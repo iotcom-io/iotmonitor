@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: iotmonitor-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - iotmonitor-network
+
+  redis:
+    image: redis:7.0-alpine
+    container_name: iotmonitor-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    networks:
+      - iotmonitor-network
+
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: iotmonitor-mosquitto
+    ports:
+      - "1883:1883"
+      - "8883:8883"
+    volumes:
+      - ./infrastructure/mosquitto/config:/mosquitto/config
+      - ./infrastructure/mosquitto/data:/mosquitto/data
+      - ./infrastructure/mosquitto/log:/mosquitto/log
+    networks:
+      - iotmonitor-network
+
+  backend:
+    build: ./backend
+    container_name: iotmonitor-backend
+    ports:
+      - "5000:5000"
+    env_file: ./backend/.env
+    depends_on:
+      - mongodb
+      - redis
+      - mosquitto
+    networks:
+      - iotmonitor-network
+    restart: always
+
+  frontend:
+    build: ./frontend
+    container_name: iotmonitor-frontend
+    ports:
+      - "3000:80" # Mapping to Nginx default port inside container
+    depends_on:
+      - backend
+    networks:
+      - iotmonitor-network
+    restart: always
+
+networks:
+  iotmonitor-network:
+    driver: bridge
+
+volumes:
+  mongodb_data:
+  mosquitto_data:
+  mosquitto_log:

@@ -1,0 +1,22 @@
+[Unit]
+Description=IoTMonitor Monitoring Agent
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/iotmonitor
+ExecStart=/opt/iotmonitor/iotmonitor-agent
+Restart=always
+RestartSec=10
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=iotmonitor-agent
+
+# Environment variables can be set here or in a separate file
+# Environment=IOT_DEVICE_ID=...
+# Environment=IOT_AGENT_TOKEN=...
+# Environment=IOT_MQTT_URL=...
+
+[Install]
+WantedBy=multi-user.target
