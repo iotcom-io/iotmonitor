@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { useDeviceStore } from '../store/useDeviceStore';
-import { Plus, Search, Filter, MoreVertical, Wifi, WifiOff, AlertCircle } from 'lucide-react';
+import { Plus, Search, Filter, MoreVertical, Wifi, WifiOff, AlertCircle, Server } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useNavigate } from 'react-router-dom';
 
