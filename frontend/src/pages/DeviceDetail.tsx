@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import {
     Activity, Cpu, HardDrive, Wifi, MemoryStick as Memory,
-    Terminal as TerminalIcon, ShieldRule, Settings, ArrowLeft
+    Terminal as TerminalIcon, ShieldCheck, Settings, ArrowLeft
 } from 'lucide-react';
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -49,15 +49,15 @@ export const DeviceDetail = () => {
                 {[
                     { id: 'metrics', label: 'Real-time Metrics', icon: Activity },
                     { id: 'terminal', label: 'Remote Terminal', icon: TerminalIcon },
-                    { id: 'checks', label: 'Monitor Checks', icon: ShieldRule },
+                    { id: 'checks', label: 'Monitor Checks', icon: ShieldCheck },
                     { id: 'settings', label: 'Configuration', icon: Settings },
                 ].map(tab => (
                     <button
                         key={tab.id}
                         onClick={() => setActiveTab(tab.id)}
                         className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${activeTab === tab.id
-                                ? "bg-primary-600 text-white shadow-lg shadow-primary-500/20"
-                                : "text-slate-400 hover:text-slate-100 hover:bg-white/5"
+                            ? "bg-primary-600 text-white shadow-lg shadow-primary-500/20"
+                            : "text-slate-400 hover:text-slate-100 hover:bg-white/5"
                             }`}
                     >
                         <tab.icon size={18} />

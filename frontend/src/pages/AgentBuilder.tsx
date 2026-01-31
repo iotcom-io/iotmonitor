@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Download, Cpu, Container, Wifi, Activity, Hammer, CheckCircle2 } from 'lucide-react';
+import { Download, Cpu, Container, Wifi, Activity, Hammer, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { clsx } from 'clsx';
 
 const ModuleToggle = ({ icon: Icon, label, description, enabled, onToggle }: { icon: any, label: string, description: string, enabled: boolean, onToggle: () => void }) => (
@@ -96,7 +96,7 @@ export const AgentBuilder = () => {
                     <div className="space-y-3">
                         <label className="text-sm font-medium text-slate-400 uppercase tracking-wider">Communication</label>
                         <div className="flex items-center gap-2 p-3 bg-white/5 rounded-xl border border-white/5">
-                            <ShieldRule size={18} className="text-emerald-400" />
+                            <ShieldCheck size={18} className="text-emerald-400" />
                             <span className="text-sm text-slate-300">TLS 1.3 Encryption Enforced</span>
                         </div>
                     </div>
