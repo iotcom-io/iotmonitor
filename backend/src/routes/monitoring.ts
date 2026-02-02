@@ -7,7 +7,7 @@ const router = Router();
 router.use(authenticate);
 
 // Get checks for a device
-router.get('/:deviceId', async (req: AuthRequest, res) => {
+router.get('/metrics/:deviceId', async (req: AuthRequest, res) => {
     try {
         const checks = await MonitoringCheck.find({ device_id: req.params.deviceId });
         res.json(checks);

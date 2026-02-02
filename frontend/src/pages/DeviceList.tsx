@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { useDeviceStore } from '../store/useDeviceStore';
-import { Plus, Search, Filter, MoreVertical, Wifi, WifiOff, AlertCircle, Server } from 'lucide-react';
+import { Plus, Search, Filter, MoreVertical, Wifi, WifiOff, AlertCircle, Server, Hammer } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useNavigate } from 'react-router-dom';
 import api from '../lib/axios';
@@ -36,6 +36,23 @@ export const DeviceList = () => {
             alert('Failed to register device');
         } finally {
             setRegistering(false);
+        }
+    };
+
+    const handleBuild = async (e: React.MouseEvent, deviceId: string) => {
+        e.stopPropagation();
+        try {
+            const { data } = await api.post(`/devices/${deviceId}/generate-agent`, {
+                os: 'linux',
+                arch: 'amd64'
+            });
+            // Auto-trigger download
+            const url = `/api/devices/download/${data.binary_id}`;
+            window.open(url, '_blank');
+            alert('Agent build started and download triggered!');
+        } catch (error) {
+            console.error('Build failed', error);
+            alert('Failed to build agent for this device');
         }
     };
 
@@ -180,8 +197,12 @@ export const DeviceList = () => {
                                     {new Date(device.last_seen).toLocaleString()}
                                 </td>
                                 <td className="px-6 py-4 text-right">
-                                    <button className="p-2 text-slate-500 hover:text-white hover:bg-white/5 rounded-lg transition-all">
-                                        <MoreVertical size={18} />
+                                    <button
+                                        onClick={(e) => handleBuild(e, device.device_id)}
+                                        title="Build Agent Binary"
+                                        className="p-2 text-primary-400 hover:text-white hover:bg-primary-500/10 rounded-lg transition-all"
+                                    >
+                                        <Hammer size={18} />
                                     </button>
                                 </td>
                             </tr>
