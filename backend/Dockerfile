@@ -6,11 +6,16 @@ RUN apk add --no-cache go
 
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm install
+# Copy package files from backend
+COPY backend/package*.json ./backend/
+RUN cd backend && npm install
 
-COPY . .
-RUN npm run build
+# Copy agent and backend source
+COPY agent ./agent
+COPY backend ./backend
+
+# Build backend
+RUN cd backend && npm run build
 
 # Production stage
 FROM node:20-alpine
@@ -20,11 +25,16 @@ RUN apk add --no-cache go
 
 WORKDIR /app
 
-COPY package*.json ./
+# Copy dependencies and build artifacts
+COPY backend/package*.json ./
 RUN npm install --omit=dev
 
-COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/backend/dist ./dist
+COPY --from=builder /app/agent ./agent
 
-EXPOSE 5000
+EXPOSE 5001
 
-CMD ["npm", "start"]
+# Set the port explicitly
+ENV PORT=5001
+
+CMD ["node", "dist/index.js"]

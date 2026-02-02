@@ -66,7 +66,11 @@ router.post('/:id/generate-agent', async (req: AuthRequest, res) => {
         if (!device) return res.status(404).json({ message: 'Device not found' });
 
         // Prepare build paths
-        const agentDir = path.resolve(__dirname, '../../../agent');
+        let agentDir = path.resolve(__dirname, '../../../agent');
+        if (!fs.existsSync(agentDir)) {
+            agentDir = path.resolve(__dirname, '../../agent');
+        }
+
         const outputDir = path.resolve(__dirname, '../../builds');
         if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
@@ -123,9 +127,16 @@ router.post('/generate-agent', async (req: AuthRequest, res) => {
         await device.save();
 
         // 2. Prepare build paths
-        const agentDir = path.resolve(__dirname, '../../../agent');
-        const outputDir = path.resolve(__dirname, '../../builds');
-        if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+        // Robust path detection: check for agent folder in project root or relative to dist
+        let agentDir = path.resolve(__dirname, '../../../agent');
+        if (!fs.existsSync(agentDir)) {
+            agentDir = path.resolve(__dirname, '../../agent');
+        }
+
+        let outputDir = path.resolve(__dirname, '../../builds');
+        if (!fs.existsSync(outputDir)) {
+            fs.mkdirSync(outputDir, { recursive: true });
+        }
 
         const binary_id = crypto.randomBytes(16).toString('hex');
         const extension = os === 'windows' ? '.exe' : '';

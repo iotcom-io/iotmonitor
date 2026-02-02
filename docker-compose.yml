@@ -24,7 +24,9 @@ services:
       - iotmonitor-network
 
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: iotmonitor-backend
     ports:
       - "5001:5001"
