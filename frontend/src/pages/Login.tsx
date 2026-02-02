@@ -50,7 +50,7 @@ export const Login = () => {
                                 type="email"
                                 required
                                 className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-11 pr-4 text-white placeholder:text-slate-600 focus:border-primary-500/50 focus:ring-1 focus:ring-primary-500/20 transition-all outline-none"
-                                placeholder="admin@iotmonitor.io"
+                                placeholder="admin@iotcom.io"
                                 value={email}
                                 onChange={e => setEmail(e.target.value)}
                             />

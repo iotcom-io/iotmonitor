@@ -10,7 +10,7 @@ const seed = async () => {
         const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/iotmonitor';
         await mongoose.connect(MONGODB_URI);
 
-        const existingAdmin = await User.findOne({ email: 'admin@iotmonitor.io' });
+        const existingAdmin = await User.findOne({ email: 'admin@iotcom.io' });
         if (existingAdmin) {
             console.log('Admin user already exists');
             process.exit(0);
@@ -18,13 +18,13 @@ const seed = async () => {
 
         const password_hash = await bcrypt.hash('admin123456', 10);
         const admin = new User({
-            email: 'admin@iotmonitor.io',
+            email: 'admin@iotcom.io',
             password_hash,
             role: 'admin'
         });
 
         await admin.save();
-        console.log('Default admin user created: admin@iotmonitor.io / admin123456');
+        console.log('Default admin user created: admin@iotcom.io / admin123456');
         process.exit(0);
     } catch (err) {
         console.error('Seeding failed:', err);
