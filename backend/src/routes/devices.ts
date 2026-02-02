@@ -80,9 +80,14 @@ router.get('/:id', async (req: AuthRequest, res) => {
 // Build agent for an existing device
 router.post('/:id/generate-agent', async (req: AuthRequest, res) => {
     try {
-        const { os, arch } = req.body;
+        const { os, arch, name } = req.body;
         const device = await Device.findOne({ device_id: req.params.id });
         if (!device) return res.status(404).json({ message: 'Device not found' });
+
+        if (name) {
+            device.name = name;
+            await device.save();
+        }
 
         // Prepare build paths
         let agentDir = path.resolve(__dirname, '../../../agent');
@@ -131,7 +136,7 @@ router.post('/:id/generate-agent', async (req: AuthRequest, res) => {
 // Generate and build agent binary (creates a new device)
 router.post('/generate-agent', async (req: AuthRequest, res) => {
     try {
-        const { os, arch, modules } = req.body;
+        const { os, arch, modules, name } = req.body;
 
         // 1. Create a new "Pending" device for this agent
         const device_id = crypto.randomBytes(8).toString('hex');
@@ -140,7 +145,7 @@ router.post('/generate-agent', async (req: AuthRequest, res) => {
 
         const device = new Device({
             device_id,
-            name: `Agent-${device_id.slice(0, 4)}`,
+            name: name || `Agent-${device_id.slice(0, 4)}`,
             type: 'server',
             agent_token,
             mqtt_topic,

@@ -32,6 +32,7 @@ const ModuleToggle = ({ icon: Icon, label, description, enabled, onToggle }: { i
 export const AgentBuilder = () => {
     const { devices, fetchDevices } = useDeviceStore();
     const [selectedDeviceId, setSelectedDeviceId] = useState<string>('new');
+    const [deviceName, setDeviceName] = useState<string>('');
     const [template, setTemplate] = useState<'custom' | 'standard' | 'full'>('custom');
     const [modules, setModules] = useState({
         system: true,
@@ -62,6 +63,10 @@ export const AgentBuilder = () => {
     };
 
     const handleBuild = async () => {
+        if (selectedDeviceId === 'new' && !deviceName) {
+            alert('Please enter a device name for the new agent');
+            return;
+        }
         setBuilding(true);
         setBuildResult(null);
         try {
@@ -73,7 +78,8 @@ export const AgentBuilder = () => {
             const { data } = await api.post(endpoint, {
                 os,
                 arch,
-                modules
+                modules,
+                name: deviceName
             });
             setBuildResult({
                 url: `/api/devices/download/${data.binary_id}`,
@@ -108,7 +114,37 @@ export const AgentBuilder = () => {
                         ))}
                     </select>
                 </div>
-                <div className="flex gap-2 p-1 bg-dark-surface border border-dark-border rounded-xl">
+                {selectedDeviceId === 'new' ? (
+                    <div className="space-y-3">
+                        <label className="text-sm font-medium text-slate-400 uppercase tracking-wider">New Device Name</label>
+                        <input
+                            type="text"
+                            value={deviceName}
+                            onChange={e => setDeviceName(e.target.value)}
+                            className="w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-3 text-white outline-none focus:border-primary-500/50"
+                            placeholder="e.g. Production-Web-01"
+                        />
+                    </div>
+                ) : (
+                    <div className="flex gap-2 p-1 bg-dark-surface border border-dark-border rounded-xl">
+                        <button
+                            onClick={() => setTemplate('custom')}
+                            className={clsx("px-4 py-2 rounded-lg text-sm font-bold transition-all", template === 'custom' ? "bg-primary-600 text-white" : "text-slate-400 hover:text-white")}
+                        >Custom</button>
+                        <button
+                            onClick={() => applyTemplate('standard')}
+                            className={clsx("px-4 py-2 rounded-lg text-sm font-bold transition-all", template === 'standard' ? "bg-primary-600 text-white" : "text-slate-400 hover:text-white")}
+                        >Standard</button>
+                        <button
+                            onClick={() => applyTemplate('full')}
+                            className={clsx("px-4 py-2 rounded-lg text-sm font-bold transition-all", template === 'full' ? "bg-primary-600 text-white" : "text-slate-400 hover:text-white")}
+                        >Full Stack</button>
+                    </div>
+                )}
+            </div>
+
+            {selectedDeviceId === 'new' && (
+                <div className="flex gap-2 p-1 bg-dark-surface border border-dark-border rounded-xl w-fit">
                     <button
                         onClick={() => setTemplate('custom')}
                         className={clsx("px-4 py-2 rounded-lg text-sm font-bold transition-all", template === 'custom' ? "bg-primary-600 text-white" : "text-slate-400 hover:text-white")}
@@ -122,7 +158,7 @@ export const AgentBuilder = () => {
                         className={clsx("px-4 py-2 rounded-lg text-sm font-bold transition-all", template === 'full' ? "bg-primary-600 text-white" : "text-slate-400 hover:text-white")}
                     >Full Stack</button>
                 </div>
-            </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <ModuleToggle
