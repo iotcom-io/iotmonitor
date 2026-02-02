@@ -1,6 +1,4 @@
-import React, { useState } from 'react';
-import { Download, Cpu, Container, Wifi, Activity, Hammer, CheckCircle2, ShieldCheck } from 'lucide-react';
-import { clsx } from 'clsx';
+import api from '../lib/axios';
 
 const ModuleToggle = ({ icon: Icon, label, description, enabled, onToggle }: { icon: any, label: string, description: string, enabled: boolean, onToggle: () => void }) => (
     <div
@@ -35,9 +33,33 @@ export const AgentBuilder = () => {
     });
 
     const [platform, setPlatform] = useState('linux-amd64');
+    const [building, setBuilding] = useState(false);
+    const [buildResult, setBuildResult] = useState<{ url: string, sha: string } | null>(null);
 
     const toggleModule = (key: keyof typeof modules) => {
         setModules(prev => ({ ...prev, [key]: !prev[key] }));
+    };
+
+    const handleBuild = async () => {
+        setBuilding(true);
+        setBuildResult(null);
+        try {
+            const [os, arch] = platform.split('-');
+            const { data } = await api.post('/devices/generate-agent', {
+                os,
+                arch,
+                modules
+            });
+            setBuildResult({
+                url: `/api/devices/download/${data.binary_id}`,
+                sha: data.checksum
+            });
+        } catch (error) {
+            console.error('Build failed', error);
+            alert('Build failed. Please try again.');
+        } finally {
+            setBuilding(false);
+        }
     };
 
     return (
@@ -102,15 +124,41 @@ export const AgentBuilder = () => {
                     </div>
                 </div>
 
-                <div className="pt-6 border-t border-dark-border flex flex-col md:flex-row justify-between items-center gap-6">
-                    <div className="flex items-center gap-4 text-emerald-400 font-medium">
-                        <Hammer size={24} />
-                        <span>Ready for compilation</span>
+                <div className="pt-6 border-t border-dark-border space-y-4">
+                    {buildResult && (
+                        <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl space-y-3">
+                            <div className="flex items-center gap-3 text-emerald-400 text-sm font-bold">
+                                <CheckCircle2 size={18} />
+                                Binary Ready for Deployment
+                            </div>
+                            <div className="text-xs text-slate-400 font-mono break-all bg-black/20 p-2 rounded">
+                                SHA256: {buildResult.sha}
+                            </div>
+                            <a
+                                href={buildResult.url}
+                                className="btn-primary w-full inline-flex items-center justify-center gap-2"
+                                download
+                            >
+                                <Download size={18} />
+                                Download Binary
+                            </a>
+                        </div>
+                    )}
+
+                    <div className="flex flex-col md:flex-row justify-between items-center gap-6">
+                        <div className="flex items-center gap-4 text-emerald-400 font-medium">
+                            <Hammer size={24} className={building ? "animate-spin" : ""} />
+                            <span>{building ? 'Compiling Agent...' : 'Ready for compilation'}</span>
+                        </div>
+                        <button
+                            onClick={handleBuild}
+                            disabled={building}
+                            className="w-full md:w-auto bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-white font-bold px-8 py-4 rounded-xl shadow-lg shadow-primary-500/20 transition-all flex items-center justify-center gap-3"
+                        >
+                            {building ? <Loader2 size={20} className="animate-spin" /> : <Download size={20} />}
+                            {building ? 'Building...' : 'Generate Installer'}
+                        </button>
                     </div>
-                    <button className="w-full md:w-auto bg-primary-600 hover:bg-primary-500 text-white font-bold px-8 py-4 rounded-xl shadow-lg shadow-primary-500/20 transition-all flex items-center justify-center gap-3">
-                        <Download size={20} />
-                        Generate Installer
-                    </button>
                 </div>
             </div>
 
