@@ -12,42 +12,59 @@ client.on('connect', () => {
 });
 
 client.on('message', async (topic, message) => {
-    const parts = topic.split('/');
-    // iotmonitor/device/{device_id}/status
-    // iotmonitor/device/{device_id}/metrics/{check_type}
+    try {
+        const parts = topic.split('/');
+        if (parts.length >= 4 && parts[1] === 'device') {
+            const device_id = parts[2];
+            const type = parts[3];
 
-    if (parts.length >= 4 && parts[1] === 'device') {
-        const device_id = parts[2];
-        const type = parts[3];
+            const device = await Device.findOne({ device_id });
 
-        if (type === 'status') {
-            const status = message.toString();
-            await Device.findOneAndUpdate({ device_id }, { status, last_seen: new Date() });
-        } else if (type === 'metrics') {
-            const check_type = parts[4];
-            const payload = JSON.parse(message.toString());
+            if (type === 'status') {
+                const status = message.toString();
+                const oldStatus = device?.status;
 
-            // Update device heartbeat
-            await Device.findOneAndUpdate({ device_id }, { last_seen: new Date() });
+                await Device.findOneAndUpdate({ device_id }, { status, last_seen: new Date() });
 
-            // Store historical telemetry for system metrics
-            if (check_type === 'system') {
-                const Telemetry = (await import('../models/Telemetry')).default;
-                await new Telemetry({
-                    device_id,
-                    cpu_usage: payload.cpu_usage,
-                    memory_usage: payload.memory_usage,
-                    disk_usage: payload.disk_usage,
-                    network_in: payload.network_in,
-                    network_out: payload.network_out,
-                    extra: payload.extra
-                }).save();
+                // Notify if status changed
+                if (device && oldStatus !== status) {
+                    const { NotificationService } = await import('./NotificationService');
+                    const settings = await (await import('../models/SystemSettings')).default.findOne();
+
+                    await NotificationService.send({
+                        subject: `Device Status Change: ${device.name}`,
+                        message: `Device ${device.name} is now ${status.toUpperCase()}`,
+                        channels: ['slack'],
+                        recipients: { slackWebhook: settings?.notification_slack_webhook }
+                    });
+                }
+            } else if (type === 'metrics') {
+                if (!device) return;
+
+                const check_type = parts[4];
+                const payload = JSON.parse(message.toString());
+
+                await Device.findOneAndUpdate({ device_id }, { last_seen: new Date() });
+
+                if (check_type === 'system') {
+                    const Telemetry = (await import('../models/Telemetry')).default;
+                    await new Telemetry({
+                        device_id,
+                        cpu_usage: payload.cpu_usage || 0,
+                        memory_usage: payload.memory_usage || 0,
+                        disk_usage: payload.disk_usage || 0,
+                        network_in: payload.network_in,
+                        network_out: payload.network_out,
+                        extra: payload.extra
+                    }).save();
+                }
+
+                const { AlertingEngine } = await import('./AlertingEngine');
+                await AlertingEngine.evaluate(device_id, { [check_type]: payload });
             }
-
-            // Evaluate thresholds and trigger alerts
-            const { AlertingEngine } = await import('./AlertingEngine');
-            await AlertingEngine.evaluate(device_id, { [check_type]: payload });
         }
+    } catch (err) {
+        console.error('[MQTT] Handler Error:', err);
     }
 });
 

@@ -76,6 +76,11 @@ export const DeviceDetail = () => {
                         )}>
                             {device.status}
                         </span>
+                        {device.monitoring_enabled === false && (
+                            <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 uppercase tracking-wider">
+                                Monitoring Paused
+                            </span>
+                        )}
                     </div>
                     <p className="text-slate-400 text-sm font-mono">ID: {id}</p>
                 </div>

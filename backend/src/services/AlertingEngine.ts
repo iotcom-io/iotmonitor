@@ -7,7 +7,7 @@ export class AlertingEngine {
     static async evaluate(device_id: string, metrics: any) {
         try {
             const device = await Device.findOne({ device_id });
-            if (!device) return;
+            if (!device || device.monitoring_enabled === false) return;
 
             const checks = await MonitoringCheck.find({ device_id, enabled: true });
 

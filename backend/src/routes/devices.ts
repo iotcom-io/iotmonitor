@@ -30,6 +30,32 @@ router.get('/download/:id', async (req, res) => {
     }
 });
 
+// Update device (Pause/Resume)
+router.patch('/:id', authenticate, async (req: AuthRequest, res) => {
+    try {
+        const device = await Device.findOneAndUpdate(
+            { device_id: req.params.id },
+            { $set: req.body },
+            { new: true }
+        );
+        if (!device) return res.status(404).json({ message: 'Device not found' });
+        res.json(device);
+    } catch (err: any) {
+        res.status(400).json({ message: err.message });
+    }
+});
+
+// Delete device
+router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
+    try {
+        const result = await Device.deleteOne({ device_id: req.params.id });
+        if (result.deletedCount === 0) return res.status(404).json({ message: 'Device not found' });
+        res.json({ message: 'Device deleted successfully' });
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
 router.use(authenticate);
 
 // Get all devices
@@ -72,6 +98,32 @@ router.get('/:id', async (req: AuthRequest, res) => {
         const device = await Device.findOne({ device_id: req.params.id });
         if (!device) return res.status(404).json({ message: 'Device not found' });
         res.json(device);
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+// Update device (Pause/Resume)
+router.patch('/:id', async (req: AuthRequest, res) => {
+    try {
+        const device = await Device.findOneAndUpdate(
+            { device_id: req.params.id },
+            { $set: req.body },
+            { new: true }
+        );
+        if (!device) return res.status(404).json({ message: 'Device not found' });
+        res.json(device);
+    } catch (err: any) {
+        res.status(400).json({ message: err.message });
+    }
+});
+
+// Delete device
+router.delete('/:id', async (req: AuthRequest, res) => {
+    try {
+        const result = await Device.deleteOne({ device_id: req.params.id });
+        if (result.deletedCount === 0) return res.status(404).json({ message: 'Device not found' });
+        res.json({ message: 'Device deleted successfully' });
     } catch (err: any) {
         res.status(500).json({ message: err.message });
     }
@@ -153,6 +205,22 @@ router.post('/generate-agent', async (req: AuthRequest, res) => {
             config: { modules }
         });
         await device.save();
+
+        // Notify via Slack
+        try {
+            const { NotificationService } = await import('../services/NotificationService');
+            const SystemSettings = (await import('../models/SystemSettings')).default;
+            const settings = await SystemSettings.findOne();
+
+            await NotificationService.send({
+                subject: 'New Device Registered',
+                message: `🔍 A new agent was generated for device: ${device.name} (ID: ${device_id})`,
+                channels: ['slack'],
+                recipients: { slackWebhook: settings?.notification_slack_webhook }
+            });
+        } catch (nErr) {
+            console.error('[NOTIFY] New device notification failed:', nErr);
+        }
 
         // 2. Prepare build paths
         // Robust path detection: check for agent folder in project root or relative to dist

@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { useDeviceStore } from '../store/useDeviceStore';
-import { Plus, Search, Filter, MoreVertical, Wifi, WifiOff, AlertCircle, Server, Hammer, Loader2 } from 'lucide-react';
+import { Plus, Search, Filter, Wifi, WifiOff, AlertCircle, Server, Hammer, Loader2, Trash2, Pause, Play } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useNavigate } from 'react-router-dom';
 import api from '../lib/axios';
@@ -57,6 +57,20 @@ export const DeviceList = () => {
         } finally {
             setBuildingId(null);
         }
+    };
+
+    const handleDelete = async (e: React.MouseEvent, deviceId: string) => {
+        e.stopPropagation();
+        if (window.confirm('Are you sure you want to delete this device? This action cannot be undone.')) {
+            const { deleteDevice } = useDeviceStore.getState();
+            await deleteDevice(deviceId);
+        }
+    };
+
+    const handleToggle = async (e: React.MouseEvent, deviceId: string) => {
+        e.stopPropagation();
+        const { toggleMonitoring } = useDeviceStore.getState();
+        await toggleMonitoring(deviceId);
     };
 
     return (
@@ -200,17 +214,36 @@ export const DeviceList = () => {
                                     {new Date(device.last_seen).toLocaleString()}
                                 </td>
                                 <td className="px-6 py-4 text-right">
-                                    <button
-                                        onClick={(e) => handleBuild(e, device.device_id)}
-                                        disabled={!!buildingId}
-                                        title="Build Agent Binary"
-                                        className={clsx(
-                                            "p-2 rounded-lg transition-all",
-                                            buildingId === device.device_id ? "bg-primary-500/20 text-primary-400" : "text-primary-400 hover:text-white hover:bg-primary-500/10"
-                                        )}
-                                    >
-                                        {buildingId === device.device_id ? <Loader2 size={18} className="animate-spin" /> : <Hammer size={18} />}
-                                    </button>
+                                    <div className="flex justify-end gap-2">
+                                        <button
+                                            onClick={(e) => handleToggle(e, device.device_id)}
+                                            title={device.monitoring_enabled === false ? "Resume Monitoring" : "Pause Monitoring"}
+                                            className={clsx(
+                                                "p-2 rounded-lg transition-all",
+                                                device.monitoring_enabled === false ? "text-amber-400 hover:bg-amber-500/10" : "text-slate-400 hover:bg-white/5"
+                                            )}
+                                        >
+                                            {device.monitoring_enabled === false ? <Play size={18} /> : <Pause size={18} />}
+                                        </button>
+                                        <button
+                                            onClick={(e) => handleBuild(e, device.device_id)}
+                                            disabled={!!buildingId}
+                                            title="Build Agent Binary"
+                                            className={clsx(
+                                                "p-2 rounded-lg transition-all",
+                                                buildingId === device.device_id ? "bg-primary-500/20 text-primary-400" : "text-primary-400 hover:text-white hover:bg-primary-500/10"
+                                            )}
+                                        >
+                                            {buildingId === device.device_id ? <Loader2 size={18} className="animate-spin" /> : <Hammer size={18} />}
+                                        </button>
+                                        <button
+                                            onClick={(e) => handleDelete(e, device.device_id)}
+                                            title="Delete Device"
+                                            className="p-2 rounded-lg text-red-400 hover:text-red-500 hover:bg-red-500/10 transition-all ml-2"
+                                        >
+                                            <Trash2 size={18} />
+                                        </button>
+                                    </div>
                                 </td>
                             </tr>
                         ))}

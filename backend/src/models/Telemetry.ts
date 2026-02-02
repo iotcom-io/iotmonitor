@@ -14,9 +14,9 @@ export interface ITelemetry extends Document {
 const TelemetrySchema: Schema = new Schema({
     device_id: { type: String, required: true, index: true },
     timestamp: { type: Date, default: Date.now, index: true },
-    cpu_usage: { type: Number, required: true },
-    memory_usage: { type: Number, required: true },
-    disk_usage: { type: Number, required: true },
+    cpu_usage: { type: Number, default: 0 },
+    memory_usage: { type: Number, default: 0 },
+    disk_usage: { type: Number, default: 0 },
     network_in: { type: Number },
     network_out: { type: Number },
     extra: { type: Schema.Types.Mixed },
