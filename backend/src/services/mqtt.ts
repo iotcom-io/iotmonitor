@@ -30,6 +30,20 @@ client.on('message', async (topic, message) => {
             // Update device heartbeat
             await Device.findOneAndUpdate({ device_id }, { last_seen: new Date() });
 
+            // Store historical telemetry for system metrics
+            if (check_type === 'system') {
+                const Telemetry = (await import('../models/Telemetry')).default;
+                await new Telemetry({
+                    device_id,
+                    cpu_usage: payload.cpu_usage,
+                    memory_usage: payload.memory_usage,
+                    disk_usage: payload.disk_usage,
+                    network_in: payload.network_in,
+                    network_out: payload.network_out,
+                    extra: payload.extra
+                }).save();
+            }
+
             // Evaluate thresholds and trigger alerts
             const { AlertingEngine } = await import('./AlertingEngine');
             await AlertingEngine.evaluate(device_id, { [check_type]: payload });

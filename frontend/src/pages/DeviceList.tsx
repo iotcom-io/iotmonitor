@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { useDeviceStore } from '../store/useDeviceStore';
-import { Plus, Search, Filter, MoreVertical, Wifi, WifiOff, AlertCircle, Server, Hammer } from 'lucide-react';
+import { Plus, Search, Filter, MoreVertical, Wifi, WifiOff, AlertCircle, Server, Hammer, Loader2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useNavigate } from 'react-router-dom';
 import api from '../lib/axios';
@@ -13,6 +13,7 @@ export const DeviceList = () => {
     const [newType, setNewType] = React.useState<'server' | 'network_device' | 'website'>('server');
     const [newHostname, setNewHostname] = React.useState('');
     const [registering, setRegistering] = React.useState(false);
+    const [buildingId, setBuildingId] = React.useState<string | null>(null);
 
     useEffect(() => {
         fetchDevices();
@@ -41,6 +42,7 @@ export const DeviceList = () => {
 
     const handleBuild = async (e: React.MouseEvent, deviceId: string) => {
         e.stopPropagation();
+        setBuildingId(deviceId);
         try {
             const { data } = await api.post(`/devices/${deviceId}/generate-agent`, {
                 os: 'linux',
@@ -49,10 +51,11 @@ export const DeviceList = () => {
             // Auto-trigger download
             const url = `/api/devices/download/${data.binary_id}`;
             window.open(url, '_blank');
-            alert('Agent build started and download triggered!');
         } catch (error) {
             console.error('Build failed', error);
             alert('Failed to build agent for this device');
+        } finally {
+            setBuildingId(null);
         }
     };
 
@@ -199,10 +202,14 @@ export const DeviceList = () => {
                                 <td className="px-6 py-4 text-right">
                                     <button
                                         onClick={(e) => handleBuild(e, device.device_id)}
+                                        disabled={!!buildingId}
                                         title="Build Agent Binary"
-                                        className="p-2 text-primary-400 hover:text-white hover:bg-primary-500/10 rounded-lg transition-all"
+                                        className={clsx(
+                                            "p-2 rounded-lg transition-all",
+                                            buildingId === device.device_id ? "bg-primary-500/20 text-primary-400" : "text-primary-400 hover:text-white hover:bg-primary-500/10"
+                                        )}
                                     >
-                                        <Hammer size={18} />
+                                        {buildingId === device.device_id ? <Loader2 size={18} className="animate-spin" /> : <Hammer size={18} />}
                                     </button>
                                 </td>
                             </tr>

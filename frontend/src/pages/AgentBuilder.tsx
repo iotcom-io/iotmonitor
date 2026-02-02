@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Download, Cpu, Container, Wifi, Activity, Hammer, CheckCircle2, ShieldCheck, Loader2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import api from '../lib/axios';
+import { useDeviceStore } from '../store/useDeviceStore';
+import { useEffect } from 'react';
 
 const ModuleToggle = ({ icon: Icon, label, description, enabled, onToggle }: { icon: any, label: string, description: string, enabled: boolean, onToggle: () => void }) => (
     <div
@@ -28,12 +30,28 @@ const ModuleToggle = ({ icon: Icon, label, description, enabled, onToggle }: { i
 );
 
 export const AgentBuilder = () => {
+    const { devices, fetchDevices } = useDeviceStore();
+    const [selectedDeviceId, setSelectedDeviceId] = useState<string>('new');
+    const [template, setTemplate] = useState<'custom' | 'standard' | 'full'>('custom');
     const [modules, setModules] = useState({
         system: true,
         docker: false,
         asterisk: false,
         network: true,
     });
+
+    useEffect(() => {
+        fetchDevices();
+    }, []);
+
+    const applyTemplate = (t: 'standard' | 'full') => {
+        setTemplate(t);
+        if (t === 'standard') {
+            setModules({ system: true, docker: false, asterisk: false, network: true });
+        } else {
+            setModules({ system: true, docker: true, asterisk: true, network: true });
+        }
+    };
 
     const [platform, setPlatform] = useState('linux-amd64');
     const [building, setBuilding] = useState(false);
@@ -48,7 +66,11 @@ export const AgentBuilder = () => {
         setBuildResult(null);
         try {
             const [os, arch] = platform.split('-');
-            const { data } = await api.post('/devices/generate-agent', {
+            const endpoint = selectedDeviceId === 'new'
+                ? '/devices/generate-agent'
+                : `/devices/${selectedDeviceId}/generate-agent`;
+
+            const { data } = await api.post(endpoint, {
                 os,
                 arch,
                 modules
@@ -70,6 +92,36 @@ export const AgentBuilder = () => {
             <div>
                 <h2 className="text-3xl font-bold text-white mb-2">Agent Builder</h2>
                 <p className="text-slate-400">Configure and compile a custom monitoring binary for your infrastructure</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-end mb-4">
+                <div className="space-y-3">
+                    <label className="text-sm font-medium text-slate-400 uppercase tracking-wider">Select Target Device</label>
+                    <select
+                        value={selectedDeviceId}
+                        onChange={e => setSelectedDeviceId(e.target.value)}
+                        className="w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-3 text-white outline-none focus:border-primary-500/50"
+                    >
+                        <option value="new">+ Register New Agent</option>
+                        {devices.map(d => (
+                            <option key={d.device_id} value={d.device_id}>{d.name} ({d.device_id.slice(0, 8)})</option>
+                        ))}
+                    </select>
+                </div>
+                <div className="flex gap-2 p-1 bg-dark-surface border border-dark-border rounded-xl">
+                    <button
+                        onClick={() => setTemplate('custom')}
+                        className={clsx("px-4 py-2 rounded-lg text-sm font-bold transition-all", template === 'custom' ? "bg-primary-600 text-white" : "text-slate-400 hover:text-white")}
+                    >Custom</button>
+                    <button
+                        onClick={() => applyTemplate('standard')}
+                        className={clsx("px-4 py-2 rounded-lg text-sm font-bold transition-all", template === 'standard' ? "bg-primary-600 text-white" : "text-slate-400 hover:text-white")}
+                    >Standard</button>
+                    <button
+                        onClick={() => applyTemplate('full')}
+                        className={clsx("px-4 py-2 rounded-lg text-sm font-bold transition-all", template === 'full' ? "bg-primary-600 text-white" : "text-slate-400 hover:text-white")}
+                    >Full Stack</button>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

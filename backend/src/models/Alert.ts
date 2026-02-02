@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IAlert extends Document {
-    device_id: mongoose.Types.ObjectId;
+    device_id: string;
     check_id?: mongoose.Types.ObjectId;
     severity: 'critical' | 'warning' | 'info';
     message: string;
@@ -12,7 +12,7 @@ export interface IAlert extends Document {
 }
 
 const AlertSchema: Schema = new Schema({
-    device_id: { type: Schema.Types.ObjectId, ref: 'Device', required: true },
+    device_id: { type: String, ref: 'Device', required: true },
     check_id: { type: Schema.Types.ObjectId, ref: 'MonitoringCheck' },
     severity: { type: String, enum: ['critical', 'warning', 'info'], required: true },
     message: { type: String, required: true },

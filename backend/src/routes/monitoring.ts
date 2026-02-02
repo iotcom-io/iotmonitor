@@ -6,11 +6,16 @@ const router = Router();
 
 router.use(authenticate);
 
-// Get checks for a device
+// Get metrics (telemetry history) for a device
 router.get('/metrics/:deviceId', async (req: AuthRequest, res) => {
     try {
-        const checks = await MonitoringCheck.find({ device_id: req.params.deviceId });
-        res.json(checks);
+        const Telemetry = (await import('../models/Telemetry')).default;
+        const metrics = await Telemetry.find({ device_id: req.params.deviceId })
+            .sort({ timestamp: -1 })
+            .limit(50);
+
+        // Return in chronological order for charts
+        res.json(metrics.reverse());
     } catch (err: any) {
         res.status(500).json({ message: err.message });
     }

@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IMonitoringCheck extends Document {
-    device_id: mongoose.Types.ObjectId;
+    device_id: string;
     check_type: 'cpu' | 'memory' | 'docker' | 'asterisk' | 'ping' | 'port' | 'ssl' | 'custom';
     config: Record<string, any>;
     interval: number; // in seconds
@@ -15,7 +15,7 @@ export interface IMonitoringCheck extends Document {
 }
 
 const MonitoringCheckSchema: Schema = new Schema({
-    device_id: { type: Schema.Types.ObjectId, ref: 'Device', required: true },
+    device_id: { type: String, ref: 'Device', required: true },
     check_type: {
         type: String,
         enum: ['cpu', 'memory', 'docker', 'asterisk', 'ping', 'port', 'ssl', 'custom'],

@@ -11,6 +11,25 @@ const execAsync = promisify(exec);
 
 const router = Router();
 
+// Download agent binary (unauthenticated for browser compatibility)
+router.get('/download/:id', async (req, res) => {
+    try {
+        const fileName = req.params.id;
+        const filePath = path.resolve(__dirname, '../../builds', fileName);
+
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({ message: 'Binary not found' });
+        }
+
+        // Try to find device name to provide a better filename
+        // Filename format: iotmonitor-agent-linux-amd64-[binary_id]
+        // We can extract parts or just serve as is with a better "Content-Disposition"
+        res.download(filePath, fileName);
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
 router.use(authenticate);
 
 // Get all devices
@@ -167,22 +186,6 @@ router.post('/generate-agent', async (req: AuthRequest, res) => {
     } catch (err: any) {
         console.error('[BUILD] Error:', err);
         res.status(500).json({ message: 'Failed to build agent: ' + err.message });
-    }
-});
-
-// Download agent binary
-router.get('/download/:id', async (req, res) => {
-    try {
-        const fileName = req.params.id;
-        const filePath = path.resolve(__dirname, '../../builds', fileName);
-
-        if (!fs.existsSync(filePath)) {
-            return res.status(404).json({ message: 'Binary not found' });
-        }
-
-        res.download(filePath, fileName);
-    } catch (err: any) {
-        res.status(500).json({ message: err.message });
     }
 });
 
