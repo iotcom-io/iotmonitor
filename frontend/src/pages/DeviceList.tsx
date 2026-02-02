@@ -3,14 +3,41 @@ import { useDeviceStore } from '../store/useDeviceStore';
 import { Plus, Search, Filter, MoreVertical, Wifi, WifiOff, AlertCircle, Server } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useNavigate } from 'react-router-dom';
+import api from '../lib/axios';
 
 export const DeviceList = () => {
     const { devices, loading, fetchDevices } = useDeviceStore();
     const navigate = useNavigate();
+    const [showModal, setShowModal] = React.useState(false);
+    const [newName, setNewName] = React.useState('');
+    const [newType, setNewType] = React.useState<'server' | 'network_device' | 'website'>('server');
+    const [newHostname, setNewHostname] = React.useState('');
+    const [registering, setRegistering] = React.useState(false);
 
     useEffect(() => {
         fetchDevices();
     }, []);
+
+    const handleRegister = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setRegistering(true);
+        try {
+            await api.post('/devices/register', {
+                name: newName,
+                type: newType,
+                hostname: newHostname
+            });
+            await fetchDevices();
+            setShowModal(false);
+            setNewName('');
+            setNewHostname('');
+        } catch (error) {
+            console.error('Registration failed', error);
+            alert('Failed to register device');
+        } finally {
+            setRegistering(false);
+        }
+    };
 
     return (
         <div className="space-y-6">
@@ -19,11 +46,73 @@ export const DeviceList = () => {
                     <h2 className="text-2xl font-bold text-white">Device Management</h2>
                     <p className="text-slate-400">View and manage all registered monitoring agents</p>
                 </div>
-                <button className="btn-primary flex items-center gap-2">
+                <button
+                    onClick={() => setShowModal(true)}
+                    className="btn-primary flex items-center gap-2"
+                >
                     <Plus size={18} />
                     Register Device
                 </button>
             </div>
+
+            {showModal && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="card max-w-md w-full animate-in fade-in zoom-in duration-200">
+                        <h3 className="text-xl font-bold text-white mb-6">Register New Device</h3>
+                        <form onSubmit={handleRegister} className="space-y-4">
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-slate-300">Device Name</label>
+                                <input
+                                    required
+                                    type="text"
+                                    className="w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-2 text-white outline-none focus:border-primary-500/50"
+                                    placeholder="e.g. Production Web 01"
+                                    value={newName}
+                                    onChange={e => setNewName(e.target.value)}
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-slate-300">Device Type</label>
+                                <select
+                                    className="w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-2 text-white outline-none focus:border-primary-500/50"
+                                    value={newType}
+                                    onChange={e => setNewType(e.target.value as any)}
+                                >
+                                    <option value="server">Linux/Windows Server</option>
+                                    <option value="network_device">Network Device</option>
+                                    <option value="website">Website/URL</option>
+                                </select>
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-slate-300">Target Host/IP</label>
+                                <input
+                                    type="text"
+                                    className="w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-2 text-white outline-none focus:border-primary-500/50"
+                                    placeholder="e.g. 192.168.1.10 or app.example.com"
+                                    value={newHostname}
+                                    onChange={e => setNewHostname(e.target.value)}
+                                />
+                            </div>
+                            <div className="flex gap-4 pt-4">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowModal(false)}
+                                    className="flex-1 px-4 py-2 border border-dark-border rounded-xl text-slate-300 hover:bg-white/5 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={registering}
+                                    className="flex-1 btn-primary"
+                                >
+                                    {registering ? 'Registering...' : 'Confirm'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
 
             <div className="flex gap-4 mb-6">
                 <div className="relative flex-1 max-w-sm">

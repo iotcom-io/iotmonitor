@@ -58,38 +58,77 @@ router.get('/:id', async (req: AuthRequest, res) => {
     }
 });
 
-// Build and download agent binary
-router.get('/:id/build', async (req: AuthRequest, res) => {
+// Generate and build agent binary (creates a new device)
+router.post('/generate-agent', async (req: AuthRequest, res) => {
     try {
-        const device = await Device.findOne({ device_id: req.params.id });
-        if (!device) return res.status(404).json({ message: 'Device not found' });
+        const { os, arch, modules } = req.body;
 
+        // 1. Create a new "Pending" device for this agent
+        const device_id = crypto.randomBytes(8).toString('hex');
+        const agent_token = crypto.randomBytes(32).toString('hex');
+        const mqtt_topic = `iotmonitor/device/${device_id}`;
+
+        const device = new Device({
+            device_id,
+            name: `Agent-${device_id.slice(0, 4)}`,
+            type: 'server',
+            agent_token,
+            mqtt_topic,
+            status: 'offline',
+            config: { modules }
+        });
+        await device.save();
+
+        // 2. Prepare build paths
         const agentDir = path.resolve(__dirname, '../../../agent');
         const outputDir = path.resolve(__dirname, '../../builds');
-        if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir);
+        if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
-        const fileName = `iotmonitor-agent-${device.device_id}`;
+        const binary_id = crypto.randomBytes(16).toString('hex');
+        const extension = os === 'windows' ? '.exe' : '';
+        const fileName = `iotmonitor-agent-${os}-${arch}-${binary_id}${extension}`;
         const outputPath = path.join(outputDir, fileName);
 
-        const ldflags = `-X iotmonitor/internal/config.DefaultDeviceID=${device.device_id} ` +
-            `-X iotmonitor/internal/config.DefaultAgentToken=${device.agent_token} ` +
-            `-X iotmonitor/internal/config.DefaultMQTTURL=${process.env.MQTT_URL || 'localhost'}`;
+        // 3. Prepare LDFLAGS
+        const ldflags = `-X iotmonitor/internal/config.DefaultDeviceID=${device_id} ` +
+            `-X iotmonitor/internal/config.DefaultAgentToken=${agent_token} ` +
+            `-X iotmonitor/internal/config.DefaultMQTTURL=${process.env.MQTT_URL || 'localhost:1883'}`;
 
-        console.log(`Building agent for ${device.device_id}...`);
+        console.log(`[BUILD] Compiling agent for ${device_id} (${os}/${arch})...`);
 
-        // Command to build the agent
-        const buildCmd = `go build -ldflags "${ldflags}" -o "${outputPath}" ./cmd/agent/main.go`;
+        // 4. Build command (using cross-compilation)
+        const buildCmd = `GOOS=${os} GOARCH=${arch} go build -ldflags "${ldflags}" -o "${outputPath}" ./cmd/agent/main.go`;
 
         await execAsync(buildCmd, { cwd: agentDir });
 
-        res.download(outputPath, fileName, (err) => {
-            if (err) console.error('Download error:', err);
-            // Optional: clean up file after download
-            // fs.unlinkSync(outputPath);
+        const stats = fs.statSync(outputPath);
+        const checksum = crypto.createHash('sha256').update(fs.readFileSync(outputPath)).digest('hex');
+
+        res.json({
+            binary_id: fileName,
+            checksum,
+            size: stats.size,
+            device_id
         });
     } catch (err: any) {
-        console.error('Build error:', err);
+        console.error('[BUILD] Error:', err);
         res.status(500).json({ message: 'Failed to build agent: ' + err.message });
+    }
+});
+
+// Download agent binary
+router.get('/download/:id', async (req, res) => {
+    try {
+        const fileName = req.params.id;
+        const filePath = path.resolve(__dirname, '../../builds', fileName);
+
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({ message: 'Binary not found' });
+        }
+
+        res.download(filePath, fileName);
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
     }
 });
 
