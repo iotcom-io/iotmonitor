@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import axios from 'axios';
+import api from '../lib/axios';
 
 interface Device {
     device_id: string;
@@ -21,17 +21,8 @@ export const useDeviceStore = create<DeviceState>((set) => ({
     fetchDevices: async () => {
         set({ loading: true });
         try {
-            // Placeholder API call
-            // const res = await axios.get('/api/devices');
-            // set({ devices: res.data });
-
-            // Mock data for initial setup
-            set({
-                devices: [
-                    { device_id: '1', name: 'Server-NYC-01', status: 'online', last_seen: new Date().toISOString() },
-                    { device_id: '2', name: 'PBX-London', status: 'warning', last_seen: new Date().toISOString() },
-                ]
-            });
+            const res = await api.get('/devices');
+            set({ devices: res.data });
         } catch (error) {
             console.error('Failed to fetch devices', error);
         } finally {
