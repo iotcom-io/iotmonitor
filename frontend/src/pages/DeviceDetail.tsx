@@ -57,6 +57,8 @@ export const DeviceDetail = () => {
         );
     }
 
+    const formatGB = (bytes?: number) => bytes ? (bytes / (1024 ** 3)).toFixed(1) : '0.0';
+
     return (
         <div className="space-y-8">
             <div className="flex items-center gap-4">
@@ -82,7 +84,10 @@ export const DeviceDetail = () => {
                             </span>
                         )}
                     </div>
-                    <p className="text-slate-400 text-sm font-mono">ID: {id}</p>
+                    <p className="text-slate-400 text-sm font-mono flex items-center gap-2">
+                        ID: {id}
+                        {device.hostname && <span className="text-slate-600">| Hostname: {device.hostname}</span>}
+                    </p>
                 </div>
             </div>
 
@@ -113,7 +118,9 @@ export const DeviceDetail = () => {
                         <div className="card">
                             <div className="flex justify-between items-center mb-4">
                                 <Cpu size={24} className="text-primary-400" />
-                                <span className="text-xs text-primary-400 font-bold bg-primary-400/10 px-2 py-0.5 rounded">Core-08</span>
+                                <span className="text-xs text-primary-400 font-bold bg-primary-400/10 px-2 py-0.5 rounded">
+                                    Load: {metrics[metrics.length - 1]?.cpu_load?.toFixed(2) || '0.00'}
+                                </span>
                             </div>
                             <h4 className="text-slate-400 text-sm font-medium mb-1">CPU Load</h4>
                             <p className="text-2xl font-bold text-white">{metrics[metrics.length - 1]?.cpu_usage.toFixed(1) || '0.0'}%</p>
@@ -121,7 +128,9 @@ export const DeviceDetail = () => {
                         <div className="card">
                             <div className="flex justify-between items-center mb-4">
                                 <Memory size={24} className="text-emerald-400" />
-                                <span className="text-xs text-emerald-400 font-bold bg-emerald-400/10 px-2 py-0.5 rounded">Memory</span>
+                                <span className="text-xs text-emerald-400 font-bold bg-emerald-400/10 px-2 py-0.5 rounded">
+                                    {formatGB(metrics[metrics.length - 1]?.memory_used)} / {formatGB(metrics[metrics.length - 1]?.memory_total || device.memory_total)} GB
+                                </span>
                             </div>
                             <h4 className="text-slate-400 text-sm font-medium mb-1">RAM Usage</h4>
                             <p className="text-2xl font-bold text-white">{metrics[metrics.length - 1]?.memory_usage.toFixed(1) || '0.0'}%</p>
@@ -129,7 +138,9 @@ export const DeviceDetail = () => {
                         <div className="card">
                             <div className="flex justify-between items-center mb-4">
                                 <HardDrive size={24} className="text-amber-400" />
-                                <span className="text-xs text-amber-400 font-bold bg-amber-400/10 px-2 py-0.5 rounded">Disk</span>
+                                <span className="text-xs text-amber-400 font-bold bg-amber-400/10 px-2 py-0.5 rounded">
+                                    {formatGB(metrics[metrics.length - 1]?.disk_used)} / {formatGB(metrics[metrics.length - 1]?.disk_total || device.disk_total)} GB
+                                </span>
                             </div>
                             <h4 className="text-slate-400 text-sm font-medium mb-1">Storage</h4>
                             <p className="text-2xl font-bold text-white">{metrics[metrics.length - 1]?.disk_usage.toFixed(1) || '0.0'}%</p>

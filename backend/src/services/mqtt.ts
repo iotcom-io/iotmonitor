@@ -47,12 +47,26 @@ client.on('message', async (topic, message) => {
                 await Device.findOneAndUpdate({ device_id }, { last_seen: new Date() });
 
                 if (check_type === 'system') {
+                    // Update device hardware info/hostname if provided
+                    if (payload.hostname || payload.memory_total || payload.disk_total) {
+                        await Device.findOneAndUpdate({ device_id }, {
+                            hostname: payload.hostname || device.hostname,
+                            memory_total: payload.memory_total || device.memory_total,
+                            disk_total: payload.disk_total || device.disk_total,
+                        });
+                    }
+
                     const Telemetry = (await import('../models/Telemetry')).default;
                     await new Telemetry({
                         device_id,
                         cpu_usage: payload.cpu_usage || 0,
+                        cpu_load: payload.cpu_load,
                         memory_usage: payload.memory_usage || 0,
+                        memory_total: payload.memory_total,
+                        memory_used: payload.memory_used,
                         disk_usage: payload.disk_usage || 0,
+                        disk_total: payload.disk_total,
+                        disk_used: payload.disk_used,
                         network_in: payload.network_in,
                         network_out: payload.network_out,
                         extra: payload.extra
