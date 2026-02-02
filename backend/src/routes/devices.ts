@@ -99,13 +99,13 @@ router.post('/:id/generate-agent', async (req: AuthRequest, res) => {
         const outputPath = path.join(outputDir, fileName);
 
         // Prepare LDFLAGS (Use existing device credentials)
-        const ldflags = `-X iotmonitor/internal/config.DefaultDeviceID=${device.device_id} ` +
-            `-X iotmonitor/internal/config.DefaultAgentToken=${device.agent_token} ` +
-            `-X iotmonitor/internal/config.DefaultMQTTURL=${process.env.MQTT_URL || 'localhost:1883'}`;
+        const ldflags = `-X github.com/iotmonitor/agent/internal/config.DefaultDeviceID=${device.device_id} ` +
+            `-X github.com/iotmonitor/agent/internal/config.DefaultAgentToken=${device.agent_token} ` +
+            `-X github.com/iotmonitor/agent/internal/config.DefaultMQTTURL=${process.env.MQTT_URL || 'localhost:1883'}`;
 
         console.log(`[BUILD] Compiling agent for EXISTING device ${device.device_id} (${os}/${arch})...`);
 
-        const buildCmd = `GOOS=${os} GOARCH=${arch} go build -ldflags "${ldflags}" -o "${outputPath}" ./cmd/agent/main.go`;
+        const buildCmd = `CGO_ENABLED=0 GOOS=${os} GOARCH=${arch} go build -ldflags "${ldflags} -s -w" -o "${outputPath}" ./cmd/agent/main.go`;
 
         await execAsync(buildCmd, { cwd: agentDir });
 
@@ -163,14 +163,14 @@ router.post('/generate-agent', async (req: AuthRequest, res) => {
         const outputPath = path.join(outputDir, fileName);
 
         // 3. Prepare LDFLAGS
-        const ldflags = `-X iotmonitor/internal/config.DefaultDeviceID=${device_id} ` +
-            `-X iotmonitor/internal/config.DefaultAgentToken=${agent_token} ` +
-            `-X iotmonitor/internal/config.DefaultMQTTURL=${process.env.MQTT_URL || 'localhost:1883'}`;
+        const ldflags = `-X github.com/iotmonitor/agent/internal/config.DefaultDeviceID=${device_id} ` +
+            `-X github.com/iotmonitor/agent/internal/config.DefaultAgentToken=${agent_token} ` +
+            `-X github.com/iotmonitor/agent/internal/config.DefaultMQTTURL=${process.env.MQTT_URL || 'localhost:1883'}`;
 
         console.log(`[BUILD] Compiling agent for ${device_id} (${os}/${arch})...`);
 
         // 4. Build command (using cross-compilation)
-        const buildCmd = `GOOS=${os} GOARCH=${arch} go build -ldflags "${ldflags}" -o "${outputPath}" ./cmd/agent/main.go`;
+        const buildCmd = `CGO_ENABLED=0 GOOS=${os} GOARCH=${arch} go build -ldflags "${ldflags} -s -w" -o "${outputPath}" ./cmd/agent/main.go`;
 
         await execAsync(buildCmd, { cwd: agentDir });
 
