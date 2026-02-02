@@ -14,7 +14,17 @@ const StatCard = ({ icon: Icon, label, value, color, subvalue }: { icon: any, la
     </div>
 );
 
+import { useDeviceStore } from '../store/useDeviceStore';
+
 export const Dashboard = () => {
+    const { devices, fetchDevices } = useDeviceStore();
+
+    useEffect(() => {
+        fetchDevices();
+    }, []);
+
+    const onlineCount = devices.filter(d => d.status === 'online').length;
+
     return (
         <div className="space-y-8">
             <div className="flex justify-between items-end">
@@ -34,9 +44,9 @@ export const Dashboard = () => {
                 <StatCard
                     icon={Server}
                     label="Total Devices"
-                    value="12"
+                    value={devices.length.toString()}
                     color="primary"
-                    subvalue="8 Online"
+                    subvalue={`${onlineCount} Online`}
                 />
                 <StatCard
                     icon={AlertTriangle}

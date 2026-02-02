@@ -1,3 +1,6 @@
+import React, { useState } from 'react';
+import { Download, Cpu, Container, Wifi, Activity, Hammer, CheckCircle2, ShieldCheck, Loader2 } from 'lucide-react';
+import { clsx } from 'clsx';
 import api from '../lib/axios';
 
 const ModuleToggle = ({ icon: Icon, label, description, enabled, onToggle }: { icon: any, label: string, description: string, enabled: boolean, onToggle: () => void }) => (
