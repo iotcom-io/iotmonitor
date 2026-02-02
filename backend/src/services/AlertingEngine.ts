@@ -57,14 +57,17 @@ export class AlertingEngine {
 
         await alert.save();
 
-        // Trigger notification (Mock recipients for now)
+        // Trigger notification using stored settings
+        const SystemSettings = (await import('../models/SystemSettings')).default;
+        const settings = await SystemSettings.findOne();
+
         await NotificationService.send({
             subject: `IoTMonitor Alert: ${device.name}`,
             message,
             channels: ['email', 'slack'],
             recipients: {
-                email: 'admin@company.com',
-                slackWebhook: process.env.SLACK_WEBHOOK_URL
+                email: settings?.notification_email_user || 'admin@company.com',
+                slackWebhook: settings?.notification_slack_webhook || process.env.SLACK_WEBHOOK_URL
             }
         });
     }

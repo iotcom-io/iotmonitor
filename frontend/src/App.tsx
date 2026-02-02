@@ -7,6 +7,7 @@ import { Login } from './pages/Login';
 import { DeviceList } from './pages/DeviceList';
 import { DeviceDetail } from './pages/DeviceDetail';
 import { AgentBuilder } from './pages/AgentBuilder';
+import { Settings } from './pages/Settings';
 
 const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
     const token = useAuthStore(state => state.token);
@@ -36,7 +37,7 @@ function App() {
                         <Route path="/devices/:id" element={<PrivateRoute><DeviceDetail /></PrivateRoute>} />
                         <Route path="/agent-builder" element={<PrivateRoute><AgentBuilder /></PrivateRoute>} />
                         <Route path="/alerts" element={<PrivateRoute><div className="card">Alerts (Pending)</div></PrivateRoute>} />
-                        <Route path="/settings" element={<PrivateRoute><div className="card">Settings (Pending)</div></PrivateRoute>} />
+                        <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
                     </Routes>
                 </main>
             </div>

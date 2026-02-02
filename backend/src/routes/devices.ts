@@ -99,9 +99,13 @@ router.post('/:id/generate-agent', async (req: AuthRequest, res) => {
         const outputPath = path.join(outputDir, fileName);
 
         // Prepare LDFLAGS (Use existing device credentials)
+        const SystemSettings = (await import('../models/SystemSettings')).default;
+        const settings = await SystemSettings.findOne();
+        const mqttUrl = settings?.mqtt_public_url || process.env.MQTT_URL || 'localhost';
+
         const ldflags = `-X github.com/iotmonitor/agent/internal/config.DefaultDeviceID=${device.device_id} ` +
             `-X github.com/iotmonitor/agent/internal/config.DefaultAgentToken=${device.agent_token} ` +
-            `-X github.com/iotmonitor/agent/internal/config.DefaultMQTTURL=${process.env.MQTT_URL || 'localhost:1883'}`;
+            `-X github.com/iotmonitor/agent/internal/config.DefaultMQTTURL=mqtt://${mqttUrl}:1883`;
 
         console.log(`[BUILD] Compiling agent for EXISTING device ${device.device_id} (${os}/${arch})...`);
 
@@ -163,9 +167,13 @@ router.post('/generate-agent', async (req: AuthRequest, res) => {
         const outputPath = path.join(outputDir, fileName);
 
         // 3. Prepare LDFLAGS
+        const SystemSettings = (await import('../models/SystemSettings')).default;
+        const settings = await SystemSettings.findOne();
+        const mqttUrl = settings?.mqtt_public_url || process.env.MQTT_URL || 'localhost';
+
         const ldflags = `-X github.com/iotmonitor/agent/internal/config.DefaultDeviceID=${device_id} ` +
             `-X github.com/iotmonitor/agent/internal/config.DefaultAgentToken=${agent_token} ` +
-            `-X github.com/iotmonitor/agent/internal/config.DefaultMQTTURL=${process.env.MQTT_URL || 'localhost:1883'}`;
+            `-X github.com/iotmonitor/agent/internal/config.DefaultMQTTURL=mqtt://${mqttUrl}:1883`;
 
         console.log(`[BUILD] Compiling agent for ${device_id} (${os}/${arch})...`);
 

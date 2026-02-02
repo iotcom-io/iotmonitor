@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import authRoutes from './routes/auth';
 import deviceRoutes from './routes/devices';
 import monitoringRoutes from './routes/monitoring';
+import settingsRoutes from './routes/settings';
 import './services/mqtt'; // Initialize MQTT client
 
 import { rateLimit } from 'express-rate-limit';
@@ -30,6 +31,7 @@ app.use('/api/', limiter);
 app.use('/api/auth', authRoutes);
 app.use('/api/devices', deviceRoutes);
 app.use('/api/monitoring', monitoringRoutes);
+app.use('/api/settings', settingsRoutes);
 
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
