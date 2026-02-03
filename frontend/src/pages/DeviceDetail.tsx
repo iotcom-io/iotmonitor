@@ -36,7 +36,7 @@ export const DeviceDetail = () => {
         };
 
         fetchData();
-        const interval = setInterval(fetchData, 10000); // 10s refresh
+        const interval = setInterval(fetchData, 5000); // 5s refresh
         return () => clearInterval(interval);
     }, [id]);
 
