@@ -109,10 +109,10 @@ export const DeviceDetail = () => {
     };
 
     const latest = metrics[metrics.length - 1];
-    const memPct = latest?.memory_used && latest?.memory_total
+    const memPct = latest?.memory_used !== undefined && latest?.memory_total
         ? (latest.memory_used / latest.memory_total) * 100
         : latest?.memory_usage;
-    const diskPct = latest?.disk_used && latest?.disk_total
+    const diskPct = latest?.disk_used !== undefined && latest?.disk_total
         ? (latest.disk_used / latest.disk_total) * 100
         : latest?.disk_usage;
     const pingSamples: any[] = latest?.extra?.ping_results || [];
@@ -187,7 +187,7 @@ export const DeviceDetail = () => {
                                 </span>
                             </div>
                             <h4 className="text-slate-400 text-sm font-medium mb-1">CPU Load</h4>
-                            <p className="text-2xl font-bold text-white">{metrics[metrics.length - 1]?.cpu_usage.toFixed(1) || '0.0'}%</p>
+                            <p className="text-2xl font-bold text-white">{latest?.cpu_usage !== undefined ? latest.cpu_usage.toFixed(1) : '0.0'}%</p>
                         </div>
                         <div className="card">
                             <div className="flex justify-between items-center mb-4">
@@ -197,7 +197,7 @@ export const DeviceDetail = () => {
                                 </span>
                             </div>
                             <h4 className="text-slate-400 text-sm font-medium mb-1">RAM Usage</h4>
-                            <p className="text-2xl font-bold text-white">{memPct ? memPct.toFixed(1) : '0.0'}%</p>
+                            <p className="text-2xl font-bold text-white">{memPct !== undefined ? memPct.toFixed(1) : '0.0'}%</p>
                         </div>
                         <div className="card">
                             <div className="flex justify-between items-center mb-4">
@@ -207,7 +207,7 @@ export const DeviceDetail = () => {
                                 </span>
                             </div>
                             <h4 className="text-slate-400 text-sm font-medium mb-1">Storage</h4>
-                            <p className="text-2xl font-bold text-white">{diskPct ? diskPct.toFixed(1) : '0.0'}%</p>
+                            <p className="text-2xl font-bold text-white">{diskPct !== undefined ? diskPct.toFixed(1) : '0.0'}%</p>
                         </div>
                         <div className="card">
                             <div className="flex justify-between items-center mb-4">

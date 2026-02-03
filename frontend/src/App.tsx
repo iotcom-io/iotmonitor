@@ -16,29 +16,37 @@ const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
 
 function App() {
     const token = useAuthStore(state => state.token);
+    const version = import.meta.env.VITE_APP_VERSION || 'dev';
+    const build = import.meta.env.VITE_APP_BUILD || 'local';
 
     return (
         <Router>
             <div className="flex bg-dark-bg min-h-screen text-slate-200">
                 {token && <Sidebar />}
-                <main className={token ? "flex-1 ml-64 p-8 transition-all duration-300" : "flex-1"}>
-                    <Routes>
-                        <Route path="/login" element={!token ? <Login /> : <Navigate to="/" />} />
-                        <Route
-                            path="/"
-                            element={
-                                <PrivateRoute>
-                                    <Dashboard />
-                                </PrivateRoute>
-                            }
-                        />
-                        {/* Placeholders for other routes */}
-                        <Route path="/devices" element={<PrivateRoute><DeviceList /></PrivateRoute>} />
-                        <Route path="/devices/:id" element={<PrivateRoute><DeviceDetail /></PrivateRoute>} />
-                        <Route path="/agent-builder" element={<PrivateRoute><AgentBuilder /></PrivateRoute>} />
-                        <Route path="/alerts" element={<PrivateRoute><div className="card">Alerts (Pending)</div></PrivateRoute>} />
-                        <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
-                    </Routes>
+                <main className={token ? "flex-1 ml-64 p-8 transition-all duration-300 flex flex-col min-h-screen" : "flex-1 flex flex-col min-h-screen"}>
+                    <div className="flex-1">
+                        <Routes>
+                            <Route path="/login" element={!token ? <Login /> : <Navigate to="/" />} />
+                            <Route
+                                path="/"
+                                element={
+                                    <PrivateRoute>
+                                        <Dashboard />
+                                    </PrivateRoute>
+                                }
+                            />
+                            {/* Placeholders for other routes */}
+                            <Route path="/devices" element={<PrivateRoute><DeviceList /></PrivateRoute>} />
+                            <Route path="/devices/:id" element={<PrivateRoute><DeviceDetail /></PrivateRoute>} />
+                            <Route path="/agent-builder" element={<PrivateRoute><AgentBuilder /></PrivateRoute>} />
+                            <Route path="/alerts" element={<PrivateRoute><div className="card">Alerts (Pending)</div></PrivateRoute>} />
+                            <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
+                        </Routes>
+                    </div>
+                    <footer className="mt-8 text-xs text-slate-500 flex items-center justify-between border-t border-white/5 pt-4">
+                        <span>© 2026 iotcom.io</span>
+                        <span>Version {version} · Build {build}</span>
+                    </footer>
                 </main>
             </div>
         </Router>
