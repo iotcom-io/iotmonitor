@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import axios from 'axios';
+import SystemSettings from '../models/SystemSettings';
 
 interface NotificationOptions {
     subject: string;
@@ -25,7 +26,11 @@ export class NotificationService {
     static async send(options: NotificationOptions) {
         const promises = [];
 
-        const slackUrl = options.recipients.slackWebhook || process.env.SLACK_WEBHOOK_URL;
+        let slackUrl = options.recipients.slackWebhook || process.env.SLACK_WEBHOOK_URL;
+        if (!slackUrl && options.channels.includes('slack')) {
+            const settings = await SystemSettings.findOne();
+            slackUrl = settings?.notification_slack_webhook;
+        }
 
         if (options.channels.includes('email') && options.recipients.email) {
             promises.push(this.sendEmail(options.recipients.email, options.subject, options.message));

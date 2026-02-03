@@ -15,6 +15,7 @@ export interface IDevice extends Document {
     last_seen: Date;
     status: 'online' | 'offline' | 'warning';
     monitoring_enabled: boolean;
+    notification_slack_webhook?: string;
     created_at: Date;
     updated_at: Date;
 }
@@ -34,6 +35,7 @@ const DeviceSchema: Schema = new Schema({
     last_seen: { type: Date, default: Date.now },
     status: { type: String, enum: ['online', 'offline', 'warning'], default: 'offline' },
     monitoring_enabled: { type: Boolean, default: true },
+    notification_slack_webhook: { type: String },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 export default mongoose.model<IDevice>('Device', DeviceSchema);
