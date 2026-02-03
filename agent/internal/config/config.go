@@ -12,6 +12,7 @@ type Config struct {
 	MQTTPort   int    `json:"mqtt_port"`
 	UseTLS     bool   `json:"use_tls"`
 	MQTTPrefix string `json:"mqtt_prefix"`
+	Debug      bool   `json:"debug"`
 }
 
 var (

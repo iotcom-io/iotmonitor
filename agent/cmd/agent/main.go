@@ -15,11 +15,16 @@ import (
 
 func main() {
 	configPath := flag.String("config", "config.json", "Path to config file")
+	debug := flag.Bool("debug", false, "Enable debug logging")
 	flag.Parse()
 
 	cfg, err := config.LoadConfig(*configPath)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	if *debug {
+		cfg.Debug = true
 	}
 
 	if cfg.DeviceID == "" || cfg.AgentToken == "" {

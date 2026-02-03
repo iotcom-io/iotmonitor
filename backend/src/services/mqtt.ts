@@ -46,57 +46,126 @@ client.on('message', async (topic, message) => {
 
                 await Device.findOneAndUpdate({ device_id }, { last_seen: new Date() });
 
-                if (check_type === 'system') {
-                    // Update device hardware info/hostname if provided
-                    if (payload.hostname || payload.memory_total || payload.disk_total) {
-                        await Device.findOneAndUpdate({ device_id }, {
-                            hostname: payload.hostname || device.hostname,
-                            memory_total: payload.memory_total || device.memory_total,
-                            disk_total: payload.disk_total || device.disk_total,
-                        });
-                    }
+                // Telemetry Consolidation Logic
+                const Telemetry = (await import('../models/Telemetry')).default;
+                const CONSOLIDATION_WINDOW_MS = 2000; // 2 seconds window
 
-                    const Telemetry = (await import('../models/Telemetry')).default;
-                    await new Telemetry({
-                        device_id,
-                        cpu_usage: payload.cpu_usage || 0,
-                        cpu_load: payload.cpu_load,
-                        memory_usage: payload.memory_usage || 0,
-                        memory_total: payload.memory_total,
-                        memory_used: payload.memory_used,
-                        disk_usage: payload.disk_usage || 0,
-                        disk_total: payload.disk_total,
-                        disk_used: payload.disk_used,
-                        network_in: payload.network_in,
-                        network_out: payload.network_out,
-                        extra: payload.extra
-                    }).save();
-                } else if (check_type === 'network') {
-                    // Update IP info if provided
-                    if (payload.public_ip || payload.local_ips) {
-                        await Device.findOneAndUpdate({ device_id }, {
-                            public_ip: payload.public_ip,
-                            local_ips: payload.local_ips
-                        });
-                    }
+                const recentTelemetry = await Telemetry.findOne({
+                    device_id,
+                    timestamp: { $gte: new Date(Date.now() - CONSOLIDATION_WINDOW_MS) }
+                }).sort({ timestamp: -1 });
 
-                    const Telemetry = (await import('../models/Telemetry')).default;
-                    await new Telemetry({
-                        device_id,
-                        public_ip: payload.public_ip,
-                        local_ips: payload.local_ips,
-                        extra: {
-                            ping_results: payload.ping_results,
-                            port_results: payload.port_results,
-                            interfaces: payload.interfaces
+                if (recentTelemetry) {
+                    // Update existing recent record
+                    const updateData: any = {};
+
+                    if (check_type === 'system') {
+                        if (payload.cpu_usage !== undefined) updateData.cpu_usage = payload.cpu_usage;
+                        if (payload.cpu_load !== undefined) updateData.cpu_load = payload.cpu_load;
+                        if (payload.memory_usage !== undefined) updateData.memory_usage = payload.memory_usage;
+                        if (payload.memory_used !== undefined) updateData.memory_used = payload.memory_used;
+                        if (payload.memory_total !== undefined) {
+                            updateData.memory_total = payload.memory_total;
+                            // Also update Device model
+                            await Device.findOneAndUpdate({ device_id }, {
+                                memory_total: payload.memory_total,
+                                disk_total: payload.disk_total,
+                                hostname: payload.hostname || device.hostname
+                            });
                         }
-                    }).save();
-                } else if (check_type === 'asterisk') {
-                    const Telemetry = (await import('../models/Telemetry')).default;
-                    await new Telemetry({
-                        device_id,
-                        extra: payload
-                    }).save();
+                        if (payload.disk_usage !== undefined) updateData.disk_usage = payload.disk_usage;
+                        if (payload.disk_used !== undefined) updateData.disk_used = payload.disk_used;
+                        if (payload.disk_total !== undefined) updateData.disk_total = payload.disk_total;
+
+                        // Merge extra system info if present
+                        if (payload.extra) {
+                            for (const key in payload.extra) {
+                                recentTelemetry.extra = recentTelemetry.extra || {};
+                                recentTelemetry.extra[key] = payload.extra[key];
+                            }
+                            recentTelemetry.markModified('extra');
+                        }
+                    } else if (check_type === 'network') {
+                        if (payload.public_ip) updateData.public_ip = payload.public_ip;
+                        if (payload.local_ips) updateData.local_ips = payload.local_ips; // Can overwrite array
+                        // Update Device model IPs too
+                        if (payload.public_ip || payload.local_ips) {
+                            await Device.findOneAndUpdate({ device_id }, {
+                                public_ip: payload.public_ip,
+                                local_ips: payload.local_ips
+                            });
+                        }
+
+                        // Merge extra network info (ping_results, etc)
+                        if (payload.ping_results || payload.port_results || payload.interfaces) {
+                            recentTelemetry.extra = recentTelemetry.extra || {};
+                            if (payload.ping_results) recentTelemetry.extra.ping_results = payload.ping_results;
+                            if (payload.port_results) recentTelemetry.extra.port_results = payload.port_results;
+                            if (payload.interfaces) recentTelemetry.extra.interfaces = payload.interfaces;
+                            recentTelemetry.markModified('extra');
+                        }
+                    } else if (check_type === 'asterisk') {
+                        // Merge extra asterisk info
+                        recentTelemetry.extra = recentTelemetry.extra || {};
+                        Object.assign(recentTelemetry.extra, payload);
+                        recentTelemetry.markModified('extra');
+                    }
+
+                    // Apply standard field updates
+                    Object.assign(recentTelemetry, updateData);
+                    await recentTelemetry.save();
+
+                } else {
+                    // Create new record
+                    if (check_type === 'system') {
+                        // Update device hardware info/hostname if provided
+                        if (payload.hostname || payload.memory_total || payload.disk_total) {
+                            await Device.findOneAndUpdate({ device_id }, {
+                                hostname: payload.hostname || device.hostname,
+                                memory_total: payload.memory_total || device.memory_total,
+                                disk_total: payload.disk_total || device.disk_total,
+                            });
+                        }
+
+                        await new Telemetry({
+                            device_id,
+                            cpu_usage: payload.cpu_usage || 0,
+                            cpu_load: payload.cpu_load,
+                            memory_usage: payload.memory_usage || 0,
+                            memory_total: payload.memory_total,
+                            memory_used: payload.memory_used,
+                            disk_usage: payload.disk_usage || 0,
+                            disk_total: payload.disk_total,
+                            disk_used: payload.disk_used,
+                            network_in: payload.network_in,
+                            network_out: payload.network_out,
+                            extra: payload.extra
+                        }).save();
+                    } else if (check_type === 'network') {
+                        // Update IP info if provided
+                        if (payload.public_ip || payload.local_ips) {
+                            await Device.findOneAndUpdate({ device_id }, {
+                                public_ip: payload.public_ip,
+                                local_ips: payload.local_ips
+                            });
+                        }
+
+                        await new Telemetry({
+                            device_id,
+                            public_ip: payload.public_ip,
+                            local_ips: payload.local_ips,
+                            extra: {
+                                ping_results: payload.ping_results,
+                                port_results: payload.port_results,
+                                interfaces: payload.interfaces
+                            }
+                        }).save();
+                    } else if (check_type === 'asterisk') {
+                        await new Telemetry({
+                            device_id,
+                            extra: payload
+                        }).save();
+                    }
                 }
 
                 const { AlertingEngine } = await import('./AlertingEngine');

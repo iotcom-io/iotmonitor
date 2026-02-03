@@ -54,6 +54,11 @@ func (c *Client) PublishMetric(checkType string, payload interface{}) error {
 	if err != nil {
 		return err
 	}
+
+	if c.Config.Debug {
+		log.Printf("[DEBUG] Publishing %s: %s", checkType, string(data))
+	}
+
 	token := c.Publish(topic, 1, false, data)
 	token.Wait()
 	return token.Error()

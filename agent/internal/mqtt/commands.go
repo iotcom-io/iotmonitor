@@ -28,6 +28,10 @@ type CommandResponse struct {
 func (c *Client) HandleCommands() {
 	topic := fmt.Sprintf("%s/%s/commands", c.Config.MQTTPrefix, c.Config.DeviceID)
 	c.Subscribe(topic, 1, func(client mqtt.Client, msg mqtt.Message) {
+		if c.Config.Debug {
+			log.Printf("[DEBUG] Received message on %s: %s", msg.Topic(), string(msg.Payload()))
+		}
+
 		var req CommandRequest
 		if err := json.Unmarshal(msg.Payload(), &req); err != nil {
 			log.Printf("Failed to unmarshal command: %v", err)
