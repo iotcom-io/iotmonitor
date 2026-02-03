@@ -12,6 +12,7 @@ import {
 import api from '../lib/axios';
 import { clsx } from 'clsx';
 import { MonitoringRuleModal } from '../components/MonitoringRuleModal';
+import { IncidentBanner } from '../components/IncidentBanner';
 import { Info } from 'lucide-react';
 
 export const DeviceDetail = () => {
@@ -24,6 +25,7 @@ export const DeviceDetail = () => {
     const [loading, setLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingCheck, setEditingCheck] = useState<any>(null);
+    const [incidents, setIncidents] = useState<any[]>([]);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -31,11 +33,13 @@ export const DeviceDetail = () => {
                 const [deviceRes, metricsRes, checksRes] = await Promise.all([
                     api.get(`/devices/${id}`),
                     api.get(`/monitoring/metrics/${id}`),
-                    api.get(`/monitoring/checks/${id}`)
+                    api.get(`/monitoring/checks/${id}`),
                 ]);
                 setDevice(deviceRes.data);
                 setMetrics(metricsRes.data);
                 setChecks(checksRes.data);
+                const incRes = await api.get(`/incidents`, { params: { target_id: id, status: 'open' } });
+                setIncidents(incRes.data);
             } catch (error) {
                 console.error('Failed to fetch device data', error);
             } finally {
@@ -163,6 +167,7 @@ export const DeviceDetail = () => {
                     Device is OFFLINE. Live metrics are paused; showing last reported data. Possible causes: power/network loss or agent not running.
                 </div>
             )}
+            <IncidentBanner incidents={incidents} />
             {!isOffline && (
                 <div className="p-3 border border-emerald-500/20 bg-emerald-500/5 rounded-lg text-emerald-200 text-xs">
                     Live data updating every 5s. Last sample: {latest ? new Date(latest.timestamp).toLocaleTimeString() : 'n/a'}

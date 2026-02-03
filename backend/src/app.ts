@@ -8,6 +8,7 @@ import deviceRoutes from './routes/devices';
 import monitoringRoutes from './routes/monitoring';
 import settingsRoutes from './routes/settings';
 import syntheticRoutes from './routes/synthetics';
+import incidentRoutes from './routes/incidents';
 import './services/mqtt'; // Initialize MQTT client
 
 dotenv.config();
@@ -24,6 +25,7 @@ app.use('/api/devices', deviceRoutes);
 app.use('/api/monitoring', monitoringRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/synthetics', syntheticRoutes);
+app.use('/api/incidents', incidentRoutes);
 
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });

@@ -8,6 +8,8 @@ import { DeviceList } from './pages/DeviceList';
 import { DeviceDetail } from './pages/DeviceDetail';
 import { AgentBuilder } from './pages/AgentBuilder';
 import { Settings } from './pages/Settings';
+import { Synthetics } from './pages/Synthetics';
+import { Incidents } from './pages/Incidents';
 
 const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
     const token = useAuthStore(state => state.token);
@@ -38,9 +40,10 @@ function App() {
                             {/* Placeholders for other routes */}
                             <Route path="/devices" element={<PrivateRoute><DeviceList /></PrivateRoute>} />
                             <Route path="/devices/:id" element={<PrivateRoute><DeviceDetail /></PrivateRoute>} />
-                            <Route path="/agent-builder" element={<PrivateRoute><AgentBuilder /></PrivateRoute>} />
-                            <Route path="/alerts" element={<PrivateRoute><div className="card">Alerts (Pending)</div></PrivateRoute>} />
-                            <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
+                        <Route path="/agent-builder" element={<PrivateRoute><AgentBuilder /></PrivateRoute>} />
+                        <Route path="/alerts" element={<PrivateRoute><Incidents /></PrivateRoute>} />
+                        <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
+                        <Route path="/synthetics" element={<PrivateRoute><Synthetics /></PrivateRoute>} />
                         </Routes>
                     </div>
                     <footer className="mt-8 text-xs text-slate-500 flex items-center justify-between border-t border-white/5 pt-4">

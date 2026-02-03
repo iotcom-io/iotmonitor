@@ -3,6 +3,7 @@ import Incident from '../models/Incident';
 import { NotificationService } from './NotificationService';
 import https from 'https';
 import http from 'http';
+import tls from 'tls';
 import { URL } from 'url';
 
 let timer: NodeJS.Timeout | null = null;
@@ -80,12 +81,41 @@ const ensureIncident = async (check: any, ok: boolean, message: string) => {
     }
 };
 
+const runSSL = async (check: any) => {
+    return new Promise<{ ok: boolean; message: string }>((resolve) => {
+        const url = new URL(check.url);
+        const host = url.hostname;
+        const port = url.port ? parseInt(url.port) : 443;
+        const socket = tls.connect(port, host, { servername: host, timeout: check.timeout || 8000 }, () => {
+            const cert = socket.getPeerCertificate();
+            if (!cert || !cert.valid_to) {
+                resolve({ ok: false, message: 'No certificate' });
+                socket.end();
+                return;
+            }
+            const exp = new Date(cert.valid_to);
+            const days = Math.round((exp.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+            if (days <= (check.ssl_expiry_days || 14)) {
+                resolve({ ok: false, message: `Cert expires in ${days}d (${cert.subject.CN || host})` });
+            } else {
+                resolve({ ok: true, message: `Cert valid ${days}d` });
+            }
+            socket.end();
+        });
+        socket.on('error', (err) => resolve({ ok: false, message: err.message }));
+        socket.on('timeout', () => {
+            socket.destroy(new Error('Timeout'));
+            resolve({ ok: false, message: 'Timeout' });
+        });
+    });
+};
+
 const tick = async () => {
     const checks = await SyntheticCheck.find({ enabled: true });
     const now = Date.now();
     for (const check of checks) {
         if (check.last_run && now - check.last_run.getTime() < (check.interval || 300) * 1000) continue;
-        const result = await runHttp(check);
+        const result = check.type === 'ssl' ? await runSSL(check) : await runHttp(check);
         check.last_run = new Date();
         check.last_status = result.ok ? 'ok' : 'fail';
         check.last_message = result.message;

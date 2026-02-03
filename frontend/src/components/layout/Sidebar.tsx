@@ -57,6 +57,12 @@ export const Sidebar = () => {
                     to="/alerts"
                     active={location.pathname === '/alerts'}
                 />
+                <SidebarItem
+                    icon={Server}
+                    label="Synthetics"
+                    to="/synthetics"
+                    active={location.pathname.startsWith('/synthetics')}
+                />
             </nav>
 
             <div className="mt-auto space-y-2">
