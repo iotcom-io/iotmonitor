@@ -3,6 +3,7 @@ import Device from '../models/Device';
 import Alert from '../models/Alert';
 
 const MQTT_URL = process.env.MQTT_URL || 'mqtt://localhost:1883';
+const DEBUG_MQTT = process.env.DEBUG_MQTT === 'true';
 const client = mqtt.connect(MQTT_URL);
 
 client.on('connect', () => {
@@ -13,6 +14,10 @@ client.on('connect', () => {
 
 client.on('message', async (topic, message) => {
     try {
+        if (DEBUG_MQTT) {
+            console.log(`[MQTT][IN] ${topic} (${message.length} bytes)`);
+        }
+
         const parts = topic.split('/');
         if (parts.length >= 4 && parts[1] === 'device') {
             const device_id = parts[2];
@@ -104,6 +109,11 @@ client.on('message', async (topic, message) => {
                             if (payload.interfaces) recentTelemetry.extra.interfaces = payload.interfaces;
                             recentTelemetry.markModified('extra');
                         }
+                    } else if (check_type === 'docker') {
+                        // Persist docker container stats
+                        recentTelemetry.extra = recentTelemetry.extra || {};
+                        recentTelemetry.extra.docker = payload;
+                        recentTelemetry.markModified('extra');
                     } else if (check_type === 'asterisk') {
                         // Merge extra asterisk info
                         recentTelemetry.extra = recentTelemetry.extra || {};
@@ -160,6 +170,13 @@ client.on('message', async (topic, message) => {
                                 interfaces: payload.interfaces
                             }
                         }).save();
+                    } else if (check_type === 'docker') {
+                        await new Telemetry({
+                            device_id,
+                            extra: {
+                                docker: payload
+                            }
+                        }).save();
                     } else if (check_type === 'asterisk') {
                         await new Telemetry({
                             device_id,
@@ -169,7 +186,7 @@ client.on('message', async (topic, message) => {
                 }
 
                 const { AlertingEngine } = await import('./AlertingEngine');
-                await AlertingEngine.evaluate(device_id, { [check_type]: payload });
+                await AlertingEngine.evaluate(device_id, payload, check_type);
             }
         }
     } catch (err) {

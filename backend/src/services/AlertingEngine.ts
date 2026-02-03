@@ -4,7 +4,7 @@ import Device from '../models/Device';
 import { NotificationService } from './NotificationService';
 
 export class AlertingEngine {
-    static async evaluate(device_id: string, metrics: any) {
+    static async evaluate(device_id: string, metrics: any, check_type?: string) {
         try {
             const device = await Device.findOne({ device_id });
             if (!device || device.monitoring_enabled === false) return;
@@ -12,6 +12,11 @@ export class AlertingEngine {
             const checks = await MonitoringCheck.find({ device_id, enabled: true });
 
             for (const check of checks) {
+                // Only evaluate checks that match the incoming metric type if provided
+                if (check_type && check.check_type !== check_type && !(check_type === 'asterisk' && check.check_type === 'sip')) {
+                    continue;
+                }
+
                 let currentVal: number | null = null;
                 let unit = '%';
 
