@@ -12,6 +12,7 @@ import {
 import api from '../lib/axios';
 import { clsx } from 'clsx';
 import { MonitoringRuleModal } from '../components/MonitoringRuleModal';
+import { Info } from 'lucide-react';
 
 export const DeviceDetail = () => {
     const { id } = useParams();
@@ -109,13 +110,11 @@ export const DeviceDetail = () => {
     };
 
     const latest = metrics[metrics.length - 1];
-    const memPct = latest?.memory_used !== undefined && latest?.memory_total
+    // Memory: agent already reports used = total - available (includes cache/buffers). Use that directly.
+    const memPct = latest?.memory_usage ?? (latest?.memory_used !== undefined && latest?.memory_total
         ? (latest.memory_used / latest.memory_total) * 100
-        : latest?.memory_usage;
+        : undefined);
     const cacheBuffers = (latest?.memory_cached || 0) + (latest?.memory_buffers || 0);
-    const memPctInclCache = latest?.memory_total
-        ? (((latest.memory_used || 0) + cacheBuffers) / latest.memory_total) * 100
-        : memPct;
     const diskPct = latest?.disk_usage !== undefined
         ? latest.disk_usage
         : (latest?.disk_used !== undefined && latest?.disk_total ? (latest.disk_used / latest.disk_total) * 100 : undefined);
@@ -124,6 +123,8 @@ export const DeviceDetail = () => {
     const avgLatency = successfulPings.length
         ? (successfulPings.reduce((sum, p) => sum + (p.latency_ms || 0), 0) / successfulPings.length)
         : null;
+
+    const isOffline = device?.status === 'offline';
 
     return (
         <div className="space-y-8">
@@ -157,6 +158,17 @@ export const DeviceDetail = () => {
                 </div>
             </div>
 
+            {isOffline && (
+                <div className="p-4 border border-red-500/30 bg-red-500/10 rounded-xl text-red-200 text-sm">
+                    Device is OFFLINE. Live metrics are paused; showing last reported data. Possible causes: power/network loss or agent not running.
+                </div>
+            )}
+            {!isOffline && (
+                <div className="p-3 border border-emerald-500/20 bg-emerald-500/5 rounded-lg text-emerald-200 text-xs">
+                    Live data updating every 5s. Last sample: {latest ? new Date(latest.timestamp).toLocaleTimeString() : 'n/a'}
+                </div>
+            )}
+
             <div className="flex gap-2 p-1 bg-dark-surface border border-dark-border rounded-xl w-fit">
                 {[
                     { id: 'metrics', label: 'Real-time Metrics', icon: Activity },
@@ -185,25 +197,24 @@ export const DeviceDetail = () => {
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                         <div className="card">
                             <div className="flex justify-between items-center mb-4">
-                                <Cpu size={24} className="text-primary-400" />
-                                <span className="text-xs text-primary-400 font-bold bg-primary-400/10 px-2 py-0.5 rounded">
+                                <div className="flex items-center gap-2">
+                                    <Cpu size={24} className="text-primary-400" />
+                                    <Info size={16} className="text-slate-500" title="Hover to see per-core usage" />
+                                </div>
+                                <span className="text-xs text-primary-400 font-bold bg-primary-400/10 px-2 py-0.5 rounded" title="1 minute load average">
                                     Load: {metrics[metrics.length - 1]?.cpu_load?.toFixed(2) || '0.00'}
                                 </span>
                             </div>
                             <h4 className="text-slate-400 text-sm font-medium mb-1">CPU Usage</h4>
                             <p className="text-2xl font-bold text-white">{latest?.cpu_usage !== undefined ? latest.cpu_usage.toFixed(1) : '0.0'}%</p>
                             {latest?.cpu_per_core && latest.cpu_per_core.length > 0 && (
-                                <div className="mt-3 space-y-1">
-                                    <p className="text-[10px] uppercase text-slate-500 font-bold">Per-core</p>
-                                    <div className="space-y-1">
+                                <div className="mt-3">
+                                    <p className="text-[10px] uppercase text-slate-500 font-bold mb-1">Per-core</p>
+                                    <div className="flex flex-wrap gap-2 text-xs text-slate-400">
                                         {latest.cpu_per_core.map((val: number, idx: number) => (
-                                            <div key={idx} className="flex items-center gap-2 text-xs text-slate-400">
-                                                <span className="w-10 text-slate-500 font-mono">C{idx}</span>
-                                                <div className="flex-1 h-2 bg-white/5 rounded">
-                                                    <div className="h-full rounded bg-primary-500" style={{ width: `${Math.min(val, 100)}%` }} />
-                                                </div>
-                                                <span className="w-12 text-right font-mono text-white">{val.toFixed(0)}%</span>
-                                            </div>
+                                            <span key={idx} className="px-2 py-1 bg-white/5 rounded border border-white/10" title={`Core ${idx}: ${val.toFixed(1)}%`}>
+                                                C{idx}: {val.toFixed(0)}%
+                                            </span>
                                         ))}
                                     </div>
                                 </div>
@@ -217,9 +228,9 @@ export const DeviceDetail = () => {
                                 </span>
                             </div>
                             <h4 className="text-slate-400 text-sm font-medium mb-1">RAM Usage</h4>
-                            <p className="text-2xl font-bold text-white">{memPctInclCache !== undefined ? memPctInclCache.toFixed(1) : '0.0'}%</p>
+                            <p className="text-2xl font-bold text-white">{memPct !== undefined ? Math.min(memPct, 100).toFixed(1) : '0.0'}%</p>
                             <p className="text-[10px] text-slate-500 mt-1">
-                                (incl. cache+buffers: {cacheBuffers ? `${cacheBuffers / (1024 ** 3) < 0.01 ? '<0.01' : (cacheBuffers / (1024 ** 3)).toFixed(2)} GB` : '0 GB'})
+                                cache+buffers: {cacheBuffers ? `${cacheBuffers / (1024 ** 3) < 0.01 ? '<0.01' : (cacheBuffers / (1024 ** 3)).toFixed(2)} GB` : '0 GB'}
                             </p>
                         </div>
                         <div className="card">
@@ -457,7 +468,7 @@ export const DeviceDetail = () => {
                 <div className="space-y-6">
                     <div className="flex justify-between items-center">
                         <h3 className="text-xl font-bold text-white">Monitoring Rules</h3>
-                        <button className="btn-primary flex items-center gap-2">
+                        <button onClick={() => setIsModalOpen(true)} className="btn-primary flex items-center gap-2">
                             <CheckCircle2 size={18} />
                             Add New Rule
                         </button>
@@ -582,7 +593,7 @@ export const DeviceDetail = () => {
                 onClose={() => { setIsModalOpen(false); setEditingCheck(null); }}
                 onSave={handleSaveCheck}
                 initialData={editingCheck}
-                device={device}
+                latestMetrics={latest}
             />
         </div>
     );

@@ -7,10 +7,10 @@ interface MonitoringRuleModalProps {
     onClose: () => void;
     onSave: (rule: any) => void;
     initialData?: any;
-    device: any;
+    latestMetrics?: any;
 }
 
-export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, device }: MonitoringRuleModalProps) => {
+export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, latestMetrics }: MonitoringRuleModalProps) => {
     const [formData, setFormData] = useState(initialData || {
         check_type: 'cpu',
         target: '',
@@ -94,36 +94,36 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, devi
                                 <Activity size={14} />
                                 Target Endpoint / Interface
                             </label>
-                            {formData.check_type === 'sip' ? (
-                                <select
-                                    className="input-field"
-                                    value={formData.target}
-                                    onChange={e => setFormData({ ...formData, target: e.target.value })}
-                                >
-                                    <option value="">Select a SIP Trunk...</option>
-                                    {device.extra?.summary?.registrationsTotal > 0 && device.extra?.registrations?.map((r: any) => (
-                                        <option key={r.name} value={r.name}>{r.name} (PJSIP)</option>
-                                    ))}
-                                </select>
-                            ) : formData.check_type === 'sip_registration' ? (
-                                <input
+            {formData.check_type === 'sip' ? (
+                <select
+                    className="input-field"
+                    value={formData.target}
+                    onChange={e => setFormData({ ...formData, target: e.target.value })}
+                >
+                    <option value="">Select a SIP Trunk...</option>
+                    {latestMetrics?.extra?.registrations?.map((r: any) => (
+                        <option key={r.name} value={r.name}>{r.name} (PJSIP)</option>
+                    ))}
+                </select>
+            ) : formData.check_type === 'sip_registration' ? (
+                <input
                                     type="text"
                                     className="input-field"
                                     placeholder="All registrations"
                                     disabled
                                 />
-                            ) : formData.check_type === 'bandwidth' ? (
-                                <select
-                                    className="input-field"
-                                    value={formData.target}
-                                    onChange={e => setFormData({ ...formData, target: e.target.value })}
-                                >
-                                    <option value="">Select Interface...</option>
-                                    {device.extra?.interfaces?.map((i: any) => (
-                                        <option key={i.name} value={i.name}>{i.name}</option>
-                                    ))}
-                                </select>
-                            ) : (
+            ) : formData.check_type === 'bandwidth' ? (
+                <select
+                    className="input-field"
+                    value={formData.target}
+                    onChange={e => setFormData({ ...formData, target: e.target.value })}
+                >
+                    <option value="">Select Interface...</option>
+                    {latestMetrics?.extra?.interfaces?.map((i: any) => (
+                        <option key={i.name} value={i.name}>{i.name}</option>
+                    ))}
+                </select>
+            ) : (
                                 <input
                                     type="text"
                                     className="input-field"
