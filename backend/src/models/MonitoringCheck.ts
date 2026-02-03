@@ -2,7 +2,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IMonitoringCheck extends Document {
     device_id: string;
-    check_type: 'cpu' | 'memory' | 'docker' | 'sip' | 'ping' | 'port' | 'bandwidth' | 'ssl' | 'custom';
+    check_type: 'cpu' | 'memory' | 'docker' | 'sip' | 'sip_registration' | 'ping' | 'port' | 'bandwidth' | 'ssl' | 'custom';
     target?: string; // e.g. "callapptrunk" or "eth0"
     config: Record<string, any>;
     interval: number; // in seconds
@@ -21,7 +21,7 @@ const MonitoringCheckSchema: Schema = new Schema({
     device_id: { type: String, ref: 'Device', required: true },
     check_type: {
         type: String,
-        enum: ['cpu', 'memory', 'docker', 'sip', 'ping', 'port', 'bandwidth', 'ssl', 'custom'],
+        enum: ['cpu', 'memory', 'docker', 'sip', 'sip_registration', 'ping', 'port', 'bandwidth', 'ssl', 'custom'],
         required: true
     },
     target: { type: String },

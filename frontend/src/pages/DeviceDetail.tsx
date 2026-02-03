@@ -112,9 +112,13 @@ export const DeviceDetail = () => {
     const memPct = latest?.memory_used !== undefined && latest?.memory_total
         ? (latest.memory_used / latest.memory_total) * 100
         : latest?.memory_usage;
-    const diskPct = latest?.disk_used !== undefined && latest?.disk_total
-        ? (latest.disk_used / latest.disk_total) * 100
-        : latest?.disk_usage;
+    const cacheBuffers = (latest?.memory_cached || 0) + (latest?.memory_buffers || 0);
+    const memPctInclCache = latest?.memory_total
+        ? (((latest.memory_used || 0) + cacheBuffers) / latest.memory_total) * 100
+        : memPct;
+    const diskPct = latest?.disk_usage !== undefined
+        ? latest.disk_usage
+        : (latest?.disk_used !== undefined && latest?.disk_total ? (latest.disk_used / latest.disk_total) * 100 : undefined);
     const pingSamples: any[] = latest?.extra?.ping_results || [];
     const successfulPings = pingSamples.filter(p => p.success);
     const avgLatency = successfulPings.length
@@ -186,8 +190,24 @@ export const DeviceDetail = () => {
                                     Load: {metrics[metrics.length - 1]?.cpu_load?.toFixed(2) || '0.00'}
                                 </span>
                             </div>
-                            <h4 className="text-slate-400 text-sm font-medium mb-1">CPU Load</h4>
+                            <h4 className="text-slate-400 text-sm font-medium mb-1">CPU Usage</h4>
                             <p className="text-2xl font-bold text-white">{latest?.cpu_usage !== undefined ? latest.cpu_usage.toFixed(1) : '0.0'}%</p>
+                            {latest?.cpu_per_core && latest.cpu_per_core.length > 0 && (
+                                <div className="mt-3 space-y-1">
+                                    <p className="text-[10px] uppercase text-slate-500 font-bold">Per-core</p>
+                                    <div className="space-y-1">
+                                        {latest.cpu_per_core.map((val: number, idx: number) => (
+                                            <div key={idx} className="flex items-center gap-2 text-xs text-slate-400">
+                                                <span className="w-10 text-slate-500 font-mono">C{idx}</span>
+                                                <div className="flex-1 h-2 bg-white/5 rounded">
+                                                    <div className="h-full rounded bg-primary-500" style={{ width: `${Math.min(val, 100)}%` }} />
+                                                </div>
+                                                <span className="w-12 text-right font-mono text-white">{val.toFixed(0)}%</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                         <div className="card">
                             <div className="flex justify-between items-center mb-4">
@@ -197,7 +217,10 @@ export const DeviceDetail = () => {
                                 </span>
                             </div>
                             <h4 className="text-slate-400 text-sm font-medium mb-1">RAM Usage</h4>
-                            <p className="text-2xl font-bold text-white">{memPct !== undefined ? memPct.toFixed(1) : '0.0'}%</p>
+                            <p className="text-2xl font-bold text-white">{memPctInclCache !== undefined ? memPctInclCache.toFixed(1) : '0.0'}%</p>
+                            <p className="text-[10px] text-slate-500 mt-1">
+                                (incl. cache+buffers: {cacheBuffers ? `${cacheBuffers / (1024 ** 3) < 0.01 ? '<0.01' : (cacheBuffers / (1024 ** 3)).toFixed(2)} GB` : '0 GB'})
+                            </p>
                         </div>
                         <div className="card">
                             <div className="flex justify-between items-center mb-4">

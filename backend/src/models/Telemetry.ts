@@ -5,9 +5,13 @@ export interface ITelemetry extends Document {
     timestamp: Date;
     cpu_usage: number;
     cpu_load?: number;
+    cpu_per_core?: number[];
     memory_usage: number;
     memory_total?: number;
     memory_used?: number;
+    memory_available?: number;
+    memory_cached?: number;
+    memory_buffers?: number;
     disk_usage: number;
     disk_total?: number;
     disk_used?: number;
@@ -23,9 +27,13 @@ const TelemetrySchema: Schema = new Schema({
     timestamp: { type: Date, default: Date.now, index: true },
     cpu_usage: { type: Number, default: 0 },
     cpu_load: { type: Number },
+    cpu_per_core: [{ type: Number }],
     memory_usage: { type: Number, default: 0 },
     memory_total: { type: Number },
     memory_used: { type: Number },
+    memory_available: { type: Number },
+    memory_cached: { type: Number },
+    memory_buffers: { type: Number },
     disk_usage: { type: Number, default: 0 },
     disk_total: { type: Number },
     disk_used: { type: Number },

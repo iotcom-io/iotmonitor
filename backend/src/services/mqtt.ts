@@ -67,8 +67,12 @@ client.on('message', async (topic, message) => {
                     if (check_type === 'system') {
                         if (payload.cpu_usage !== undefined) updateData.cpu_usage = payload.cpu_usage;
                         if (payload.cpu_load !== undefined) updateData.cpu_load = payload.cpu_load;
+                        if (payload.cpu_per_core) updateData.cpu_per_core = payload.cpu_per_core;
                         if (payload.memory_usage !== undefined) updateData.memory_usage = payload.memory_usage;
                         if (payload.memory_used !== undefined) updateData.memory_used = payload.memory_used;
+                        if (payload.memory_available !== undefined) updateData.memory_available = payload.memory_available;
+                        if (payload.memory_cached !== undefined) updateData.memory_cached = payload.memory_cached;
+                        if (payload.memory_buffers !== undefined) updateData.memory_buffers = payload.memory_buffers;
                         if (payload.memory_total !== undefined) {
                             updateData.memory_total = payload.memory_total;
                             // Also update Device model
@@ -141,9 +145,13 @@ client.on('message', async (topic, message) => {
                             device_id,
                             cpu_usage: payload.cpu_usage || 0,
                             cpu_load: payload.cpu_load,
+                            cpu_per_core: payload.cpu_per_core,
                             memory_usage: payload.memory_usage || 0,
                             memory_total: payload.memory_total,
                             memory_used: payload.memory_used,
+                            memory_available: payload.memory_available,
+                            memory_cached: payload.memory_cached,
+                            memory_buffers: payload.memory_buffers,
                             disk_usage: payload.disk_usage || 0,
                             disk_total: payload.disk_total,
                             disk_used: payload.disk_used,

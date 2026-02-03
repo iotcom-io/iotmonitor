@@ -34,6 +34,7 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, devi
         { id: 'cpu', label: 'CPU Load', icon: Cpu, unit: '%' },
         { id: 'memory', label: 'Memory Usage', icon: Memory, unit: '%' },
         { id: 'sip', label: 'SIP RTT/Status', icon: Phone, unit: 'ms' },
+        { id: 'sip_registration', label: 'SIP Registrations %', icon: Phone, unit: '%' },
         { id: 'bandwidth', label: 'Network Bandwidth', icon: Wifi, unit: 'Mbps' },
     ];
 
@@ -59,7 +60,20 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, devi
                             <button
                                 key={type.id}
                                 type="button"
-                                onClick={() => setFormData({ ...formData, check_type: type.id as any })}
+                                onClick={() => {
+                                    const defaults: any = {
+                                        cpu: { attention: 70, critical: 90 },
+                                        memory: { attention: 75, critical: 90 },
+                                        sip: { attention: 400, critical: 800 },
+                                        sip_registration: { attention: 95, critical: 80 },
+                                        bandwidth: { attention: 70, critical: 90 }
+                                    };
+                                    setFormData({
+                                        ...formData,
+                                        check_type: type.id as any,
+                                        thresholds: defaults[type.id] || formData.thresholds
+                                    });
+                                }}
                                 className={clsx(
                                     "flex flex-col items-center gap-2 p-4 rounded-xl border transition-all",
                                     formData.check_type === type.id
@@ -91,6 +105,13 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, devi
                                         <option key={r.name} value={r.name}>{r.name} (PJSIP)</option>
                                     ))}
                                 </select>
+                            ) : formData.check_type === 'sip_registration' ? (
+                                <input
+                                    type="text"
+                                    className="input-field"
+                                    placeholder="All registrations"
+                                    disabled
+                                />
                             ) : formData.check_type === 'bandwidth' ? (
                                 <select
                                     className="input-field"
@@ -147,7 +168,9 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, devi
                                 <input
                                     type="range"
                                     className="w-full accent-amber-500"
-                                    min="0" max={formData.check_type === 'sip' ? 2000 : 100}
+                                    min="0"
+                                    max={formData.check_type === 'sip' ? 2000 : formData.check_type === 'sip_registration' ? 100 : 100}
+                                    step="1"
                                     value={formData.thresholds.attention}
                                     onChange={e => setFormData({
                                         ...formData,
@@ -165,7 +188,9 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, devi
                                 <input
                                     type="range"
                                     className="w-full accent-red-500"
-                                    min="0" max={formData.check_type === 'sip' ? 2000 : 100}
+                                    min="0"
+                                    max={formData.check_type === 'sip' ? 2000 : formData.check_type === 'sip_registration' ? 100 : 100}
+                                    step="1"
                                     value={formData.thresholds.critical}
                                     onChange={e => setFormData({
                                         ...formData,

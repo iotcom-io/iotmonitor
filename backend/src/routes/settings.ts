@@ -11,7 +11,16 @@ router.get('/', async (req: AuthRequest, res) => {
     try {
         let settings = await SystemSettings.findOne();
         if (!settings) {
-            settings = await SystemSettings.create({ mqtt_public_url: req.get('host')?.split(':')[0] || 'localhost' });
+            settings = await SystemSettings.create({
+                mqtt_public_url: req.get('host')?.split(':')[0] || 'localhost',
+                default_thresholds: {
+                    cpu: { attention: 70, critical: 90 },
+                    memory: { attention: 75, critical: 90 },
+                    sip_registration: { attention: 90, critical: 75 }, // percent registered
+                },
+                default_notification_frequency: 15,
+                summary_interval_minutes: 60,
+            });
         }
         res.json(settings);
     } catch (err: any) {
