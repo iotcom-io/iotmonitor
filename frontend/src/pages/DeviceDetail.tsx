@@ -199,7 +199,7 @@ export const DeviceDetail = () => {
                             <div className="flex justify-between items-center mb-4">
                                 <div className="flex items-center gap-2">
                                     <Cpu size={24} className="text-primary-400" />
-                                    <Info size={16} className="text-slate-500" title="Hover to see per-core usage" />
+                                    <Info size={16} className="text-slate-500" data-tooltip="Hover to see per-core usage" />
                                 </div>
                                 <span className="text-xs text-primary-400 font-bold bg-primary-400/10 px-2 py-0.5 rounded" title="1 minute load average">
                                     Load: {metrics[metrics.length - 1]?.cpu_load?.toFixed(2) || '0.00'}
