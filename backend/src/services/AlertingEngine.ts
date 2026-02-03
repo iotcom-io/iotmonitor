@@ -112,10 +112,7 @@ export class AlertingEngine {
 
         await alert.save();
 
-        // Trigger notification
-        const SystemSettings = (await import('../models/SystemSettings')).default;
-        const settings = await SystemSettings.findOne();
-
+        // Trigger notification using system settings
         await NotificationService.send({
             subject: `IoTMonitor ALERT [${severity.toUpperCase()}]: ${device.hostname || device.device_id}`,
             message,
