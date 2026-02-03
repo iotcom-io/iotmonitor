@@ -71,6 +71,32 @@ client.on('message', async (topic, message) => {
                         network_out: payload.network_out,
                         extra: payload.extra
                     }).save();
+                } else if (check_type === 'network') {
+                    // Update IP info if provided
+                    if (payload.public_ip || payload.local_ips) {
+                        await Device.findOneAndUpdate({ device_id }, {
+                            public_ip: payload.public_ip,
+                            local_ips: payload.local_ips
+                        });
+                    }
+
+                    const Telemetry = (await import('../models/Telemetry')).default;
+                    await new Telemetry({
+                        device_id,
+                        public_ip: payload.public_ip,
+                        local_ips: payload.local_ips,
+                        extra: {
+                            ping_results: payload.ping_results,
+                            port_results: payload.port_results,
+                            interfaces: payload.interfaces
+                        }
+                    }).save();
+                } else if (check_type === 'asterisk') {
+                    const Telemetry = (await import('../models/Telemetry')).default;
+                    await new Telemetry({
+                        device_id,
+                        extra: payload
+                    }).save();
                 }
 
                 const { AlertingEngine } = await import('./AlertingEngine');

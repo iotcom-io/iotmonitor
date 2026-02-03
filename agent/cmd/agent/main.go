@@ -60,10 +60,12 @@ func main() {
 				client.PublishMetric("docker", dockerMetrics)
 			}
 
-			// Asterisk Metrics (Example config)
-			astMetrics, err := monitor.GetAsteriskStatus(false, "")
+			// Asterisk Metrics
+			astMetrics, err := monitor.GetAsteriskPJSIPMetrics("asterisk")
 			if err == nil {
 				client.PublishMetric("asterisk", astMetrics)
+			} else {
+				log.Printf("Asterisk metrics error: %v", err)
 			}
 
 			// Network Metrics (Example targets)

@@ -2,13 +2,33 @@ package monitor
 
 import (
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"time"
+
+	psnet "github.com/shirou/gopsutil/v3/net"
+)
+
+var (
+	lastNetStats []psnet.IOCountersStat
+	lastNetTime  time.Time
 )
 
 type NetworkMetrics struct {
-	PingResults []PingResult `json:"ping_results"`
-	PortResults []PortResult `json:"port_results"`
+	PublicIP    string           `json:"public_ip"`
+	LocalIPs    []string         `json:"local_ips"`
+	PingResults []PingResult     `json:"ping_results"`
+	PortResults []PortResult     `json:"port_results"`
+	Interfaces  []InterfaceStats `json:"interfaces"`
+}
+
+type InterfaceStats struct {
+	Name    string  `json:"name"`
+	RxBps   float64 `json:"rx_bps"`
+	TxBps   float64 `json:"tx_bps"`
+	RxBytes uint64  `json:"rx_bytes"`
+	TxBytes uint64  `json:"tx_bytes"`
 }
 
 type PingResult struct {
@@ -24,12 +44,58 @@ type PortResult struct {
 }
 
 func CheckNetwork(hosts []string, ports []map[string]interface{}) *NetworkMetrics {
-	metrics := &NetworkMetrics{}
+	metrics := &NetworkMetrics{
+		LocalIPs: []string{},
+	}
+
+	// 1. Get Public IP
+	httpClient := &http.Client{Timeout: 2 * time.Second}
+	if resp, err := httpClient.Get("https://ident.me"); err == nil {
+		if ip, err := io.ReadAll(resp.Body); err == nil {
+			metrics.PublicIP = string(ip)
+		}
+		resp.Body.Close()
+	}
+
+	// 2. Get Local IPs
+	if addrs, err := net.InterfaceAddrs(); err == nil {
+		for _, addr := range addrs {
+			if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+				if ipnet.IP.To4() != nil {
+					metrics.LocalIPs = append(metrics.LocalIPs, ipnet.IP.String())
+				}
+			}
+		}
+	}
+
+	// 3. Bandwidth Calculation
+	now := time.Now()
+	if currentStats, err := psnet.IOCounters(true); err == nil {
+		if !lastNetTime.IsZero() {
+			duration := now.Sub(lastNetTime).Seconds()
+			for _, curr := range currentStats {
+				for _, prev := range lastNetStats {
+					if curr.Name == prev.Name {
+						rxBps := float64(curr.BytesRecv-prev.BytesRecv) * 8 / duration
+						txBps := float64(curr.BytesSent-prev.BytesSent) * 8 / duration
+						metrics.Interfaces = append(metrics.Interfaces, InterfaceStats{
+							Name:    curr.Name,
+							RxBps:   rxBps,
+							TxBps:   txBps,
+							RxBytes: curr.BytesRecv,
+							TxBytes: curr.BytesSent,
+						})
+						break
+					}
+				}
+			}
+		}
+		lastNetStats = currentStats
+		lastNetTime = now
+	}
 
 	for _, host := range hosts {
 		start := time.Now()
-		// Simple TCP check as a proxy for ping if ICMP is restricted,
-		// or just use a dialer with a short timeout.
 		conn, err := net.DialTimeout("tcp", host+":80", 2*time.Second)
 		latency := time.Since(start).Milliseconds()
 		success := err == nil
@@ -44,9 +110,9 @@ func CheckNetwork(hosts []string, ports []map[string]interface{}) *NetworkMetric
 	}
 
 	for _, p := range ports {
-		host := p["host"].(string)
-		port := int(p["port"].(float64))
-		address := fmt.Sprintf("%s:%d", host, port)
+		host, _ := p["host"].(string)
+		port, _ := p["port"].(float64)
+		address := fmt.Sprintf("%s:%d", host, int(port))
 		conn, err := net.DialTimeout("tcp", address, 2*time.Second)
 		open := err == nil
 		if conn != nil {
@@ -54,7 +120,7 @@ func CheckNetwork(hosts []string, ports []map[string]interface{}) *NetworkMetric
 		}
 		metrics.PortResults = append(metrics.PortResults, PortResult{
 			Host: host,
-			Port: port,
+			Port: int(port),
 			Open: open,
 		})
 	}

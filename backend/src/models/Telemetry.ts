@@ -13,6 +13,8 @@ export interface ITelemetry extends Document {
     disk_used?: number;
     network_in?: number;
     network_out?: number;
+    public_ip?: string;
+    local_ips?: string[];
     extra?: Record<string, any>;
 }
 
@@ -29,6 +31,8 @@ const TelemetrySchema: Schema = new Schema({
     disk_used: { type: Number },
     network_in: { type: Number },
     network_out: { type: Number },
+    public_ip: { type: String },
+    local_ips: [{ type: String }],
     extra: { type: Schema.Types.Mixed },
 });
 

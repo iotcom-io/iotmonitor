@@ -7,6 +7,8 @@ export interface IDevice extends Document {
     type: 'server' | 'network_device' | 'website';
     memory_total?: number;
     disk_total?: number;
+    public_ip?: string;
+    local_ips?: string[];
     agent_token: string;
     mqtt_topic: string;
     config: Record<string, any>;
@@ -24,6 +26,8 @@ const DeviceSchema: Schema = new Schema({
     type: { type: String, enum: ['server', 'network_device', 'website'], default: 'server' },
     memory_total: { type: Number },
     disk_total: { type: Number },
+    public_ip: { type: String },
+    local_ips: [{ type: String }],
     agent_token: { type: String, required: true },
     mqtt_topic: { type: String, required: true },
     config: { type: Schema.Types.Mixed, default: {} },
