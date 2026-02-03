@@ -108,6 +108,19 @@ export const DeviceDetail = () => {
         return bps.toFixed(0) + ' bps';
     };
 
+    const latest = metrics[metrics.length - 1];
+    const memPct = latest?.memory_used && latest?.memory_total
+        ? (latest.memory_used / latest.memory_total) * 100
+        : latest?.memory_usage;
+    const diskPct = latest?.disk_used && latest?.disk_total
+        ? (latest.disk_used / latest.disk_total) * 100
+        : latest?.disk_usage;
+    const pingSamples: any[] = latest?.extra?.ping_results || [];
+    const successfulPings = pingSamples.filter(p => p.success);
+    const avgLatency = successfulPings.length
+        ? (successfulPings.reduce((sum, p) => sum + (p.latency_ms || 0), 0) / successfulPings.length)
+        : null;
+
     return (
         <div className="space-y-8">
             <div className="flex items-center gap-4">
@@ -180,29 +193,36 @@ export const DeviceDetail = () => {
                             <div className="flex justify-between items-center mb-4">
                                 <Memory size={24} className="text-emerald-400" />
                                 <span className="text-xs text-emerald-400 font-bold bg-emerald-400/10 px-2 py-0.5 rounded">
-                                    {formatGB(metrics[metrics.length - 1]?.memory_used)} / {formatGB(metrics[metrics.length - 1]?.memory_total || device.memory_total)} GB
+                                    {formatGB(latest?.memory_used)} / {formatGB(latest?.memory_total || device.memory_total)} GB
                                 </span>
                             </div>
                             <h4 className="text-slate-400 text-sm font-medium mb-1">RAM Usage</h4>
-                            <p className="text-2xl font-bold text-white">{metrics[metrics.length - 1]?.memory_usage.toFixed(1) || '0.0'}%</p>
+                            <p className="text-2xl font-bold text-white">{memPct ? memPct.toFixed(1) : '0.0'}%</p>
                         </div>
                         <div className="card">
                             <div className="flex justify-between items-center mb-4">
                                 <HardDrive size={24} className="text-amber-400" />
                                 <span className="text-xs text-amber-400 font-bold bg-amber-400/10 px-2 py-0.5 rounded">
-                                    {formatGB(metrics[metrics.length - 1]?.disk_used)} / {formatGB(metrics[metrics.length - 1]?.disk_total || device.disk_total)} GB
+                                    {formatGB(latest?.disk_used)} / {formatGB(latest?.disk_total || device.disk_total)} GB
                                 </span>
                             </div>
                             <h4 className="text-slate-400 text-sm font-medium mb-1">Storage</h4>
-                            <p className="text-2xl font-bold text-white">{metrics[metrics.length - 1]?.disk_usage.toFixed(1) || '0.0'}%</p>
+                            <p className="text-2xl font-bold text-white">{diskPct ? diskPct.toFixed(1) : '0.0'}%</p>
                         </div>
                         <div className="card">
                             <div className="flex justify-between items-center mb-4">
                                 <Wifi size={24} className="text-blue-400" />
-                                <span className="text-xs text-blue-400 font-bold bg-blue-400/10 px-2 py-0.5 rounded">Ping</span>
+                                <span className="text-xs text-blue-400 font-bold bg-blue-400/10 px-2 py-0.5 rounded">
+                                    Ping
+                                    {successfulPings[0]?.host && (
+                                        <span className="ml-2 text-[10px] text-slate-400">({successfulPings[0].host})</span>
+                                    )}
+                                </span>
                             </div>
                             <h4 className="text-slate-400 text-sm font-medium mb-1">Latency</h4>
-                            <p className="text-2xl font-bold text-white">42ms</p>
+                            <p className="text-2xl font-bold text-white">
+                                {avgLatency !== null ? `${avgLatency.toFixed(1)}ms` : '—'}
+                            </p>
                         </div>
                     </div>
 
