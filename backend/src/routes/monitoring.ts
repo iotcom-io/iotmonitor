@@ -21,21 +21,56 @@ router.get('/metrics/:deviceId', async (req: AuthRequest, res) => {
     }
 });
 
+// List checks for a device
+router.get('/checks/:deviceId', async (req: AuthRequest, res) => {
+    try {
+        const checks = await MonitoringCheck.find({ device_id: req.params.deviceId });
+        res.json(checks);
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
 // Add a check to a device
 router.post('/', async (req: AuthRequest, res) => {
     try {
-        const { device_id, check_type, config, interval, thresholds } = req.body;
+        const { device_id, check_type, target, config, interval, thresholds, notification_frequency, notification_recipients } = req.body;
         const check = new MonitoringCheck({
             device_id,
             check_type,
+            target,
             config,
             interval,
             thresholds,
+            notification_frequency,
+            notification_recipients
         });
         await check.save();
         res.status(201).json(check);
     } catch (err: any) {
         res.status(400).json({ message: err.message });
+    }
+});
+
+// Update a check
+router.put('/:id', async (req: AuthRequest, res) => {
+    try {
+        const check = await MonitoringCheck.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        if (!check) return res.status(404).json({ message: 'Check not found' });
+        res.json(check);
+    } catch (err: any) {
+        res.status(400).json({ message: err.message });
+    }
+});
+
+// Delete a check
+router.delete('/:id', async (req: AuthRequest, res) => {
+    try {
+        const check = await MonitoringCheck.findByIdAndDelete(req.params.id);
+        if (!check) return res.status(404).json({ message: 'Check not found' });
+        res.json({ message: 'Check deleted' });
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
     }
 });
 

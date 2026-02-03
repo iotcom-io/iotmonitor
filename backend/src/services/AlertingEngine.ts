@@ -12,25 +12,45 @@ export class AlertingEngine {
             const checks = await MonitoringCheck.find({ device_id, enabled: true });
 
             for (const check of checks) {
-                let isTriggered = false;
-                let alertMessage = '';
+                let currentVal: number | null = null;
+                let unit = '%';
 
-                if (check.check_type === 'cpu' && metrics.cpu && check.thresholds.critical) {
-                    if (metrics.cpu > check.thresholds.critical) {
-                        isTriggered = true;
-                        alertMessage = `CRITICAL: CPU usage on ${device.name} is ${metrics.cpu.toFixed(1)}% (Threshold: ${check.thresholds.critical}%)`;
+                if (check.check_type === 'cpu') {
+                    currentVal = metrics.cpu_usage;
+                } else if (check.check_type === 'memory') {
+                    currentVal = metrics.memory_usage;
+                } else if (check.check_type === 'sip' && metrics.extra?.contacts) {
+                    unit = 'ms';
+                    const contact = metrics.extra.contacts.find((c: any) => c.aor === check.target);
+                    if (contact && contact.rttMs) {
+                        currentVal = contact.rttMs;
+                    } else if (contact && contact.status === 'Unavail') {
+                        // High penalty for Unavailable
+                        currentVal = 9999;
+                    }
+                } else if (check.check_type === 'bandwidth' && metrics.extra?.interfaces) {
+                    unit = 'bps';
+                    const iface = metrics.extra.interfaces.find((i: any) => i.name === check.target);
+                    if (iface) {
+                        currentVal = Math.max(iface.rx_bps, iface.tx_bps);
                     }
                 }
 
-                if (check.check_type === 'memory' && metrics.memory && check.thresholds.critical) {
-                    if (metrics.memory > check.thresholds.critical) {
-                        isTriggered = true;
-                        alertMessage = `CRITICAL: Memory usage on ${device.name} is ${metrics.memory.toFixed(1)}% (Threshold: ${check.thresholds.critical}%)`;
-                    }
+                if (currentVal === null) continue;
+
+                let severity: 'critical' | 'warning' | null = null;
+                if (check.thresholds.critical && currentVal >= check.thresholds.critical) {
+                    severity = 'critical';
+                } else if (check.thresholds.attention && currentVal >= check.thresholds.attention) {
+                    severity = 'warning';
                 }
 
-                if (isTriggered) {
-                    await this.processAlert(device, check, alertMessage);
+                if (severity) {
+                    const alertMessage = `${severity.toUpperCase()}: ${check.check_type.toUpperCase()} on ${device.hostname || device.device_id} is ${currentVal.toFixed(1)}${unit} (Target: ${check.target || 'System'})`;
+                    await this.processAlert(device, check, severity, alertMessage);
+                } else {
+                    // Potential recovery
+                    await this.checkRecovery(device, check);
                 }
             }
         } catch (err) {
@@ -38,31 +58,35 @@ export class AlertingEngine {
         }
     }
 
-    private static async processAlert(device: any, check: any, message: string) {
-        // Check for existing unresolved alert
-        const existingAlert = await Alert.findOne({
+    private static async processAlert(device: any, check: any, severity: 'critical' | 'warning', message: string) {
+        const cooldownMs = (check.notification_frequency || 60) * 60 * 1000;
+
+        const lastAlert = await Alert.findOne({
             device_id: device.device_id,
             check_id: check._id,
-            resolved: false
-        });
+        }).sort({ created_at: -1 });
 
-        if (existingAlert) return; // Don't spam alerts
+        // If active unresolved alert exists, check cooldown
+        if (lastAlert && !lastAlert.resolved) {
+            const timeSinceLast = Date.now() - new Date(lastAlert.created_at).getTime();
+            if (timeSinceLast < cooldownMs) return; // Still in cooldown
+        }
 
         const alert = new Alert({
             device_id: device.device_id,
             check_id: check._id,
-            severity: 'critical',
+            severity,
             message,
         });
 
         await alert.save();
 
-        // Trigger notification using stored settings
+        // Trigger notification
         const SystemSettings = (await import('../models/SystemSettings')).default;
         const settings = await SystemSettings.findOne();
 
         await NotificationService.send({
-            subject: `IoTMonitor Alert: ${device.name}`,
+            subject: `IoTMonitor ALERT [${severity.toUpperCase()}]: ${device.hostname || device.device_id}`,
             message,
             channels: ['email', 'slack'],
             recipients: {
@@ -70,5 +94,28 @@ export class AlertingEngine {
                 slackWebhook: settings?.notification_slack_webhook || process.env.SLACK_WEBHOOK_URL
             }
         });
+    }
+
+    private static async checkRecovery(device: any, check: any) {
+        const lastAlert = await Alert.findOne({
+            device_id: device.device_id,
+            check_id: check._id,
+            resolved: false
+        });
+
+        if (lastAlert) {
+            lastAlert.resolved = true;
+            await lastAlert.save();
+
+            const recoveryMsg = `RECOVERY: ${check.check_type.toUpperCase()} on ${device.hostname || device.device_id} has returned to normal levels.`;
+
+            // Explicitly notify on restoration if desired
+            await NotificationService.send({
+                subject: `IoTMonitor RECOVERY: ${device.hostname || device.device_id}`,
+                message: recoveryMsg,
+                channels: ['email', 'slack'],
+                recipients: {} // NotificationService will use defaults
+            });
+        }
     }
 }
