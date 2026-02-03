@@ -25,12 +25,18 @@ export class NotificationService {
     static async send(options: NotificationOptions) {
         const promises = [];
 
+        const slackUrl = options.recipients.slackWebhook || process.env.SLACK_WEBHOOK_URL;
+
         if (options.channels.includes('email') && options.recipients.email) {
             promises.push(this.sendEmail(options.recipients.email, options.subject, options.message));
         }
 
-        if (options.channels.includes('slack') && options.recipients.slackWebhook) {
-            promises.push(this.sendSlack(options.recipients.slackWebhook, options.message));
+        if (options.channels.includes('slack')) {
+            if (slackUrl) {
+                promises.push(this.sendSlack(slackUrl, options.message));
+            } else {
+                console.warn('[NotificationService] Slack channel requested but no webhook configured.');
+            }
         }
 
         await Promise.allSettled(promises);

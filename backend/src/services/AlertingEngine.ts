@@ -75,6 +75,7 @@ export class AlertingEngine {
 
                 if (severity) {
                     const alertMessage = `${severity.toUpperCase()}: ${check.check_type.toUpperCase()} on ${device.hostname || device.device_id} is ${currentVal.toFixed(1)}${unit} (Target: ${check.target || 'System'})`;
+                    console.log('[Alert] Trigger', { device: device.device_id, type: check.check_type, severity, value: currentVal, thresholds });
                     await this.processAlert(device, check, severity, alertMessage);
                 } else {
                     // Potential recovery
