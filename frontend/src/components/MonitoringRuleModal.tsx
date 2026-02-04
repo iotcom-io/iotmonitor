@@ -11,17 +11,19 @@ interface MonitoringRuleModalProps {
 }
 
 export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, latestMetrics }: MonitoringRuleModalProps) => {
-    const [formData, setFormData] = useState(initialData || {
+    const defaultData = {
         check_type: 'cpu',
         target: '',
-        thresholds: {
-            attention: 70,
-            critical: 90
-        },
+        thresholds: { attention: 70, critical: 90 },
         notification_frequency: 15,
         notification_recipients: [],
         enabled: true
-    });
+    };
+    const [formData, setFormData] = useState(initialData || defaultData);
+
+    React.useEffect(() => {
+        setFormData(initialData || defaultData);
+    }, [initialData, isOpen]);
 
     if (!isOpen) return null;
 

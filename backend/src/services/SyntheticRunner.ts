@@ -1,6 +1,7 @@
 import SyntheticCheck from '../models/SyntheticCheck';
 import Incident from '../models/Incident';
 import { NotificationService } from './NotificationService';
+import SystemSettings from '../models/SystemSettings';
 import https from 'https';
 import http from 'http';
 import tls from 'tls';
@@ -57,11 +58,17 @@ const ensureIncident = async (check: any, ok: boolean, message: string) => {
                 updates: [{ at: new Date(), message }]
             });
             await incident.save();
+            const settings = await SystemSettings.findOne();
+            const slackGroup = check.slack_webhook_name;
+            const slackWebhook = slackGroup ? settings?.slack_webhooks?.find((w: any) => w.name === slackGroup)?.url : undefined;
             await NotificationService.send({
                 subject: `Synthetic DOWN: ${check.name}`,
                 message,
-                channels: ['email', 'slack'],
-                recipients: {}
+                channels: check.channels?.length ? check.channels : ['slack'],
+                recipients: {
+                    slackWebhook,
+                    customWebhookName: check.custom_webhook_name,
+                }
             });
         } else {
             incident.updates.push({ at: new Date(), message });
@@ -72,11 +79,17 @@ const ensureIncident = async (check: any, ok: boolean, message: string) => {
         incident.resolved_at = new Date();
         incident.updates.push({ at: new Date(), message: 'Recovered' });
         await incident.save();
+        const settings = await SystemSettings.findOne();
+        const slackGroup = check.slack_webhook_name;
+        const slackWebhook = slackGroup ? settings?.slack_webhooks?.find((w: any) => w.name === slackGroup)?.url : undefined;
         await NotificationService.send({
             subject: `Synthetic RECOVERED: ${check.name}`,
             message: 'Service restored',
-            channels: ['email', 'slack'],
-            recipients: {}
+            channels: check.channels?.length ? check.channels : ['slack'],
+            recipients: {
+                slackWebhook,
+                customWebhookName: check.custom_webhook_name,
+            }
         });
     }
 };

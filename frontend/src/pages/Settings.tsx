@@ -1,11 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Shield, Bell, Globe, Loader2, CheckCircle2 } from 'lucide-react';
+import { Save, Shield, Bell, Globe, Loader2, CheckCircle2, Plus, Trash2, Lock } from 'lucide-react';
 import api from '../lib/axios';
 
 export const Settings = () => {
     const [settings, setSettings] = useState<any>({
         mqtt_public_url: '',
+        mqtt_username: '',
+        mqtt_password: '',
         notification_slack_webhook: '',
+        slack_webhooks: [],
+        custom_webhooks: [],
         notification_email_user: '',
         notification_email_pass: ''
     });
@@ -77,6 +81,21 @@ export const Settings = () => {
                         />
                         <p className="text-xs text-slate-500">This address will be baked into all new agents. Remote agents must be able to reach this IP on port 1883.</p>
                     </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                                MQTT Username <Lock size={12} className="text-slate-500" />
+                            </label>
+                            <input className="input-field" value={settings.mqtt_username || ''} onChange={e => setSettings({ ...settings, mqtt_username: e.target.value })} />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                                MQTT Password <Lock size={12} className="text-slate-500" />
+                            </label>
+                            <input type="password" className="input-field" value={settings.mqtt_password || ''} onChange={e => setSettings({ ...settings, mqtt_password: e.target.value })} />
+                        </div>
+                    </div>
                 </div>
 
                 <div className="card space-y-6">
@@ -95,6 +114,87 @@ export const Settings = () => {
                                 className="w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-3 text-white outline-none focus:border-primary-500/50"
                                 placeholder="https://hooks.slack.com/services/..."
                             />
+                        </div>
+
+                        <div className="space-y-3">
+                            <label className="text-sm font-medium text-slate-400 uppercase tracking-wider">Slack Webhook Groups</label>
+                            <p className="text-xs text-slate-500">Add multiple webhook URLs; the first is used by default unless overridden by device or rule.</p>
+                            {settings.slack_webhooks?.map((w: any, idx: number) => (
+                                <div key={idx} className="flex gap-2">
+                                    <input
+                                        className="input-field flex-1"
+                                        placeholder="Name"
+                                        value={w.name}
+                                        onChange={e => {
+                                            const list = [...settings.slack_webhooks];
+                                            list[idx] = { ...list[idx], name: e.target.value };
+                                            setSettings({ ...settings, slack_webhooks: list });
+                                        }}
+                                    />
+                                    <input
+                                        className="input-field flex-[2]"
+                                        placeholder="https://hooks.slack.com/services/..."
+                                        value={w.url}
+                                        onChange={e => {
+                                            const list = [...settings.slack_webhooks];
+                                            list[idx] = { ...list[idx], url: e.target.value };
+                                            setSettings({ ...settings, slack_webhooks: list });
+                                        }}
+                                    />
+                                    <button
+                                        type="button"
+                                        className="icon-btn text-red-400"
+                                        onClick={() => {
+                                            const list = settings.slack_webhooks.filter((_: any, i: number) => i !== idx);
+                                            setSettings({ ...settings, slack_webhooks: list });
+                                        }}
+                                    >
+                                        <Trash2 size={16} />
+                                    </button>
+                                </div>
+                            ))}
+                            <button
+                                type="button"
+                                className="btn-secondary flex items-center gap-2"
+                                onClick={() => setSettings({ ...settings, slack_webhooks: [...(settings.slack_webhooks || []), { name: '', url: '' }] })}
+                            >
+                                <Plus size={14} /> Add Slack Webhook
+                            </button>
+                        </div>
+
+                        <div className="space-y-3">
+                            <label className="text-sm font-medium text-slate-400 uppercase tracking-wider">Custom Webhooks / APIs</label>
+                            <p className="text-xs text-slate-500">Triggered on alerts. Use {{message}} in body.</p>
+                            {settings.custom_webhooks?.map((w: any, idx: number) => (
+                                <div key={idx} className="p-3 bg-white/5 border border-white/10 rounded-lg space-y-2">
+                                    <div className="flex gap-2">
+                                        <input className="input-field flex-1" placeholder="Name" value={w.name} onChange={e => {
+                                            const list = [...settings.custom_webhooks]; list[idx] = { ...list[idx], name: e.target.value }; setSettings({ ...settings, custom_webhooks: list });
+                                        }} />
+                                        <input className="input-field flex-[2]" placeholder="https://api.example.com/hook" value={w.url} onChange={e => {
+                                            const list = [...settings.custom_webhooks]; list[idx] = { ...list[idx], url: e.target.value }; setSettings({ ...settings, custom_webhooks: list });
+                                        }} />
+                                        <select className="input-field w-28" value={w.method || 'POST'} onChange={e => {
+                                            const list = [...settings.custom_webhooks]; list[idx] = { ...list[idx], method: e.target.value }; setSettings({ ...settings, custom_webhooks: list });
+                                        }}>
+                                            <option>POST</option><option>GET</option><option>PUT</option><option>DELETE</option>
+                                        </select>
+                                        <button type="button" className="icon-btn text-red-400" onClick={() => {
+                                            const list = settings.custom_webhooks.filter((_: any, i: number) => i !== idx);
+                                            setSettings({ ...settings, custom_webhooks: list });
+                                        }}><Trash2 size={16} /></button>
+                                    </div>
+                                    <textarea className="input-field w-full text-xs" rows={3} placeholder='{"message":"{{message}}"}' value={w.body || ''} onChange={e => {
+                                        const list = [...settings.custom_webhooks]; list[idx] = { ...list[idx], body: e.target.value }; setSettings({ ...settings, custom_webhooks: list });
+                                    }} />
+                                    <textarea className="input-field w-full text-xs" rows={2} placeholder='{"Authorization":"Bearer token"}' value={w.headers ? JSON.stringify(w.headers) : ''} onChange={e => {
+                                        const list = [...settings.custom_webhooks]; list[idx] = { ...list[idx], headers: e.target.value ? JSON.parse(e.target.value) : {} }; setSettings({ ...settings, custom_webhooks: list });
+                                    }} />
+                                </div>
+                            ))}
+                            <button type="button" className="btn-secondary flex items-center gap-2" onClick={() => setSettings({ ...settings, custom_webhooks: [...(settings.custom_webhooks || []), { name: '', url: '', method: 'POST', headers: {}, body: '' }] })}>
+                                <Plus size={14} /> Add Custom Webhook
+                            </button>
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

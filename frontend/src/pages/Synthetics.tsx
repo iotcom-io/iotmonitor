@@ -1,14 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import api from '../lib/axios';
-import { Globe, Plus, RefreshCw, ShieldAlert, CheckCircle2, X } from 'lucide-react';
+import { Globe, Plus, RefreshCw, ShieldAlert, CheckCircle2, X, Pause, Play, Trash2, Edit3 } from 'lucide-react';
 
 const typeLabels: any = {
     http: 'HTTP',
     ssl: 'SSL Expiry',
 };
 
-const NewCheckModal = ({ isOpen, onClose, onSaved }: any) => {
-    const [form, setForm] = useState<any>({
+const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
+    const blank = {
         name: '',
         type: 'http',
         url: '',
@@ -17,13 +17,23 @@ const NewCheckModal = ({ isOpen, onClose, onSaved }: any) => {
         expected_status: 200,
         must_include: '',
         ssl_expiry_days: 14,
-    });
+        channels: ['slack'],
+        slack_webhook_name: '',
+        custom_webhook_name: ''
+    };
+    const [form, setForm] = useState<any>(initial || blank);
     const [saving, setSaving] = useState(false);
+
+    useEffect(() => { setForm(initial || blank); }, [initial, isOpen]);
 
     const save = async () => {
         setSaving(true);
         try {
-            await api.post('/synthetics', form);
+            if (form._id) {
+                await api.put(`/synthetics/${form._id}`, form);
+            } else {
+                await api.post('/synthetics', form);
+            }
             onSaved();
             onClose();
         } finally {
@@ -34,36 +44,49 @@ const NewCheckModal = ({ isOpen, onClose, onSaved }: any) => {
     if (!isOpen) return null;
     return (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur flex items-center justify-center p-4">
-            <div className="bg-dark-surface border border-dark-border rounded-2xl w-full max-w-lg p-6 space-y-4">
+            <div className="bg-dark-surface border border-dark-border rounded-2xl w-full max-w-2xl p-6 space-y-4">
                 <div className="flex justify-between items-center">
-                    <h3 className="text-xl font-bold text-white">New Synthetic Check</h3>
+                    <h3 className="text-xl font-bold text-white">{form._id ? 'Edit Synthetic Check' : 'New Synthetic Check'}</h3>
                     <button className="text-slate-500 hover:text-white" onClick={onClose}><X size={20} /></button>
                 </div>
-                <div className="space-y-3">
-                    <label className="text-sm text-slate-400">Name</label>
-                    <input className="input-field" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
-                    <label className="text-sm text-slate-400">URL</label>
-                    <input className="input-field" value={form.url} onChange={e => setForm({ ...form, url: e.target.value })} placeholder="https://example.com/health" />
-                    <label className="text-sm text-slate-400">Type</label>
-                    <select className="input-field" value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}>
-                        <option value="http">HTTP</option>
-                        <option value="ssl">SSL Expiry</option>
-                    </select>
+                <div className="space-y-4">
+                    <div className="grid md:grid-cols-2 gap-3">
+                        <div className="space-y-2">
+                            <label className="text-sm text-slate-400">Name</label>
+                            <input className="input-field" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-sm text-slate-400">URL</label>
+                            <input className="input-field" value={form.url} onChange={e => setForm({ ...form, url: e.target.value })} placeholder="https://example.com/health" />
+                        </div>
+                    </div>
+                    <div className="grid md:grid-cols-2 gap-3">
+                        <div className="space-y-2">
+                            <label className="text-sm text-slate-400">Type</label>
+                            <select className="input-field" value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}>
+                                <option value="http">HTTP</option>
+                                <option value="ssl">SSL Expiry</option>
+                            </select>
+                        </div>
+                        {form.type === 'http' ? (
+                            <div className="space-y-2">
+                                <label className="text-sm text-slate-400">Expected Status</label>
+                                <input className="input-field" type="number" value={form.expected_status} onChange={e => setForm({ ...form, expected_status: parseInt(e.target.value) })} />
+                            </div>
+                        ) : (
+                            <div className="space-y-2">
+                                <label className="text-sm text-slate-400">Alert when days-to-expiry ≤</label>
+                                <input className="input-field" type="number" value={form.ssl_expiry_days} onChange={e => setForm({ ...form, ssl_expiry_days: parseInt(e.target.value) })} />
+                            </div>
+                        )}
+                    </div>
                     {form.type === 'http' && (
-                        <>
-                            <label className="text-sm text-slate-400">Expected Status</label>
-                            <input className="input-field" type="number" value={form.expected_status} onChange={e => setForm({ ...form, expected_status: parseInt(e.target.value) })} />
+                        <div className="space-y-2">
                             <label className="text-sm text-slate-400">Must include (optional)</label>
                             <input className="input-field" value={form.must_include} onChange={e => setForm({ ...form, must_include: e.target.value })} placeholder="e.g. OK" />
-                        </>
+                        </div>
                     )}
-                    {form.type === 'ssl' && (
-                        <>
-                            <label className="text-sm text-slate-400">Alert when days-to-expiry ≤</label>
-                            <input className="input-field" type="number" value={form.ssl_expiry_days} onChange={e => setForm({ ...form, ssl_expiry_days: parseInt(e.target.value) })} />
-                        </>
-                    )}
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid md:grid-cols-2 gap-3">
                         <div>
                             <label className="text-sm text-slate-400">Interval (s)</label>
                             <input className="input-field" type="number" value={form.interval} onChange={e => setForm({ ...form, interval: parseInt(e.target.value) })} />
@@ -71,6 +94,31 @@ const NewCheckModal = ({ isOpen, onClose, onSaved }: any) => {
                         <div>
                             <label className="text-sm text-slate-400">Timeout (ms)</label>
                             <input className="input-field" type="number" value={form.timeout} onChange={e => setForm({ ...form, timeout: parseInt(e.target.value) })} />
+                        </div>
+                    </div>
+                    <div className="space-y-2">
+                        <label className="text-sm text-slate-400">Channels</label>
+                        <div className="flex gap-3 text-sm text-white">
+                            {['slack', 'email', 'custom'].map(ch => (
+                                <label key={ch} className="flex items-center gap-2">
+                                    <input type="checkbox" checked={form.channels?.includes(ch)} onChange={e => {
+                                        const set = new Set(form.channels || []);
+                                        e.target.checked ? set.add(ch) : set.delete(ch);
+                                        setForm({ ...form, channels: Array.from(set) });
+                                    }} />
+                                    {ch.toUpperCase()}
+                                </label>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="grid md:grid-cols-2 gap-3">
+                        <div className="space-y-2">
+                            <label className="text-sm text-slate-400">Slack Webhook Name (optional)</label>
+                            <input className="input-field" value={form.slack_webhook_name || ''} onChange={e => setForm({ ...form, slack_webhook_name: e.target.value })} placeholder="matches Settings group name" />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-sm text-slate-400">Custom Webhook Name (optional)</label>
+                            <input className="input-field" value={form.custom_webhook_name || ''} onChange={e => setForm({ ...form, custom_webhook_name: e.target.value })} placeholder="matches Settings custom webhook name" />
                         </div>
                     </div>
                 </div>
@@ -87,6 +135,7 @@ export const Synthetics = () => {
     const [checks, setChecks] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [modalOpen, setModalOpen] = useState(false);
+    const [editing, setEditing] = useState<any>(null);
 
     const fetchChecks = async () => {
         setLoading(true);
@@ -112,7 +161,7 @@ export const Synthetics = () => {
                 </div>
                 <div className="flex gap-2">
                     <button className="icon-btn" onClick={fetchChecks}><RefreshCw size={18} /></button>
-                    <button className="btn-primary flex items-center gap-2" onClick={() => setModalOpen(true)}>
+                    <button className="btn-primary flex items-center gap-2" onClick={() => { setEditing(null); setModalOpen(true); }}>
                         <Plus size={16} /> New Check
                     </button>
                 </div>
@@ -120,7 +169,7 @@ export const Synthetics = () => {
             {loading ? <div className="card">Loading...</div> : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {checks.map((c) => (
-                        <div key={c._id} className="card border border-white/10">
+                        <div key={c._id} className="card border border-white/10 space-y-2">
                             <div className="flex justify-between items-center mb-2">
                                 <h3 className="text-lg font-bold text-white">{c.name}</h3>
                                 <span className={`px-2 py-0.5 rounded text-xs font-bold ${c.last_status === 'ok' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-red-500/20 text-red-300'}`}>
@@ -131,12 +180,28 @@ export const Synthetics = () => {
                             <p className="text-slate-500 text-xs mt-1">{typeLabels[c.type] || c.type}</p>
                             <p className="text-slate-500 text-xs mt-2">Interval: {c.interval || 300}s · Timeout: {c.timeout || 8000}ms</p>
                             <p className="text-slate-500 text-xs">Last: {c.last_run ? new Date(c.last_run).toLocaleTimeString() : 'never'} — {c.last_message || ''}</p>
+                            <div className="flex gap-2 text-xs">
+                                <span className="px-2 py-0.5 rounded bg-white/5 text-slate-300">Channels: {(c.channels || ['slack']).join(', ')}</span>
+                                {c.slack_webhook_name && <span className="px-2 py-0.5 rounded bg-white/5 text-slate-300">Slack: {c.slack_webhook_name}</span>}
+                                {c.custom_webhook_name && <span className="px-2 py-0.5 rounded bg-white/5 text-slate-300">Custom: {c.custom_webhook_name}</span>}
+                            </div>
+                            <div className="flex gap-2 pt-2">
+                                <button className="icon-btn" onClick={async () => {
+                                    await api.put(`/synthetics/${c._id}`, { enabled: !c.enabled });
+                                    fetchChecks();
+                                }}>{c.enabled ? <Pause size={14} /> : <Play size={14} />}</button>
+                                <button className="icon-btn" onClick={() => { setEditing(c); setModalOpen(true); }}><Edit3 size={14} /></button>
+                                <button className="icon-btn text-red-400" onClick={async () => {
+                                    await api.delete(`/synthetics/${c._id}`);
+                                    fetchChecks();
+                                }}><Trash2 size={14} /></button>
+                            </div>
                         </div>
                     ))}
                     {checks.length === 0 && <div className="card text-slate-400">No checks yet. Create one.</div>}
                 </div>
             )}
-            <NewCheckModal isOpen={modalOpen} onClose={() => setModalOpen(false)} onSaved={fetchChecks} />
+            <NewCheckModal isOpen={modalOpen} onClose={() => setModalOpen(false)} onSaved={fetchChecks} initial={editing} />
         </div>
     );
 };

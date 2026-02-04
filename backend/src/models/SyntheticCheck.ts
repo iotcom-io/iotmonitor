@@ -14,6 +14,9 @@ export interface ISyntheticCheck extends Document {
     expected_status?: number;
     must_include?: string;
     ssl_expiry_days?: number; // alert when <= this many days
+    channels?: string[];
+    slack_webhook_name?: string;
+    custom_webhook_name?: string;
     enabled: boolean;
     last_run?: Date;
     last_status?: 'ok' | 'fail';
@@ -34,6 +37,9 @@ const SyntheticCheckSchema: Schema = new Schema({
     expected_status: { type: Number, default: 200 },
     must_include: { type: String },
     ssl_expiry_days: { type: Number, default: 14 },
+    channels: [{ type: String }],
+    slack_webhook_name: { type: String },
+    custom_webhook_name: { type: String },
     enabled: { type: Boolean, default: true },
     last_run: { type: Date },
     last_status: { type: String, enum: ['ok', 'fail'] },

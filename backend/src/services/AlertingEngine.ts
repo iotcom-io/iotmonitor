@@ -114,15 +114,17 @@ export class AlertingEngine {
         await alert.save();
 
         // Trigger notification using device-specific webhook or system defaults
-        const slackWebhook = device.notification_slack_webhook || settings?.notification_slack_webhook || process.env.SLACK_WEBHOOK_URL;
+        const slackWebhook = device.notification_slack_webhook || settings?.notification_slack_webhook || settings?.slack_webhooks?.[0]?.url || process.env.SLACK_WEBHOOK_URL;
+        const customWebhookName = check.config?.custom_webhook_name;
 
         await NotificationService.send({
             subject: `IoTMonitor ALERT [${severity.toUpperCase()}]: ${device.hostname || device.device_id}`,
             message,
-            channels: ['email', 'slack'],
+            channels: ['email', 'slack', ...(customWebhookName ? ['custom'] : [])],
             recipients: {
                 email: settings?.notification_email_user || 'admin@company.com',
-                slackWebhook
+                slackWebhook,
+                customWebhookName
             }
         });
     }

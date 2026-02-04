@@ -473,7 +473,7 @@ export const DeviceDetail = () => {
                 <div className="space-y-6">
                     <div className="flex justify-between items-center">
                         <h3 className="text-xl font-bold text-white">Monitoring Rules</h3>
-                        <button onClick={() => setIsModalOpen(true)} className="btn-primary flex items-center gap-2">
+                        <button onClick={() => { setEditingCheck(null); setIsModalOpen(true); }} className="btn-primary flex items-center gap-2">
                             <CheckCircle2 size={18} />
                             Add New Rule
                         </button>

@@ -5,12 +5,14 @@ import SystemSettings from '../models/SystemSettings';
 interface NotificationOptions {
     subject: string;
     message: string;
-    channels: ('email' | 'slack' | 'whatsapp')[];
+    channels: ('email' | 'slack' | 'whatsapp' | 'custom')[];
     recipients: {
         email?: string;
         slackWebhook?: string;
+        customWebhookName?: string;
         phone?: string;
     };
+    deviceSlack?: string;
 }
 
 export class NotificationService {
@@ -26,10 +28,11 @@ export class NotificationService {
     static async send(options: NotificationOptions) {
         const promises = [];
 
-        let slackUrl = options.recipients.slackWebhook || process.env.SLACK_WEBHOOK_URL;
+        const settings = await SystemSettings.findOne();
+
+        let slackUrl = options.recipients.slackWebhook || options.deviceSlack || process.env.SLACK_WEBHOOK_URL;
         if (!slackUrl && options.channels.includes('slack')) {
-            const settings = await SystemSettings.findOne();
-            slackUrl = settings?.notification_slack_webhook;
+            slackUrl = settings?.notification_slack_webhook || settings?.slack_webhooks?.[0]?.url;
         }
 
         if (options.channels.includes('email') && options.recipients.email) {
@@ -42,6 +45,10 @@ export class NotificationService {
             } else {
                 console.warn('[NotificationService] Slack channel requested but no webhook configured.');
             }
+        }
+
+        if (options.channels.includes('custom') && options.recipients.customWebhookName) {
+            promises.push(this.sendCustom(options.recipients.customWebhookName, options.message, settings));
         }
 
         await Promise.allSettled(promises);
@@ -67,6 +74,25 @@ export class NotificationService {
             console.log('Slack notification sent');
         } catch (err) {
             console.error('Failed to send Slack message:', err);
+        }
+    }
+
+    private static async sendCustom(name: string, text: string, settings: any) {
+        try {
+            const target = settings?.custom_webhooks?.find((c: any) => c.name === name);
+            if (!target) {
+                console.warn(`[NotificationService] custom webhook '${name}' not found`);
+                return;
+            }
+            await axios.request({
+                url: target.url,
+                method: target.method || 'POST',
+                headers: target.headers || { 'Content-Type': 'application/json' },
+                data: target.body ? target.body.replace('{{message}}', text) : { message: text },
+            });
+            console.log(`Custom webhook '${name}' sent`);
+        } catch (err) {
+            console.error('Failed to send custom webhook:', err);
         }
     }
 }
