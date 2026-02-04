@@ -21,7 +21,8 @@ router.post('/:id/resolve', async (req, res) => {
     if (!incident) return res.status(404).json({ message: 'Not found' });
     incident.status = 'resolved';
     incident.resolved_at = new Date();
-    incident.updates.push({ at: new Date(), message: req.body.message || 'Resolved manually' } as any);
+    const note = (req.body && req.body.message) ? req.body.message : 'Resolved manually';
+    incident.updates.push({ at: new Date(), message: note } as any);
     await incident.save();
     res.json(incident);
 });
