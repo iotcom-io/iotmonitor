@@ -7,6 +7,11 @@ interface Device {
     status: 'online' | 'offline' | 'warning';
     last_seen: string;
     monitoring_enabled?: boolean;
+    config?: {
+        cpu_usage?: number;
+        disk_usage?: number;
+        [key: string]: any;
+    };
 }
 
 interface DeviceState {
@@ -16,6 +21,7 @@ interface DeviceState {
     updateDeviceStatus: (deviceId: string, status: 'online' | 'offline' | 'warning') => void;
     deleteDevice: (deviceId: string) => Promise<void>;
     toggleMonitoring: (deviceId: string) => Promise<void>;
+    initSocket: () => void;
 }
 
 export const useDeviceStore = create<DeviceState>((set, get) => ({
