@@ -17,13 +17,21 @@ const StatCard = ({ icon: Icon, label, value, color, subvalue }: { icon: any, la
 import { useDeviceStore } from '../store/useDeviceStore';
 
 export const Dashboard = () => {
-    const { devices, fetchDevices } = useDeviceStore();
+    const { devices, fetchDevices, initSocket } = useDeviceStore();
 
     useEffect(() => {
         fetchDevices();
+        initSocket();
     }, []);
 
     const onlineCount = devices.filter(d => d.status === 'online').length;
+
+    // Calculate Averages
+    const totalCpu = devices.reduce((acc, d) => acc + (d.config?.cpu_usage || 0), 0);
+    const avgCpu = devices.length ? (totalCpu / devices.length).toFixed(1) : '0';
+
+    const totalDisk = devices.reduce((acc, d) => acc + (d.config?.disk_usage || 0), 0);
+    const avgDisk = devices.length ? (totalDisk / devices.length).toFixed(1) : '0';
 
     return (
         <div className="space-y-8">
@@ -58,13 +66,13 @@ export const Dashboard = () => {
                 <StatCard
                     icon={Cpu}
                     label="Avg CPU Usage"
-                    value="24.8%"
+                    value={`${avgCpu}%`}
                     color="emerald"
                 />
                 <StatCard
                     icon={HardDrive}
                     label="Avg Disk Usage"
-                    value="62.1%"
+                    value={`${avgDisk}%`}
                     color="amber"
                 />
             </div>

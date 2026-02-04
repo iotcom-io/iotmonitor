@@ -195,6 +195,19 @@ client.on('message', async (topic, message) => {
 
                 const { AlertingEngine } = await import('./AlertingEngine');
                 await AlertingEngine.evaluate(device_id, payload, check_type);
+
+                // Notify Frontend via Socket.IO
+                try {
+                    const { getIO } = await import('./socket');
+                    const io = getIO();
+                    io.emit('device:update', {
+                        device_id,
+                        status: 'online', // Implicitly online if sending metrics
+                        metrics: payload
+                    });
+                } catch (socketErr) {
+                    console.error('[MQTT] Socket Emit Error:', socketErr);
+                }
             }
         }
     } catch (err) {

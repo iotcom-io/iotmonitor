@@ -47,5 +47,27 @@ export const useDeviceStore = create<DeviceState>((set, get) => ({
         set(state => ({
             devices: state.devices.map(d => d.device_id === deviceId ? { ...d, monitoring_enabled: newStatus } : d)
         }));
+    },
+    initSocket: () => {
+        // Dynamic import to avoid SSR issues if we ever go there, but also cleaner separation
+        import('../lib/socket').then(({ socket }) => {
+            if (!socket.connected) {
+                socket.connect();
+            }
+
+            socket.off('device:update'); // Prevent duplicate listeners
+            socket.on('device:update', (data: any) => {
+                const { device_id, status, metrics } = data;
+                set(state => ({
+                    devices: state.devices.map(d => {
+                        if (d.device_id === device_id) {
+                            // Merge metrics if available (this is partial since IStore doesn't fully type 'metrics' yet)
+                            return { ...d, status: status || d.status, last_seen: new Date().toISOString() };
+                        }
+                        return d;
+                    })
+                }));
+            });
+        });
     }
 }));

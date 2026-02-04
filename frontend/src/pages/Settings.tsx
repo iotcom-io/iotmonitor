@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Save, Shield, Bell, Globe, Loader2, CheckCircle2, Plus, Trash2, Lock } from 'lucide-react';
 import api from '../lib/axios';
+import { ConfirmationModal } from '../components/ConfirmationModal';
 
 export const Settings = () => {
     const [settings, setSettings] = useState<any>({
@@ -16,6 +17,45 @@ export const Settings = () => {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [saved, setSaved] = useState(false);
+
+    // Confirmation Modal State
+    const [confirmModal, setConfirmModal] = useState({
+        isOpen: false,
+        title: '',
+        message: '',
+        onConfirm: () => { },
+        isDangerous: false
+    });
+
+    const closeConfirmModal = () => setConfirmModal(prev => ({ ...prev, isOpen: false }));
+
+    const handleDeleteSlack = (idx: number) => {
+        setConfirmModal({
+            isOpen: true,
+            title: 'Delete Slack Webhook?',
+            message: 'Are you sure you want to remove this webhook? This action cannot be undone.',
+            isDangerous: true,
+            onConfirm: () => {
+                const list = settings.slack_webhooks.filter((_: any, i: number) => i !== idx);
+                setSettings((prev: any) => ({ ...prev, slack_webhooks: list }));
+                closeConfirmModal();
+            }
+        });
+    };
+
+    const handleDeleteCustom = (idx: number) => {
+        setConfirmModal({
+            isOpen: true,
+            title: 'Delete Custom Webhook?',
+            message: 'Are you sure you want to remove this webhook configuration? This action cannot be undone.',
+            isDangerous: true,
+            onConfirm: () => {
+                const list = settings.custom_webhooks.filter((_: any, i: number) => i !== idx);
+                setSettings((prev: any) => ({ ...prev, custom_webhooks: list }));
+                closeConfirmModal();
+            }
+        });
+    };
 
     useEffect(() => {
         const fetchSettings = async () => {
@@ -75,7 +115,7 @@ export const Settings = () => {
                             type="text"
                             value={settings.mqtt_public_url}
                             onChange={e => setSettings({ ...settings, mqtt_public_url: e.target.value })}
-                            className="w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-3 text-white outline-none focus:border-primary-500/50"
+                            className="input-field"
                             placeholder="e.g. 157.245.x.x or monitor.mycompany.com"
                             required
                         />
@@ -111,7 +151,7 @@ export const Settings = () => {
                                 type="text"
                                 value={settings.notification_slack_webhook || ''}
                                 onChange={e => setSettings({ ...settings, notification_slack_webhook: e.target.value })}
-                                className="w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-3 text-white outline-none focus:border-primary-500/50"
+                                className="input-field"
                                 placeholder="https://hooks.slack.com/services/..."
                             />
                         </div>
@@ -143,11 +183,8 @@ export const Settings = () => {
                                     />
                                     <button
                                         type="button"
-                                        className="icon-btn text-red-400"
-                                        onClick={() => {
-                                            const list = settings.slack_webhooks.filter((_: any, i: number) => i !== idx);
-                                            setSettings({ ...settings, slack_webhooks: list });
-                                        }}
+                                        className="icon-btn text-red-400 hover:text-red-300 transition-colors p-2"
+                                        onClick={() => handleDeleteSlack(idx)}
                                     >
                                         <Trash2 size={16} />
                                     </button>
@@ -179,10 +216,9 @@ export const Settings = () => {
                                         }}>
                                             <option>POST</option><option>GET</option><option>PUT</option><option>DELETE</option>
                                         </select>
-                                        <button type="button" className="icon-btn text-red-400" onClick={() => {
-                                            const list = settings.custom_webhooks.filter((_: any, i: number) => i !== idx);
-                                            setSettings({ ...settings, custom_webhooks: list });
-                                        }}><Trash2 size={16} /></button>
+                                        <button type="button" className="icon-btn text-red-400 hover:text-red-300 transition-colors p-2" onClick={() => handleDeleteCustom(idx)}>
+                                            <Trash2 size={16} />
+                                        </button>
                                     </div>
                                     <textarea className="input-field w-full text-xs" rows={3} placeholder='{"message":"{{message}}"}' value={w.body || ''} onChange={e => {
                                         const list = [...settings.custom_webhooks]; list[idx] = { ...list[idx], body: e.target.value }; setSettings({ ...settings, custom_webhooks: list });
@@ -204,7 +240,7 @@ export const Settings = () => {
                                     type="text"
                                     value={settings.notification_email_user || ''}
                                     onChange={e => setSettings({ ...settings, notification_email_user: e.target.value })}
-                                    className="w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-3 text-white outline-none focus:border-primary-500/50"
+                                    className="input-field"
                                     placeholder="alerts@mycompany.com"
                                 />
                             </div>
@@ -214,7 +250,7 @@ export const Settings = () => {
                                     type="password"
                                     value={settings.notification_email_pass || ''}
                                     onChange={e => setSettings({ ...settings, notification_email_pass: e.target.value })}
-                                    className="w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-3 text-white outline-none focus:border-primary-500/50"
+                                    className="input-field"
                                     placeholder="••••••••"
                                 />
                             </div>
@@ -248,6 +284,15 @@ export const Settings = () => {
                     <span className="text-slate-100 font-semibold">Security Note:</span> These settings are encrypted at rest and only accessible to authorized administrators. Changing the MQTT host will not affect previously generated agents unless they are manually updated with a new <code className="text-slate-200">config.json</code> file.
                 </p>
             </div>
+
+            <ConfirmationModal
+                isOpen={confirmModal.isOpen}
+                title={confirmModal.title}
+                message={confirmModal.message}
+                onConfirm={confirmModal.onConfirm}
+                onCancel={closeConfirmModal}
+                isDangerous={confirmModal.isDangerous}
+            />
         </div>
     );
 };
