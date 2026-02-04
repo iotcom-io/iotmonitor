@@ -164,7 +164,7 @@ export const Settings = () => {
 
                         <div className="space-y-3">
                             <label className="text-sm font-medium text-slate-400 uppercase tracking-wider">Custom Webhooks / APIs</label>
-                            <p className="text-xs text-slate-500">Triggered on alerts. Use {{message}} in body.</p>
+                            <p className="text-xs text-slate-500">Triggered on alerts. Use &#123;&#123;message&#125;&#125; in body.</p>
                             {settings.custom_webhooks?.map((w: any, idx: number) => (
                                 <div key={idx} className="p-3 bg-white/5 border border-white/10 rounded-lg space-y-2">
                                     <div className="flex gap-2">
