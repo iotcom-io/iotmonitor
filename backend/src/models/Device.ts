@@ -35,6 +35,7 @@ export interface IDevice extends Document {
         docker?: Date;
         asterisk?: Date;
         network?: Date;
+        [key: string]: Date | undefined;
     };
     notification_slack_webhook?: string;
     // Monitoring overrides

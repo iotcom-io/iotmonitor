@@ -30,10 +30,11 @@ export async function checkOfflineDevices() {
                 if (device.status !== 'offline') {
                     console.log(`Device ${device.name} is offline (last seen: ${device.last_seen})`);
 
-                    // Mark device as offline
-                    device.status = 'offline';
-                    device.consecutive_missed_messages = Math.floor(timeSinceLastMessage / expectedInterval);
-                    await device.save();
+                    // Atomic update to offline status
+                    await Device.findByIdAndUpdate(device._id, {
+                        status: 'offline',
+                        consecutive_missed_messages: Math.floor(timeSinceLastMessage / expectedInterval)
+                    });
 
                     // Trigger offline alert
                     await triggerAlert({
@@ -58,12 +59,13 @@ export async function checkOfflineDevices() {
                 if (device.status === 'offline') {
                     console.log(`Device ${device.name} is back online`);
 
-                    // Mark device as online
-                    device.status = 'online';
-                    device.consecutive_missed_messages = 0;
-                    await device.save();
+                    // Atomic update to online status
+                    await Device.findByIdAndUpdate(device._id, {
+                        status: 'online',
+                        consecutive_missed_messages: 0
+                    });
 
-                    // Resolve offline alert and trigger recovery notification
+                    // Resolve offline alert
                     await resolveAlert({
                         device_id: device._id.toString(),
                         device_name: device.name,
@@ -72,6 +74,34 @@ export async function checkOfflineDevices() {
                             offline_duration_minutes: Math.floor(timeSinceLastMessage / 60000)
                         }
                     });
+                }
+
+                // CHECK ENABLED SERVICES (Partial failure detection)
+                // This is now the ONLY place where service_down alerts are detected (not resolved)
+                if (device.status === 'online' && device.enabled_modules) {
+                    for (const module of device.enabled_modules as string[]) {
+                        if (module === 'system') continue; // Always checked via heartbeat
+
+                        const lastSuccess = (device.last_successful_metrics as any)?.[module];
+                        if (lastSuccess) {
+                            const timeSinceSuccess = now.getTime() - new Date(lastSuccess).getTime();
+
+                            // Trigger alert if service hasn't responded in 2 minutes
+                            if (timeSinceSuccess > 120000) {
+                                await triggerAlert({
+                                    device_id: device._id.toString(),
+                                    device_name: device.name,
+                                    alert_type: 'service_down',
+                                    severity: 'warning',
+                                    specific_service: module,
+                                    details: {
+                                        last_successful: lastSuccess,
+                                        missing_duration_minutes: Math.floor(timeSinceSuccess / 60000)
+                                    }
+                                });
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -86,47 +116,41 @@ export async function checkOfflineDevices() {
  */
 export async function updateDeviceHeartbeat(deviceId: string) {
     try {
+        const now = new Date();
         const device = await Device.findById(deviceId);
         if (!device) return;
 
-        const now = new Date();
+        // Atomic update of last_seen and status
+        let updateData: any = {
+            last_seen: now,
+            consecutive_missed_messages: 0
+        };
 
-        // Update last_seen
-        device.last_seen = now;
-
-        // Maintain rolling window of last 4 timestamps
-        if (!device.last_message_timestamps) {
-            device.last_message_timestamps = [];
-        }
-        device.last_message_timestamps.push(now);
-        if (device.last_message_timestamps.length > 4) {
-            device.last_message_timestamps.shift();
+        const oldStatus = device.status;
+        if (oldStatus === 'offline' || oldStatus === 'not_monitored') {
+            updateData.status = 'online';
+            console.log(`Device ${device.name} is now online (transitioned from ${oldStatus})`);
         }
 
-        // Reset missed messages counter
-        device.consecutive_missed_messages = 0;
-
-        // If device was offline or not monitored, mark it online
-        if (device.status === 'offline' || device.status === 'not_monitored') {
-            console.log(`Device ${device.name} is now online (transitioned from ${device.status})`);
-            const oldStatus = device.status;
-            device.status = 'online';
-
-            await device.save();
-
-            // Resolve offline alert if it was offline
-            if (oldStatus === 'offline') {
-                await resolveAlert({
-                    device_id: device._id.toString(),
-                    device_name: device.name,
-                    alert_type: 'offline',
-                    details: {
-                        recovery_time: now
-                    }
-                });
+        // Maintain rolling window using atomic $push and $slice
+        await Device.findByIdAndUpdate(deviceId, {
+            $set: updateData,
+            $push: {
+                last_message_timestamps: {
+                    $each: [now],
+                    $slice: -4
+                }
             }
-        } else {
-            await device.save();
+        });
+
+        // Resolve offline alert if it was offline
+        if (oldStatus === 'offline') {
+            await resolveAlert({
+                device_id: deviceId,
+                device_name: device.name,
+                alert_type: 'offline',
+                details: { recovery_time: now }
+            });
         }
     } catch (error) {
         console.error('Error updating device heartbeat:', error);
@@ -138,18 +162,15 @@ export async function updateDeviceHeartbeat(deviceId: string) {
  */
 export async function updateServiceMetrics(
     deviceId: string,
-    service: 'system' | 'docker' | 'asterisk' | 'network'
+    service: string
 ) {
     try {
-        const device = await Device.findById(deviceId);
-        if (!device) return;
+        const now = new Date();
+        const updateField = `last_successful_metrics.${service}`;
 
-        if (!device.last_successful_metrics) {
-            device.last_successful_metrics = {};
-        }
-
-        device.last_successful_metrics[service] = new Date();
-        await device.save();
+        await Device.findByIdAndUpdate(deviceId, {
+            $set: { [updateField]: now }
+        });
     } catch (error) {
         console.error('Error updating service metrics:', error);
     }

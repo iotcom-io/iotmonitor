@@ -28,16 +28,17 @@ client.on('message', async (topic, message) => {
             if (!device) return;
 
             // Update heartbeat for ANY device message (status or metrics)
+            // This now handles atomic status transition from offline/not_monitored to online
             await updateDeviceHeartbeat(device._id.toString());
 
             if (type === 'status') {
                 const status = message.toString();
                 const oldStatus = device.status;
 
-                await Device.findOneAndUpdate({ device_id }, { status, last_seen: new Date() });
-
-                // Notify if status changed
+                // Update status if it changed (updateDeviceHeartbeat handled the transition to online if needed)
                 if (oldStatus !== status) {
+                    await Device.findOneAndUpdate({ device_id }, { status, last_seen: new Date() });
+
                     const { NotificationService } = await import('./NotificationService');
                     const settings = await (await import('../models/SystemSettings')).default.findOne();
 
@@ -52,9 +53,7 @@ client.on('message', async (topic, message) => {
                 const check_type = parts[4];
                 const payload = JSON.parse(message.toString());
 
-                // No need to call updateDeviceHeartbeat here anymore as it's called above
-
-                await Device.findOneAndUpdate({ device_id }, { last_seen: new Date() });
+                // Handled above via updateDeviceHeartbeat
 
                 // Telemetry Consolidation Logic
                 const Telemetry = (await import('../models/Telemetry')).default;

@@ -24,7 +24,7 @@ export interface ITelemetry extends Document {
 
 const TelemetrySchema: Schema = new Schema({
     device_id: { type: String, required: true, index: true },
-    timestamp: { type: Date, default: Date.now, index: true },
+    timestamp: { type: Date, default: Date.now },
     cpu_usage: { type: Number, default: 0 },
     cpu_load: { type: Number },
     cpu_per_core: [{ type: Number }],

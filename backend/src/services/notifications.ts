@@ -212,7 +212,8 @@ function buildAlertMessage(alert: IAlertTracking, deviceName: string, isReminder
     let text = `${prefix} ${severityEmoji}\n\n`;
     text += `*Device:* ${deviceName}\n`;
     text += `*Alert:* ${typeDescription}\n`;
-    text += `*Time:* ${new Date(alert.first_triggered).toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })}${duration}`;
+    const triggeredDate = alert.first_triggered instanceof Date ? alert.first_triggered : new Date(alert.first_triggered);
+    text += `*Time:* ${triggeredDate.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })}${duration}`;
 
     if (alert.specific_endpoint) {
         text += `\n*Endpoint:* ${alert.specific_endpoint}`;

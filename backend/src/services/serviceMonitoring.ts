@@ -18,50 +18,21 @@ export async function checkServiceHealth(deviceId: string, receivedMetrics: any)
 
         const now = new Date();
 
-        // Check each enabled module
-        for (const module of device.enabled_modules) {
-            const hasServiceData = checkIfServiceDataPresent(module, receivedMetrics);
+        // Process each incoming metric type
+        for (const module of Object.keys(receivedMetrics)) {
+            // If this module just reported, update its successful timestamp
+            // and resolve any existing "service_down" alerts for it.
+            await updateServiceMetrics(deviceId, module as any);
 
-            if (hasServiceData) {
-                // Service is responding - update last successful metrics
-                await updateServiceMetrics(deviceId, module);
-
-                // Resolve any existing service-down alert
-                await resolveAlert({
-                    device_id: deviceId,
-                    device_name: device.name,
-                    alert_type: 'service_down',
-                    specific_service: module,
-                    details: {
-                        recovery_time: now
-                    }
-                });
-            } else {
-                // Service data is missing
-                // Check if this is a new failure or ongoing
-                const lastSuccess = device.last_successful_metrics?.[module];
-
-                if (lastSuccess) {
-                    const timeSinceSuccess = now.getTime() - new Date(lastSuccess).getTime();
-
-                    // If service hasn't responded in 2 minutes, trigger alert
-                    if (timeSinceSuccess > 120000) { // 2 minutes
-                        console.log(`Service ${module} not responding on device ${device.name}`);
-
-                        await triggerAlert({
-                            device_id: deviceId,
-                            device_name: device.name,
-                            alert_type: 'service_down', severity: 'warning',
-                            specific_service: module,
-                            details: {
-                                last_successful: lastSuccess,
-                                missing_duration_minutes: Math.floor(timeSinceSuccess / 60000),
-                                device_status: device.status
-                            }
-                        });
-                    }
+            await resolveAlert({
+                device_id: deviceId,
+                device_name: device.name,
+                alert_type: 'service_down',
+                specific_service: module,
+                details: {
+                    recovery_time: now
                 }
-            }
+            });
         }
 
         // Apply dynamic threshold rules for generic metrics (CPU, Memory, etc.)
