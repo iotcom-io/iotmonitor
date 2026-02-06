@@ -12,6 +12,12 @@ export const DeviceList = () => {
     const [newName, setNewName] = React.useState('');
     const [newType, setNewType] = React.useState<'server' | 'network_device' | 'website'>('server');
     const [newHostname, setNewHostname] = React.useState('');
+    const [enabledModules, setEnabledModules] = React.useState<string[]>(['system']);
+    // Probe config state
+    const [targetIp, setTargetIp] = React.useState('');
+    const [targetPort, setTargetPort] = React.useState('');
+    const [pingHost, setPingHost] = React.useState('');
+
     const [registering, setRegistering] = React.useState(false);
     const [buildingId, setBuildingId] = React.useState<string | null>(null);
 
@@ -26,18 +32,34 @@ export const DeviceList = () => {
             await api.post('/devices/register', {
                 name: newName,
                 type: newType,
-                hostname: newHostname
+                hostname: newHostname,
+                enabled_modules: enabledModules,
+                probe_config: enabledModules.includes('network') ? {
+                    target_ip: targetIp,
+                    target_port: parseInt(targetPort) || 0,
+                    ping_host: pingHost
+                } : undefined
             });
             await fetchDevices();
             setShowModal(false);
             setNewName('');
             setNewHostname('');
+            setEnabledModules(['system']);
+            setTargetIp('');
+            setTargetPort('');
+            setPingHost('');
         } catch (error) {
             console.error('Registration failed', error);
             alert('Failed to register device');
         } finally {
             setRegistering(false);
         }
+    };
+
+    const toggleModule = (module: string) => {
+        setEnabledModules(prev =>
+            prev.includes(module) ? prev.filter(m => m !== module) : [...prev, module]
+        );
     };
 
     const handleBuild = async (e: React.MouseEvent, deviceId: string) => {
@@ -48,7 +70,7 @@ export const DeviceList = () => {
                 os: 'linux',
                 arch: 'amd64'
             });
-            // Auto-trigger download
+            // Download using the new filename
             const url = `/api/devices/download/${data.binary_id}`;
             window.open(url, '_blank');
         } catch (error) {
@@ -91,7 +113,7 @@ export const DeviceList = () => {
 
             {showModal && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="card max-w-md w-full animate-in fade-in zoom-in duration-200">
+                    <div className="card max-w-lg w-full animate-in fade-in zoom-in duration-200 max-h-[90vh] overflow-y-auto">
                         <h3 className="text-xl font-bold text-white mb-6">Register New Device</h3>
                         <form onSubmit={handleRegister} className="space-y-4">
                             <div className="space-y-2">
@@ -99,7 +121,7 @@ export const DeviceList = () => {
                                 <input
                                     required
                                     type="text"
-                                    className="w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-2 text-white outline-none focus:border-primary-500/50"
+                                    className="input-field"
                                     placeholder="e.g. Production Web 01"
                                     value={newName}
                                     onChange={e => setNewName(e.target.value)}
@@ -108,7 +130,7 @@ export const DeviceList = () => {
                             <div className="space-y-2">
                                 <label className="text-sm font-medium text-slate-300">Device Type</label>
                                 <select
-                                    className="w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-2 text-white outline-none focus:border-primary-500/50"
+                                    className="input-field"
                                     value={newType}
                                     onChange={e => setNewType(e.target.value as any)}
                                 >
@@ -117,12 +139,78 @@ export const DeviceList = () => {
                                     <option value="website">Website/URL</option>
                                 </select>
                             </div>
+
+                            {/* Capabilities / Modules */}
                             <div className="space-y-2">
-                                <label className="text-sm font-medium text-slate-300">Target Host/IP</label>
+                                <label className="text-sm font-medium text-slate-300">Monitoring Modules</label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {[
+                                        { id: 'system', label: 'System Metrics' },
+                                        { id: 'docker', label: 'Docker Containers' },
+                                        { id: 'asterisk', label: 'Asterisk PBX' },
+                                        { id: 'network', label: 'Network Probe' }
+                                    ].map(mod => (
+                                        <div
+                                            key={mod.id}
+                                            onClick={() => toggleModule(mod.id)}
+                                            className={`p-3 rounded-lg border cursor-pointer transition-colors ${enabledModules.includes(mod.id)
+                                                    ? 'bg-primary-500/20 border-primary-500/50 text-white'
+                                                    : 'bg-dark-bg border-dark-border text-slate-400 hover:bg-white/5'
+                                                }`}
+                                        >
+                                            <div className="text-sm font-medium">{mod.label}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Network Probe Config */}
+                            {enabledModules.includes('network') && (
+                                <div className="p-4 rounded-xl bg-white/5 border border-white/10 space-y-4">
+                                    <h4 className="text-sm font-bold text-primary-400 flex items-center gap-2">
+                                        <Wifi size={14} /> Network Probe Configuration
+                                    </h4>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-1">
+                                            <label className="text-xs text-slate-400">Target IP/Host</label>
+                                            <input
+                                                type="text"
+                                                className="input-field text-sm py-1.5"
+                                                placeholder="192.168.1.1"
+                                                value={targetIp}
+                                                onChange={e => setTargetIp(e.target.value)}
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-xs text-slate-400">Target Port</label>
+                                            <input
+                                                type="number"
+                                                className="input-field text-sm py-1.5"
+                                                placeholder="80, 5060..."
+                                                value={targetPort}
+                                                onChange={e => setTargetPort(e.target.value)}
+                                            />
+                                        </div>
+                                        <div className="col-span-2 space-y-1">
+                                            <label className="text-xs text-slate-400">Ping Host (ICMP)</label>
+                                            <input
+                                                type="text"
+                                                className="input-field text-sm py-1.5"
+                                                placeholder="8.8.8.8"
+                                                value={pingHost}
+                                                onChange={e => setPingHost(e.target.value)}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-slate-300">Hostname (for references)</label>
                                 <input
                                     type="text"
-                                    className="w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-2 text-white outline-none focus:border-primary-500/50"
-                                    placeholder="e.g. 192.168.1.10 or app.example.com"
+                                    className="input-field"
+                                    placeholder="e.g. app.example.com"
                                     value={newHostname}
                                     onChange={e => setNewHostname(e.target.value)}
                                 />

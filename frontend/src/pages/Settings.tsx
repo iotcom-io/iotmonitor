@@ -258,6 +258,60 @@ export const Settings = () => {
                     </div>
                 </div>
 
+                <div className="card space-y-6">
+                    <div className="flex items-center gap-3 border-b border-white/5 pb-4">
+                        <Shield className="text-amber-400" size={24} />
+                        <h3 className="text-xl font-bold text-white">Monitoring Strategy</h3>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-3">
+                            <label className="text-sm font-medium text-slate-400 uppercase tracking-wider">Check Interval (Seconds)</label>
+                            <input
+                                type="number"
+                                value={settings.monitoring_check_interval_seconds || 30}
+                                onChange={e => setSettings({ ...settings, monitoring_check_interval_seconds: parseInt(e.target.value) })}
+                                className="input-field"
+                                min="5"
+                                max="3600"
+                            />
+                            <p className="text-xs text-slate-500">How often the server checks for device heartbeats.</p>
+                        </div>
+                        <div className="space-y-3">
+                            <label className="text-sm font-medium text-slate-400 uppercase tracking-wider">Default Offline Multiplier</label>
+                            <input
+                                type="number"
+                                value={settings.default_offline_threshold_multiplier || 4}
+                                onChange={e => setSettings({ ...settings, default_offline_threshold_multiplier: parseInt(e.target.value) })}
+                                className="input-field"
+                                min="1"
+                                max="20"
+                            />
+                            <p className="text-xs text-slate-500">Number of missed messages before marking offline.</p>
+                        </div>
+                        <div className="space-y-3">
+                            <label className="text-sm font-medium text-slate-400 uppercase tracking-wider">Default Repeat Alert (Min)</label>
+                            <input
+                                type="number"
+                                value={settings.default_repeat_interval_minutes || 5}
+                                onChange={e => setSettings({ ...settings, default_repeat_interval_minutes: parseInt(e.target.value) })}
+                                className="input-field"
+                                min="1"
+                            />
+                        </div>
+                        <div className="space-y-3">
+                            <label className="text-sm font-medium text-slate-400 uppercase tracking-wider">Throttling Duration (Min)</label>
+                            <input
+                                type="number"
+                                value={settings.default_throttling_duration_minutes || 60}
+                                onChange={e => setSettings({ ...settings, default_throttling_duration_minutes: parseInt(e.target.value) })}
+                                className="input-field"
+                                min="1"
+                            />
+                        </div>
+                    </div>
+                </div>
+
                 <div className="flex justify-end gap-4 items-center">
                     {saved && (
                         <div className="flex items-center gap-2 text-emerald-400 font-bold animate-fade-in">

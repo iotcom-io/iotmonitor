@@ -73,7 +73,7 @@ export const DeviceDetail = () => {
         if (!confirm('Are you sure you want to delete this monitoring rule?')) return;
         try {
             await api.delete(`/monitoring/${checkId}`);
-            setChecks(checks.filter(c => c._id !== checkId));
+            setChecks(checks.filter((c: any) => c._id !== checkId));
         } catch (error) {
             console.error('Failed to delete monitor check', error);
         }
@@ -82,7 +82,7 @@ export const DeviceDetail = () => {
     const handleToggleCheck = async (check: any) => {
         try {
             const updated = await api.put(`/monitoring/${check._id}`, { enabled: !check.enabled });
-            setChecks(checks.map(c => c._id === check._id ? updated.data : c));
+            setChecks(checks.map((c: any) => c._id === check._id ? updated.data : c));
         } catch (error) {
             console.error('Failed to toggle monitor check', error);
         }
@@ -593,6 +593,220 @@ export const DeviceDetail = () => {
                 </div>
             )}
 
+            {activeTab === 'settings' && (
+                <div className="space-y-6">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div className="card space-y-4">
+                            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                                <Settings size={20} className="text-slate-400" />
+                                General Configuration
+                            </h3>
+                            <div className="space-y-3">
+                                <div className="space-y-1">
+                                    <label className="text-sm font-medium text-slate-300">Device Name</label>
+                                    <input
+                                        type="text"
+                                        className="input-field"
+                                        defaultValue={device.name}
+                                        onBlur={(e) => api.patch(`/devices/${id}`, { name: e.target.value })}
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-sm font-medium text-slate-300">Hostname / IP</label>
+                                    <input
+                                        type="text"
+                                        className="input-field"
+                                        defaultValue={device.hostname}
+                                        onBlur={(e) => api.patch(`/devices/${id}`, { hostname: e.target.value })}
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-sm font-medium text-slate-300">Monitoring Modules</label>
+                                    <div className="flex flex-wrap gap-2 pt-2">
+                                        {['system', 'docker', 'asterisk', 'network'].map(mod => (
+                                            <div key={mod} className={clsx(
+                                                "px-3 py-1 rounded-lg border text-sm font-medium transition-colors cursor-not-allowed opacity-75",
+                                                device.enabled_modules?.includes(mod) || (mod === 'system') // system always enabled by default in backend but maybe not in list
+                                                    ? "bg-primary-500/20 border-primary-500/50 text-white"
+                                                    : "bg-dark-bg border-dark-border text-slate-500"
+                                            )} title="Module selection is fixed after registration">
+                                                {mod}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <p className="text-xs text-slate-500 mt-1">To change modules, please re-register the device or update the agent config.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="card space-y-4">
+                            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                                <Activity size={20} className="text-primary-400" />
+                                Monitoring Overrides
+                            </h3>
+                            <div className="space-y-3">
+                                <div className="space-y-1">
+                                    <label className="text-sm font-medium text-slate-300">Offline Multiplier (Missed Heartbeats)</label>
+                                    <input
+                                        type="number"
+                                        className="input-field"
+                                        defaultValue={device.offline_threshold_multiplier || ''}
+                                        placeholder="Global Default"
+                                        onBlur={(e) => api.patch(`/devices/${id}`, { offline_threshold_multiplier: e.target.value ? parseInt(e.target.value) : null })}
+                                    />
+                                    <p className="text-[10px] text-slate-500">How many missed intervals trigger an offline alert.</p>
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-sm font-medium text-slate-300">Alert Repeat Interval (Min)</label>
+                                    <input
+                                        type="number"
+                                        className="input-field"
+                                        defaultValue={device.repeat_interval_minutes || ''}
+                                        placeholder="Global Default"
+                                        onBlur={(e) => api.patch(`/devices/${id}`, { repeat_interval_minutes: e.target.value ? parseInt(e.target.value) : null })}
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-sm font-medium text-slate-300">Throttling Duration (Min)</label>
+                                    <input
+                                        type="number"
+                                        className="input-field"
+                                        defaultValue={device.throttling_duration_minutes || ''}
+                                        placeholder="Global Default"
+                                        onBlur={(e) => api.patch(`/devices/${id}`, { throttling_duration_minutes: e.target.value ? parseInt(e.target.value) : null })}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        {device.enabled_modules?.includes('asterisk') && (
+                            <div className="card space-y-4">
+                                <div className="flex items-center justify-between">
+                                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                                        <Phone size={20} className="text-indigo-400" />
+                                        SIP Monitoring (Granular)
+                                    </h3>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[10px] text-slate-500 uppercase font-bold">RTT Threshold</span>
+                                        <div className="relative">
+                                            <input
+                                                type="number"
+                                                className="w-20 pl-2 pr-6 py-1 bg-dark-bg border border-dark-border rounded text-xs text-indigo-400 font-mono focus:border-indigo-500 focus:outline-none"
+                                                defaultValue={device.sip_rtt_threshold_ms || 200}
+                                                onBlur={async (e) => {
+                                                    const val = e.target.value ? parseInt(e.target.value) : 200;
+                                                    try {
+                                                        await api.patch(`/devices/${id}`, { sip_rtt_threshold_ms: val });
+                                                        setDevice({ ...device, sip_rtt_threshold_ms: val });
+                                                    } catch (err) {
+                                                        console.error('Failed to update SIP RTT threshold', err);
+                                                    }
+                                                }}
+                                            />
+                                            <span className="absolute right-2 top-1 text-[10px] text-slate-600">ms</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <p className="text-xs text-slate-400">Select specific SIP endpoints/trunks to monitor. If none are selected, all will be monitored.</p>
+                                <div className="space-y-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+                                    {/* Combine registrations and contacts to get all potential endpoints */}
+                                    {Array.from(new Set([
+                                        ...(latest?.extra?.registrations?.map((r: any) => r.name) || []),
+                                        ...(latest?.extra?.contacts?.map((c: any) => c.aor) || [])
+                                    ])).map((endpoint: any) => (
+                                        <div key={endpoint} className="flex items-center justify-between p-2 hover:bg-white/5 rounded-lg transition-colors border border-white/5">
+                                            <span className="text-sm text-slate-200 font-mono">{endpoint}</span>
+                                            <input
+                                                type="checkbox"
+                                                className="w-4 h-4 rounded border-dark-border bg-dark-bg text-primary-600 focus:ring-primary-500 focus:ring-offset-dark-surface"
+                                                checked={device.monitored_sip_endpoints?.includes(endpoint) || false}
+                                                onChange={async (e) => {
+                                                    const current = device.monitored_sip_endpoints || [];
+                                                    const updated = e.target.checked
+                                                        ? [...current, endpoint]
+                                                        : current.filter((item: string) => item !== endpoint);
+
+                                                    try {
+                                                        await api.patch(`/devices/${id}`, { monitored_sip_endpoints: updated });
+                                                        setDevice({ ...device, monitored_sip_endpoints: updated });
+                                                    } catch (err) {
+                                                        console.error('Failed to update monitored SIP endpoints', err);
+                                                    }
+                                                }}
+                                            />
+                                        </div>
+                                    ))}
+                                    {(!latest?.extra?.registrations && !latest?.extra?.contacts) && (
+                                        <p className="text-center py-4 text-slate-500 text-sm italic">No SIP endpoints detected yet. Send metrics from agent to populate this list.</p>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="card space-y-4">
+                            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                                <Bell size={20} className="text-amber-400" />
+                                Notification Rules
+                            </h3>
+                            <div className="space-y-2 p-4 bg-white/5 rounded-xl border border-white/10">
+                                <p className="text-sm text-slate-300 mb-3 font-medium">Alert Triggers</p>
+                                <div className="space-y-2">
+                                    {[
+                                        { id: 'offline', label: 'Device Goes Offline' },
+                                        { id: 'service_down', label: 'Critical Service Down' },
+                                        { id: 'ip_change', label: 'Public IP Change' },
+                                        { id: 'high_load', label: 'High System Load (>90%)' }
+                                    ].map((rule: { id: string, label: string }) => (
+                                        <div key={rule.id} className="flex items-center justify-between p-2 hover:bg-white/5 rounded-lg transition-colors">
+                                            <span className="text-sm text-slate-200">{rule.label}</span>
+                                            <div
+                                                className="w-10 h-5 bg-emerald-500/20 border border-emerald-500/50 rounded-full relative cursor-pointer"
+                                                onClick={(e: React.MouseEvent) => {
+                                                    console.log('Toggle', rule.id);
+                                                }}
+                                            >
+                                                <div className="absolute right-1 top-0.5 w-3.5 h-3.5 bg-emerald-500 rounded-full shadow-lg" />
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="pt-4 border-t border-white/10">
+                                <button
+                                    onClick={async () => {
+                                        try {
+                                            await api.post(`/devices/${id}/test-notification`);
+                                            alert('Test notification sent! Check your configured channels.');
+                                        } catch (e) {
+                                            alert('Failed to send test notification');
+                                        }
+                                    }}
+                                    className="w-full py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 rounded-xl font-bold transition-all flex items-center justify-center gap-2"
+                                >
+                                    <Bell size={18} />
+                                    Send Test Alert
+                                </button>
+                                <p className="text-xs text-slate-500 text-center mt-2">Sends a test message to all configured channels</p>
+                            </div>
+                        </div>
+
+                        <div className="col-span-full card bg-black/40 border-dark-border">
+                            <h3 className="text-lg font-bold text-white mb-2">Agent Installation</h3>
+                            <p className="text-slate-400 text-sm mb-4">Run this command on your server to update or reinstall the agent:</p>
+                            <div className="bg-black/50 p-4 rounded-xl border border-white/10 font-mono text-sm text-slate-300 flex justify-between items-center group">
+                                <code className="break-all">curl -sL {window.location.origin}/install.sh | sudo bash -s -- --token {device.agent_token}</code>
+                                <button
+                                    className="p-2 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white/10 rounded-lg text-white"
+                                    onClick={() => navigator.clipboard.writeText(`curl -sL ${window.location.origin}/install.sh | sudo bash -s -- --token ${device.agent_token}`)}
+                                >
+                                    Copy
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
             <MonitoringRuleModal
                 isOpen={isModalOpen}
                 onClose={() => { setIsModalOpen(false); setEditingCheck(null); }}

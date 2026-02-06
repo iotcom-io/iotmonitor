@@ -71,7 +71,7 @@ router.get('/', async (req: AuthRequest, res) => {
 // Register a new device
 router.post('/register', async (req: AuthRequest, res) => {
     try {
-        const { name, type, hostname } = req.body;
+        const { name, type, hostname, enabled_modules, probe_config } = req.body;
         const device_id = crypto.randomBytes(8).toString('hex');
         const agent_token = crypto.randomBytes(32).toString('hex');
         const mqtt_topic = `iotmonitor/device/${device_id}`;
@@ -83,6 +83,9 @@ router.post('/register', async (req: AuthRequest, res) => {
             hostname,
             agent_token,
             mqtt_topic,
+            enabled_modules,
+            probe_config,
+            status: 'not_monitored'
         });
 
         await device.save();
@@ -150,9 +153,10 @@ router.post('/:id/generate-agent', async (req: AuthRequest, res) => {
         const outputDir = path.resolve(__dirname, '../../builds');
         if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
-        const binary_id = crypto.randomBytes(16).toString('hex');
         const extension = os === 'windows' ? '.exe' : '';
-        const fileName = `iotmonitor-agent-${os}-${arch}-${binary_id}${extension}`;
+        // Sanitize device name for filename
+        const safeName = device.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+        const fileName = `iotmonitor-${safeName}-${os}-${arch}${extension}`;
         const outputPath = path.join(outputDir, fileName);
 
         // Prepare LDFLAGS (Use existing device credentials)
@@ -267,6 +271,31 @@ router.post('/generate-agent', async (req: AuthRequest, res) => {
     } catch (err: any) {
         console.error('[BUILD] Error:', err);
         res.status(500).json({ message: 'Failed to build agent: ' + err.message });
+    }
+});
+
+// Trigger test notification
+router.post('/:id/test-notification', async (req: AuthRequest, res) => {
+    try {
+        const device = await Device.findOne({ device_id: req.params.id });
+        if (!device) return res.status(404).json({ message: 'Device not found' });
+
+        const { NotificationService } = await import('../services/NotificationService');
+        const SystemSettings = (await import('../models/SystemSettings')).default;
+        const settings = await SystemSettings.findOne();
+
+        // Simulate a warning alert
+        await NotificationService.send({
+            subject: `[TEST] Alert Notification for ${device.name}`,
+            message: `🔔 This is a test notification from device **${device.name}** (${device.hostname || 'No Hostname'}).\nIf you are seeing this, your notification channels are correctly configured.`,
+            channels: ['slack'],
+            recipients: { slackWebhook: settings?.notification_slack_webhook || device.notification_slack_webhook }
+        });
+
+        res.json({ message: 'Test notification sent' });
+    } catch (err: any) {
+        console.error('[TEST-NOTIFY] Error:', err);
+        res.status(500).json({ message: 'Failed to send test notification: ' + err.message });
     }
 });
 

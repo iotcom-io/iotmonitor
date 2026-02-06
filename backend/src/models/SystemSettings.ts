@@ -12,6 +12,10 @@ export interface ISystemSettings extends Document {
     default_thresholds?: Record<string, { attention?: number; critical?: number }>;
     default_notification_frequency?: number;
     summary_interval_minutes?: number;
+    monitoring_check_interval_seconds?: number;
+    default_offline_threshold_multiplier?: number;
+    default_repeat_interval_minutes?: number;
+    default_throttling_duration_minutes?: number;
     updated_at: Date;
 }
 
@@ -33,6 +37,10 @@ const SystemSettingsSchema: Schema = new Schema({
     default_thresholds: { type: Schema.Types.Mixed },
     default_notification_frequency: { type: Number, default: 15 }, // minutes
     summary_interval_minutes: { type: Number, default: 60 },
+    monitoring_check_interval_seconds: { type: Number, default: 30 },
+    default_offline_threshold_multiplier: { type: Number, default: 4 },
+    default_repeat_interval_minutes: { type: Number, default: 5 },
+    default_throttling_duration_minutes: { type: Number, default: 60 },
 }, { timestamps: { updatedAt: 'updated_at' } });
 
 export default mongoose.model<ISystemSettings>('SystemSettings', SystemSettingsSchema);

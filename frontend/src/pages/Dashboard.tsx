@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Activity, Server, AlertTriangle, Cpu, HardDrive } from 'lucide-react';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { useDeviceStore } from '../store/useDeviceStore';
 
 const StatCard = ({ icon: Icon, label, value, color, subvalue }: { icon: any, label: string, value: string, color: string, subvalue?: string }) => (
     <div className="card">
@@ -14,14 +16,32 @@ const StatCard = ({ icon: Icon, label, value, color, subvalue }: { icon: any, la
     </div>
 );
 
-import { useDeviceStore } from '../store/useDeviceStore';
-
 export const Dashboard = () => {
     const { devices, fetchDevices, initSocket } = useDeviceStore();
+    const [cpuHistory, setCpuHistory] = useState<{ time: string; value: number }[]>([]);
 
     useEffect(() => {
         fetchDevices();
         initSocket();
+    }, []);
+
+    // Create a live history of CPU usage
+    useEffect(() => {
+        const interval = setInterval(() => {
+            const totalCpu = useDeviceStore.getState().devices.reduce((acc, d) => acc + (d.config?.cpu_usage || 0), 0);
+            const count = useDeviceStore.getState().devices.length;
+            const avg = count ? Number((totalCpu / count).toFixed(1)) : 0;
+
+            setCpuHistory(prev => {
+                const now = new Date();
+                const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                const newHistory = [...prev, { time: timeStr, value: avg }];
+                if (newHistory.length > 20) return newHistory.slice(newHistory.length - 20);
+                return newHistory;
+            });
+        }, 3000); // Update chart every 3 seconds
+
+        return () => clearInterval(interval);
     }, []);
 
     const onlineCount = devices.filter(d => d.status === 'online').length;
@@ -78,10 +98,46 @@ export const Dashboard = () => {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <div className="lg:col-span-2 card h-96">
-                    <h3 className="text-lg font-bold text-white mb-6">Device Status Distribution</h3>
-                    <div className="flex items-center justify-center h-full text-slate-500 italic">
-                        Telemetry Chart Placeholder
+                <div className="lg:col-span-2 card h-96 flex flex-col">
+                    <h3 className="text-lg font-bold text-white mb-6">Real-Time CPU Usage (Avg)</h3>
+                    <div className="flex-1 w-full min-h-0">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={cpuHistory}>
+                                <defs>
+                                    <linearGradient id="colorCpu" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.5} vertical={false} />
+                                <XAxis
+                                    dataKey="time"
+                                    stroke="#94a3b8"
+                                    fontSize={12}
+                                    tickLine={false}
+                                    axisLine={false}
+                                />
+                                <YAxis
+                                    stroke="#94a3b8"
+                                    fontSize={12}
+                                    tickLine={false}
+                                    axisLine={false}
+                                    domain={[0, 100]}
+                                />
+                                <Tooltip
+                                    contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', borderRadius: '8px' }}
+                                    itemStyle={{ color: '#fff' }}
+                                />
+                                <Area
+                                    type="monotone"
+                                    dataKey="value"
+                                    stroke="#10b981"
+                                    strokeWidth={2}
+                                    fillOpacity={1}
+                                    fill="url(#colorCpu)"
+                                />
+                            </AreaChart>
+                        </ResponsiveContainer>
                     </div>
                 </div>
                 <div className="card h-96 overflow-hidden flex flex-col">

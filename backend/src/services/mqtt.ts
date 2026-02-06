@@ -1,6 +1,7 @@
 import mqtt from 'mqtt';
 import Device from '../models/Device';
-import Alert from '../models/Alert';
+import { updateDeviceHeartbeat } from './offlineDetection';
+import { checkServiceHealth, checkSIPEndpoints } from './serviceMonitoring';
 
 const MQTT_URL = process.env.MQTT_URL || 'mqtt://localhost:1883';
 const DEBUG_MQTT = process.env.DEBUG_MQTT === 'true';
@@ -24,15 +25,19 @@ client.on('message', async (topic, message) => {
             const type = parts[3];
 
             const device = await Device.findOne({ device_id });
+            if (!device) return;
+
+            // Update heartbeat for ANY device message (status or metrics)
+            await updateDeviceHeartbeat(device._id.toString());
 
             if (type === 'status') {
                 const status = message.toString();
-                const oldStatus = device?.status;
+                const oldStatus = device.status;
 
                 await Device.findOneAndUpdate({ device_id }, { status, last_seen: new Date() });
 
                 // Notify if status changed
-                if (device && oldStatus !== status) {
+                if (oldStatus !== status) {
                     const { NotificationService } = await import('./NotificationService');
                     const settings = await (await import('../models/SystemSettings')).default.findOne();
 
@@ -44,10 +49,10 @@ client.on('message', async (topic, message) => {
                     });
                 }
             } else if (type === 'metrics') {
-                if (!device) return;
-
                 const check_type = parts[4];
                 const payload = JSON.parse(message.toString());
+
+                // No need to call updateDeviceHeartbeat here anymore as it's called above
 
                 await Device.findOneAndUpdate({ device_id }, { last_seen: new Date() });
 
@@ -193,8 +198,15 @@ client.on('message', async (topic, message) => {
                     }
                 }
 
-                const { AlertingEngine } = await import('./AlertingEngine');
-                await AlertingEngine.evaluate(device_id, payload, check_type);
+                // Check service health (detect partial failures)
+                await checkServiceHealth(device._id.toString(), { [check_type]: payload });
+
+                // Check SIP endpoints if this is asterisk metrics
+                if (check_type === 'asterisk') {
+                    await checkSIPEndpoints(device._id.toString(), payload);
+                }
+
+                // Alerting logic is now handled by scheduled services (offline detection and threshold monitoring)
 
                 // Notify Frontend via Socket.IO
                 try {
