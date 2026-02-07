@@ -44,52 +44,108 @@ export async function checkServiceHealth(deviceId: string, receivedMetrics: any)
 }
 
 /**
- * Apply dynamic threshold rules from MonitoringCheck model
+ * Apply dynamic monitoring rules from MonitoringCheck model
  */
-async function applyThresholdRules(device: any, metrics: any) {
+export async function applyThresholdRules(device: any, metrics: any) {
+    if (device.monitoring_paused) return;
+
     const checks = await MonitoringCheck.find({ device_id: device._id, enabled: true });
     if (checks.length === 0) return;
 
     for (const check of checks) {
         let value: number | undefined;
+        let isProblem = false;
+        let message = '';
 
+        // Determine value based on check_type
         if (check.check_type === 'cpu') {
             value = metrics.system?.cpu_usage || metrics.system?.cpu_load;
         } else if (check.check_type === 'memory') {
             value = metrics.system?.memory_usage;
-        } else if (check.check_type === 'bandwidth') {
+        } else if (check.check_type === 'disk') {
+            const disks = metrics.system?.disks || metrics.disk_info || [];
+            const disk = disks.find((d: any) => d.mount === check.target || d.path === check.target);
+            value = disk?.usage_percent || disk?.percent;
+        } else if (check.check_type === 'bandwidth' || check.check_type === 'utilization') {
             const iface = metrics.network?.interfaces?.find((i: any) => i.name === check.target);
             if (iface) {
-                // Combine RX and TX for bandwidth check or use one? Usually combined/total.
-                value = (iface.rx_bps + iface.tx_bps) / 1000000; // Convert to Mbps
+                if (check.check_type === 'bandwidth') {
+                    value = (iface.rx_bps + iface.tx_bps) / 1000000; // Mbps
+                } else {
+                    value = iface.utilization_percent;
+                }
+            }
+        } else if (check.check_type === 'sip_rtt') {
+            const peer = metrics.asterisk?.contacts?.find((c: any) => c.aor === check.target || c.endpoint === check.target);
+            value = peer?.rttMs;
+        } else if (check.check_type === 'sip_registration') {
+            const registrations = metrics.asterisk?.registrations || [];
+            const reg = registrations.find((r: any) => r.name === check.target);
+            if (reg) {
+                value = reg.status === 'Registered' ? 100 : 0;
+            }
+        } else if (check.check_type === 'container_status') {
+            const containers = metrics.docker?.containers || [];
+            const container = containers.find((c: any) => c.name === check.target || c.id === check.target);
+            if (container) {
+                const criticalStates = check.config?.critical_states || ['stopped', 'exited', 'unhealthy'];
+                const warningStates = check.config?.warning_states || ['restarting', 'paused'];
+
+                if (criticalStates.includes(container.status.toLowerCase()) || container.health === 'unhealthy') {
+                    isProblem = true;
+                    value = 100; // Binary problem for status
+                    message = `Container ${check.target} is ${container.status}${container.health ? ` (${container.health})` : ''}`;
+                } else if (warningStates.includes(container.status.toLowerCase())) {
+                    isProblem = true;
+                    value = 50;
+                    message = `Container ${check.target} is ${container.status}`;
+                }
             }
         }
 
-        if (value !== undefined) {
-            if (check.thresholds.critical && value > check.thresholds.critical) {
+        if (value !== undefined || isProblem) {
+            const unit = check.check_type === 'sip_rtt' ? 'ms' : (['cpu', 'memory', 'disk', 'utilization', 'sip_registration'].includes(check.check_type) ? '%' : 'Mbps');
+
+            let newState: 'ok' | 'warning' | 'critical' = 'ok';
+            if (check.thresholds.critical && (value! >= check.thresholds.critical || (isProblem && value === 100))) {
+                newState = 'critical';
+            } else if (check.thresholds.warning && (value! >= check.thresholds.warning || (isProblem && value === 50))) {
+                newState = 'warning';
+            }
+
+            // Persistence and State Tracking
+            const stateChanged = check.last_state !== newState;
+            check.last_state = newState;
+            check.last_evaluated_at = new Date();
+            check.last_message = message || `${check.check_type.toUpperCase()} is ${value}${unit} (Threshold: ${newState === 'critical' ? check.thresholds.critical : check.thresholds.warning}${unit})`;
+            await check.save();
+
+            // Alerting integration
+            if (newState !== 'ok') {
                 await triggerAlert({
                     device_id: device._id,
                     device_name: device.name,
-                    alert_type: 'threshold',
-                    severity: 'critical',
+                    alert_type: 'rule_violation',
+                    severity: newState,
                     specific_service: check.check_type,
-                    details: { value, threshold: check.thresholds.critical, unit: check.check_type === 'bandwidth' ? 'Mbps' : '%' }
+                    specific_endpoint: check.target,
+                    details: {
+                        value,
+                        threshold: newState === 'critical' ? check.thresholds.critical : check.thresholds.warning,
+                        unit,
+                        rule_id: check._id
+                    },
+                    throttling_config: {
+                        repeat_interval_minutes: check.notification_frequency
+                    }
                 });
-            } else if (check.thresholds.attention && value > check.thresholds.attention) {
-                await triggerAlert({
-                    device_id: device._id,
-                    device_name: device.name,
-                    alert_type: 'threshold',
-                    severity: 'warning',
-                    specific_service: check.check_type,
-                    details: { value, threshold: check.thresholds.attention, unit: check.check_type === 'bandwidth' ? 'Mbps' : '%' }
-                });
-            } else {
+            } else if (stateChanged) {
                 await resolveAlert({
                     device_id: device._id,
                     device_name: device.name,
-                    alert_type: 'threshold',
-                    specific_service: check.check_type
+                    alert_type: 'rule_violation',
+                    specific_service: check.check_type,
+                    specific_endpoint: check.target
                 });
             }
         }
@@ -176,7 +232,7 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
             // Check dynamic rules for this specific endpoint
             const specificRule = sipRules.find((r: any) => r.check_type === 'sip' && (r.target === name || !r.target));
             const critThresh = specificRule?.thresholds?.critical || rttThresholdDefault;
-            const attnThresh = specificRule?.thresholds?.attention || rttThresholdDefault;
+            const warnThresh = specificRule?.thresholds?.warning || rttThresholdDefault;
 
             // Check registration/reachability status
             if (status !== 'registered' && status !== 'OK' && status !== 'Avail') {
@@ -215,7 +271,7 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
                         specific_endpoint: name,
                         details: { latency_ms, threshold_ms: critThresh }
                     });
-                } else if (latency_ms > attnThresh) {
+                } else if (latency_ms > warnThresh) {
                     await triggerAlert({
                         device_id: deviceId,
                         device_name: device.name,
@@ -223,7 +279,7 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
                         severity: 'warning',
                         specific_service: 'sip_peer',
                         specific_endpoint: name,
-                        details: { latency_ms, threshold_ms: attnThresh }
+                        details: { latency_ms, threshold_ms: warnThresh }
                     });
                 } else {
                     await resolveAlert({

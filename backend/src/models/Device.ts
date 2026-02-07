@@ -15,6 +15,7 @@ export interface IDevice extends Document {
     last_seen: Date;
     status: 'online' | 'offline' | 'warning' | 'not_monitored';
     monitoring_enabled: boolean;
+    monitoring_paused: boolean;
     enabled_modules?: ('system' | 'docker' | 'asterisk' | 'network')[];
     probe_config?: {
         target_ip?: string;
@@ -38,8 +39,16 @@ export interface IDevice extends Document {
         [key: string]: Date | undefined;
     };
     notification_slack_webhook?: string;
+    notification_channels?: {
+        critical?: string;
+        warning?: string;
+        recovery?: string;
+    };
+    notify_on_recovery?: boolean;
     // Monitoring overrides
-    offline_threshold_multiplier?: number;
+    offline_threshold_multiplier?: number; // legacy/global
+    offline_critical_threshold?: number;
+    offline_warning_threshold?: number;
     repeat_interval_minutes?: number;
     throttling_duration_minutes?: number;
     monitored_sip_endpoints?: string[]; // Specific SIP endpoints to monitor
@@ -63,6 +72,7 @@ const DeviceSchema: Schema = new Schema({
     last_seen: { type: Date, default: Date.now },
     status: { type: String, enum: ['online', 'offline', 'warning', 'not_monitored'], default: 'not_monitored' },
     monitoring_enabled: { type: Boolean, default: true },
+    monitoring_paused: { type: Boolean, default: false },
     enabled_modules: [{ type: String, enum: ['system', 'docker', 'asterisk', 'network'] }],
     probe_config: {
         target_ip: { type: String },
@@ -85,9 +95,17 @@ const DeviceSchema: Schema = new Schema({
         network: { type: Date }
     },
     notification_slack_webhook: { type: String },
+    notification_channels: {
+        critical: { type: String },
+        warning: { type: String },
+        recovery: { type: String }
+    },
+    notify_on_recovery: { type: Boolean, default: true },
     offline_threshold_multiplier: { type: Number },
-    repeat_interval_minutes: { type: Number },
-    throttling_duration_minutes: { type: Number },
+    offline_critical_threshold: { type: Number, default: 4 },
+    offline_warning_threshold: { type: Number, default: 2 },
+    repeat_interval_minutes: { type: Number, default: 10 },
+    throttling_duration_minutes: { type: Number, default: 60 },
     monitored_sip_endpoints: [{ type: String }],
     sip_rtt_threshold_ms: { type: Number, default: 200 },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });

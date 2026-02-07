@@ -9,7 +9,7 @@ export interface ISystemSettings extends Document {
     custom_webhooks?: { name: string; url: string; method?: string; headers?: Record<string, string>; body?: string }[];
     notification_email_user?: string;
     notification_email_pass?: string;
-    default_thresholds?: Record<string, { attention?: number; critical?: number }>;
+    default_thresholds?: Record<string, { warning?: number; critical?: number }>;
     default_notification_frequency?: number;
     summary_interval_minutes?: number;
     monitoring_check_interval_seconds?: number;

@@ -132,6 +132,22 @@ router.delete('/:id', async (req: AuthRequest, res) => {
     }
 });
 
+// Regenerate agent token
+router.post('/:id/regenerate-token', async (req: AuthRequest, res) => {
+    try {
+        const new_token = crypto.randomBytes(32).toString('hex');
+        const device = await Device.findOneAndUpdate(
+            { device_id: req.params.id },
+            { $set: { agent_token: new_token } },
+            { new: true }
+        );
+        if (!device) return res.status(404).json({ message: 'Device not found' });
+        res.json({ agent_token: new_token });
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
 // Build agent for an existing device
 router.post('/:id/generate-agent', async (req: AuthRequest, res) => {
     try {

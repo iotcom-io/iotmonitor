@@ -11,6 +11,7 @@ client.on('connect', () => {
     console.log('Connected to MQTT Broker');
     client.subscribe('iotmonitor/device/+/status');
     client.subscribe('iotmonitor/device/+/metrics/+');
+    client.subscribe('iotmonitor/device/+/responses');
 });
 
 client.on('message', async (topic, message) => {
@@ -218,6 +219,15 @@ client.on('message', async (topic, message) => {
                     });
                 } catch (socketErr) {
                     console.error('[MQTT] Socket Emit Error:', socketErr);
+                }
+            } else if (type === 'responses') {
+                const payload = JSON.parse(message.toString());
+                try {
+                    const { getIO } = await import('./socket');
+                    const io = getIO();
+                    io.emit(`terminal:output:${device_id}`, payload);
+                } catch (socketErr) {
+                    console.error('[MQTT] Terminal Response Emit Error:', socketErr);
                 }
             }
         }

@@ -24,11 +24,12 @@ type NetworkMetrics struct {
 }
 
 type InterfaceStats struct {
-	Name    string  `json:"name"`
-	RxBps   float64 `json:"rx_bps"`
-	TxBps   float64 `json:"tx_bps"`
-	RxBytes uint64  `json:"rx_bytes"`
-	TxBytes uint64  `json:"tx_bytes"`
+	Name    string   `json:"name"`
+	IPs     []string `json:"ips"`
+	RxBps   float64  `json:"rx_bps"`
+	TxBps   float64  `json:"tx_bps"`
+	RxBytes uint64   `json:"rx_bytes"`
+	TxBytes uint64   `json:"tx_bytes"`
 }
 
 type PingResult struct {
@@ -68,18 +69,37 @@ func CheckNetwork(hosts []string, ports []map[string]interface{}) *NetworkMetric
 		}
 	}
 
-	// 3. Bandwidth Calculation
+	// 3. Bandwidth & IP Correlation
 	now := time.Now()
 	if currentStats, err := psnet.IOCounters(true); err == nil {
 		if !lastNetTime.IsZero() {
 			duration := now.Sub(lastNetTime).Seconds()
+			
+			// Map interface names to IPs
+			ifaceMap := make(map[string][]string)
+			if nIfaces, err := net.Interfaces(); err == nil {
+				for _, iface := range nIfaces {
+					if addrs, err := iface.Addrs(); err == nil {
+						for _, addr := range addrs {
+							if ipnet, ok := addr.(*net.IPNet); ok {
+								if ipnet.IP.To4() != nil {
+									ifaceMap[iface.Name] = append(ifaceMap[iface.Name], ipnet.IP.String())
+								}
+							}
+						}
+					}
+				}
+			}
+
 			for _, curr := range currentStats {
 				for _, prev := range lastNetStats {
 					if curr.Name == prev.Name {
 						rxBps := float64(curr.BytesRecv-prev.BytesRecv) * 8 / duration
 						txBps := float64(curr.BytesSent-prev.BytesSent) * 8 / duration
+						
 						metrics.Interfaces = append(metrics.Interfaces, InterfaceStats{
 							Name:    curr.Name,
+							IPs:     ifaceMap[curr.Name],
 							RxBps:   rxBps,
 							TxBps:   txBps,
 							RxBytes: curr.BytesRecv,

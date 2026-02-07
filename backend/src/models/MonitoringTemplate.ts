@@ -10,7 +10,7 @@ export interface IMonitoringTemplate extends Document {
         enabled: boolean;
         interval?: number;
         thresholds?: {
-            attention?: number;
+            warning?: number;
             critical?: number;
             latency?: number;
         };
@@ -32,9 +32,8 @@ const MonitoringTemplateSchema = new Schema<IMonitoringTemplate>({
         enabled: { type: Boolean, default: true },
         interval: { type: Number },
         thresholds: {
-            attention: { type: Number },
-            critical: { type: Number },
-            latency: { type: Number }
+            warning: { type: Number },
+            critical: { type: Number }
         },
         target_endpoints: { type: String },
         notification_channels: [{ type: String }]

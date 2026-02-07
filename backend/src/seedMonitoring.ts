@@ -18,19 +18,19 @@ export async function seedMonitoringTemplates() {
                         check_type: 'cpu',
                         enabled: true,
                         interval: 60,
-                        thresholds: { attention: 80, critical: 95 }
+                        thresholds: { warning: 80, critical: 95 }
                     },
                     {
                         check_type: 'memory',
                         enabled: true,
                         interval: 60,
-                        thresholds: { attention: 85, critical: 95 }
+                        thresholds: { warning: 85, critical: 95 }
                     },
                     {
                         check_type: 'disk',
                         enabled: true,
                         interval: 60,
-                        thresholds: { attention: 80, critical: 90 }
+                        thresholds: { warning: 80, critical: 90 }
                     },
                     {
                         check_type: 'offline_detection',
@@ -49,19 +49,19 @@ export async function seedMonitoringTemplates() {
                         check_type: 'cpu',
                         enabled: true,
                         interval: 60,
-                        thresholds: { attention: 70, critical: 90 }
+                        thresholds: { warning: 70, critical: 90 }
                     },
                     {
                         check_type: 'memory',
                         enabled: true,
                         interval: 60,
-                        thresholds: { attention: 80, critical: 90 }
+                        thresholds: { warning: 80, critical: 90 }
                     },
                     {
                         check_type: 'disk',
                         enabled: true,
                         interval: 60,
-                        thresholds: { attention: 75, critical: 85 }
+                        thresholds: { warning: 75, critical: 85 }
                     },
                     {
                         check_type: 'docker',
@@ -84,13 +84,13 @@ export async function seedMonitoringTemplates() {
                         check_type: 'cpu',
                         enabled: true,
                         interval: 60,
-                        thresholds: { attention: 75, critical: 90 }
+                        thresholds: { warning: 75, critical: 90 }
                     },
                     {
                         check_type: 'memory',
                         enabled: true,
                         interval: 60,
-                        thresholds: { attention: 80, critical: 90 }
+                        thresholds: { warning: 80, critical: 90 }
                     },
                     {
                         check_type: 'sip',
