@@ -1,56 +1,129 @@
 import { Router } from 'express';
-import { authenticate, AuthRequest } from '../middleware/auth';
+import { authenticate, authorize, AuthRequest } from '../middleware/auth';
 import Device from '../models/Device';
 import crypto from 'crypto';
-import { exec } from 'child_process';
+import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
+import { z } from 'zod';
 
 const router = Router();
 
-// Download agent binary (unauthenticated for browser compatibility)
+type BuildOS = 'linux' | 'windows';
+type BuildArch = 'amd64' | 'arm64';
+
+const buildRequestSchema = z.object({
+    os: z.enum(['linux', 'windows']),
+    arch: z.enum(['amd64', 'arm64']),
+    name: z.string().trim().min(1).max(120).optional(),
+});
+
+const createAndBuildRequestSchema = buildRequestSchema.extend({
+    modules: z.record(z.string(), z.boolean()).optional(),
+});
+
+const resolveAgentDir = () => {
+    let agentDir = path.resolve(__dirname, '../../../agent');
+    if (!fs.existsSync(agentDir)) {
+        agentDir = path.resolve(__dirname, '../../agent');
+    }
+    return agentDir;
+};
+
+const resolveBuildOutputDir = () => {
+    const outputDir = path.resolve(__dirname, '../../builds');
+    if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+    }
+    return outputDir;
+};
+
+const normalizeMQTTURL = (rawValue: string | undefined) => {
+    const fallback = 'mqtt://localhost:1883';
+    if (!rawValue || !rawValue.trim()) return fallback;
+
+    const value = rawValue.trim();
+    if (value.startsWith('mqtt://') || value.startsWith('mqtts://')) {
+        return value;
+    }
+
+    if (!/^[a-zA-Z0-9.-]+(:\d+)?$/.test(value)) {
+        return fallback;
+    }
+
+    return `mqtt://${value.includes(':') ? value : `${value}:1883`}`;
+};
+
+const buildAgentBinary = async ({
+    agentDir,
+    outputPath,
+    os,
+    arch,
+    ldflags,
+}: {
+    agentDir: string;
+    outputPath: string;
+    os: BuildOS;
+    arch: BuildArch;
+    ldflags: string;
+}) => {
+    await new Promise<void>((resolve, reject) => {
+        const child = spawn(
+            'go',
+            ['build', '-ldflags', `${ldflags} -s -w`, '-o', outputPath, './cmd/agent/main.go'],
+            {
+                cwd: agentDir,
+                shell: false,
+                env: {
+                    ...process.env,
+                    CGO_ENABLED: '0',
+                    GOOS: os,
+                    GOARCH: arch,
+                },
+            }
+        );
+
+        let stderr = '';
+        child.stderr.on('data', (chunk) => {
+            stderr += chunk.toString();
+        });
+
+        child.on('error', (err) => reject(err));
+
+        child.on('close', (code) => {
+            if (code === 0) {
+                resolve();
+                return;
+            }
+            reject(new Error(stderr.trim() || `go build exited with code ${code}`));
+        });
+    });
+};
+
+const getArtifactMeta = (outputPath: string) => {
+    const stats = fs.statSync(outputPath);
+    const checksum = crypto.createHash('sha256').update(fs.readFileSync(outputPath)).digest('hex');
+    return {
+        size: stats.size,
+        checksum,
+    };
+};
+
+// Download agent binary (kept unauthenticated for browser direct downloads)
 router.get('/download/:id', async (req, res) => {
     try {
         const fileName = req.params.id;
+        if (!/^[a-zA-Z0-9._-]+$/.test(fileName)) {
+            return res.status(400).json({ message: 'Invalid binary id' });
+        }
+
         const filePath = path.resolve(__dirname, '../../builds', fileName);
 
         if (!fs.existsSync(filePath)) {
             return res.status(404).json({ message: 'Binary not found' });
         }
 
-        // Try to find device name to provide a better filename
-        // Filename format: iotmonitor-agent-linux-amd64-[binary_id]
-        // We can extract parts or just serve as is with a better "Content-Disposition"
         res.download(filePath, fileName);
-    } catch (err: any) {
-        res.status(500).json({ message: err.message });
-    }
-});
-
-// Update device (Pause/Resume)
-router.patch('/:id', authenticate, async (req: AuthRequest, res) => {
-    try {
-        const device = await Device.findOneAndUpdate(
-            { device_id: req.params.id },
-            { $set: req.body },
-            { new: true }
-        );
-        if (!device) return res.status(404).json({ message: 'Device not found' });
-        res.json(device);
-    } catch (err: any) {
-        res.status(400).json({ message: err.message });
-    }
-});
-
-// Delete device
-router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
-    try {
-        const result = await Device.deleteOne({ device_id: req.params.id });
-        if (result.deletedCount === 0) return res.status(404).json({ message: 'Device not found' });
-        res.json({ message: 'Device deleted successfully' });
     } catch (err: any) {
         res.status(500).json({ message: err.message });
     }
@@ -59,7 +132,7 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
 router.use(authenticate);
 
 // Get all devices
-router.get('/', async (req: AuthRequest, res) => {
+router.get('/', authorize(['admin', 'operator', 'viewer']), async (_req: AuthRequest, res) => {
     try {
         const devices = await Device.find();
         res.json(devices);
@@ -69,7 +142,7 @@ router.get('/', async (req: AuthRequest, res) => {
 });
 
 // Register a new device
-router.post('/register', async (req: AuthRequest, res) => {
+router.post('/register', authorize(['admin', 'operator']), async (req: AuthRequest, res) => {
     try {
         const { name, type, hostname, enabled_modules, probe_config } = req.body;
         const device_id = crypto.randomBytes(8).toString('hex');
@@ -85,7 +158,7 @@ router.post('/register', async (req: AuthRequest, res) => {
             mqtt_topic,
             enabled_modules,
             probe_config,
-            status: 'not_monitored'
+            status: 'not_monitored',
         });
 
         await device.save();
@@ -96,7 +169,7 @@ router.post('/register', async (req: AuthRequest, res) => {
 });
 
 // Get device by ID
-router.get('/:id', async (req: AuthRequest, res) => {
+router.get('/:id', authorize(['admin', 'operator', 'viewer']), async (req: AuthRequest, res) => {
     try {
         const device = await Device.findOne({ device_id: req.params.id });
         if (!device) return res.status(404).json({ message: 'Device not found' });
@@ -106,8 +179,8 @@ router.get('/:id', async (req: AuthRequest, res) => {
     }
 });
 
-// Update device (Pause/Resume)
-router.patch('/:id', async (req: AuthRequest, res) => {
+// Update device
+router.patch('/:id', authorize(['admin', 'operator']), async (req: AuthRequest, res) => {
     try {
         const device = await Device.findOneAndUpdate(
             { device_id: req.params.id },
@@ -122,7 +195,7 @@ router.patch('/:id', async (req: AuthRequest, res) => {
 });
 
 // Delete device
-router.delete('/:id', async (req: AuthRequest, res) => {
+router.delete('/:id', authorize(['admin']), async (req: AuthRequest, res) => {
     try {
         const result = await Device.deleteOne({ device_id: req.params.id });
         if (result.deletedCount === 0) return res.status(404).json({ message: 'Device not found' });
@@ -133,7 +206,7 @@ router.delete('/:id', async (req: AuthRequest, res) => {
 });
 
 // Regenerate agent token
-router.post('/:id/regenerate-token', async (req: AuthRequest, res) => {
+router.post('/:id/regenerate-token', authorize(['admin']), async (req: AuthRequest, res) => {
     try {
         const new_token = crypto.randomBytes(32).toString('hex');
         const device = await Device.findOneAndUpdate(
@@ -149,9 +222,14 @@ router.post('/:id/regenerate-token', async (req: AuthRequest, res) => {
 });
 
 // Build agent for an existing device
-router.post('/:id/generate-agent', async (req: AuthRequest, res) => {
+router.post('/:id/generate-agent', authorize(['admin', 'operator']), async (req: AuthRequest, res) => {
     try {
-        const { os, arch, name } = req.body;
+        const { os, arch, name } = buildRequestSchema.parse(req.body) as {
+            os: BuildOS;
+            arch: BuildArch;
+            name?: string;
+        };
+
         const device = await Device.findOne({ device_id: req.params.id });
         if (!device) return res.status(404).json({ message: 'Device not found' });
 
@@ -160,57 +238,57 @@ router.post('/:id/generate-agent', async (req: AuthRequest, res) => {
             await device.save();
         }
 
-        // Prepare build paths
-        let agentDir = path.resolve(__dirname, '../../../agent');
-        if (!fs.existsSync(agentDir)) {
-            agentDir = path.resolve(__dirname, '../../agent');
-        }
-
-        const outputDir = path.resolve(__dirname, '../../builds');
-        if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+        const agentDir = resolveAgentDir();
+        const outputDir = resolveBuildOutputDir();
 
         const extension = os === 'windows' ? '.exe' : '';
-        // Sanitize device name for filename
         const safeName = device.name.replace(/[^a-zA-Z0-9_-]/g, '_');
         const fileName = `iotmonitor-${safeName}-${os}-${arch}${extension}`;
         const outputPath = path.join(outputDir, fileName);
 
-        // Prepare LDFLAGS (Use existing device credentials)
         const SystemSettings = (await import('../models/SystemSettings')).default;
         const settings = await SystemSettings.findOne();
-        const mqttUrl = settings?.mqtt_public_url || process.env.MQTT_URL || 'localhost';
+        const mqttUrl = normalizeMQTTURL(settings?.mqtt_public_url || process.env.MQTT_URL);
 
         const ldflags = `-X github.com/iotmonitor/agent/internal/config.DefaultDeviceID=${device.device_id} ` +
             `-X github.com/iotmonitor/agent/internal/config.DefaultAgentToken=${device.agent_token} ` +
-            `-X github.com/iotmonitor/agent/internal/config.DefaultMQTTURL=mqtt://${mqttUrl}:1883`;
+            `-X github.com/iotmonitor/agent/internal/config.DefaultMQTTURL=${mqttUrl}`;
 
-        console.log(`[BUILD] Compiling agent for EXISTING device ${device.device_id} (${os}/${arch})...`);
+        await buildAgentBinary({
+            agentDir,
+            outputPath,
+            os,
+            arch,
+            ldflags,
+        });
 
-        const buildCmd = `CGO_ENABLED=0 GOOS=${os} GOARCH=${arch} go build -ldflags "${ldflags} -s -w" -o "${outputPath}" ./cmd/agent/main.go`;
-
-        await execAsync(buildCmd, { cwd: agentDir });
-
-        const stats = fs.statSync(outputPath);
-        const checksum = crypto.createHash('sha256').update(fs.readFileSync(outputPath)).digest('hex');
+        const meta = getArtifactMeta(outputPath);
 
         res.json({
             binary_id: fileName,
-            checksum,
-            size: stats.size,
-            device_id: device.device_id
+            checksum: meta.checksum,
+            size: meta.size,
+            device_id: device.device_id,
         });
     } catch (err: any) {
+        if (err?.name === 'ZodError') {
+            return res.status(400).json({ message: 'Invalid build request payload' });
+        }
         console.error('[BUILD] Error:', err);
         res.status(500).json({ message: 'Failed to build agent: ' + err.message });
     }
 });
 
 // Generate and build agent binary (creates a new device)
-router.post('/generate-agent', async (req: AuthRequest, res) => {
+router.post('/generate-agent', authorize(['admin', 'operator']), async (req: AuthRequest, res) => {
     try {
-        const { os, arch, modules, name } = req.body;
+        const { os, arch, modules, name } = createAndBuildRequestSchema.parse(req.body) as {
+            os: BuildOS;
+            arch: BuildArch;
+            modules?: Record<string, boolean>;
+            name?: string;
+        };
 
-        // 1. Create a new "Pending" device for this agent
         const device_id = crypto.randomBytes(8).toString('hex');
         const agent_token = crypto.randomBytes(32).toString('hex');
         const mqtt_topic = `iotmonitor/device/${device_id}`;
@@ -222,11 +300,10 @@ router.post('/generate-agent', async (req: AuthRequest, res) => {
             agent_token,
             mqtt_topic,
             status: 'offline',
-            config: { modules }
+            config: { modules },
         });
         await device.save();
 
-        // Notify via Slack
         try {
             const { NotificationService } = await import('../services/NotificationService');
             const SystemSettings = (await import('../models/SystemSettings')).default;
@@ -234,64 +311,57 @@ router.post('/generate-agent', async (req: AuthRequest, res) => {
 
             await NotificationService.send({
                 subject: 'New Device Registered',
-                message: `🔍 A new agent was generated for device: ${device.name} (ID: ${device_id})`,
+                message: `A new agent was generated for device: ${device.name} (ID: ${device_id})`,
                 channels: ['slack'],
-                recipients: { slackWebhook: settings?.notification_slack_webhook }
+                recipients: { slackWebhook: settings?.notification_slack_webhook },
             });
         } catch (nErr) {
             console.error('[NOTIFY] New device notification failed:', nErr);
         }
 
-        // 2. Prepare build paths
-        // Robust path detection: check for agent folder in project root or relative to dist
-        let agentDir = path.resolve(__dirname, '../../../agent');
-        if (!fs.existsSync(agentDir)) {
-            agentDir = path.resolve(__dirname, '../../agent');
-        }
-
-        let outputDir = path.resolve(__dirname, '../../builds');
-        if (!fs.existsSync(outputDir)) {
-            fs.mkdirSync(outputDir, { recursive: true });
-        }
+        const agentDir = resolveAgentDir();
+        const outputDir = resolveBuildOutputDir();
 
         const binary_id = crypto.randomBytes(16).toString('hex');
         const extension = os === 'windows' ? '.exe' : '';
         const fileName = `iotmonitor-agent-${os}-${arch}-${binary_id}${extension}`;
         const outputPath = path.join(outputDir, fileName);
 
-        // 3. Prepare LDFLAGS
         const SystemSettings = (await import('../models/SystemSettings')).default;
         const settings = await SystemSettings.findOne();
-        const mqttUrl = settings?.mqtt_public_url || process.env.MQTT_URL || 'localhost';
+        const mqttUrl = normalizeMQTTURL(settings?.mqtt_public_url || process.env.MQTT_URL);
 
         const ldflags = `-X github.com/iotmonitor/agent/internal/config.DefaultDeviceID=${device_id} ` +
             `-X github.com/iotmonitor/agent/internal/config.DefaultAgentToken=${agent_token} ` +
-            `-X github.com/iotmonitor/agent/internal/config.DefaultMQTTURL=mqtt://${mqttUrl}:1883`;
+            `-X github.com/iotmonitor/agent/internal/config.DefaultMQTTURL=${mqttUrl}`;
 
-        console.log(`[BUILD] Compiling agent for ${device_id} (${os}/${arch})...`);
+        await buildAgentBinary({
+            agentDir,
+            outputPath,
+            os,
+            arch,
+            ldflags,
+        });
 
-        // 4. Build command (using cross-compilation)
-        const buildCmd = `CGO_ENABLED=0 GOOS=${os} GOARCH=${arch} go build -ldflags "${ldflags} -s -w" -o "${outputPath}" ./cmd/agent/main.go`;
-
-        await execAsync(buildCmd, { cwd: agentDir });
-
-        const stats = fs.statSync(outputPath);
-        const checksum = crypto.createHash('sha256').update(fs.readFileSync(outputPath)).digest('hex');
+        const meta = getArtifactMeta(outputPath);
 
         res.json({
             binary_id: fileName,
-            checksum,
-            size: stats.size,
-            device_id
+            checksum: meta.checksum,
+            size: meta.size,
+            device_id,
         });
     } catch (err: any) {
+        if (err?.name === 'ZodError') {
+            return res.status(400).json({ message: 'Invalid build request payload' });
+        }
         console.error('[BUILD] Error:', err);
         res.status(500).json({ message: 'Failed to build agent: ' + err.message });
     }
 });
 
 // Trigger test notification
-router.post('/:id/test-notification', async (req: AuthRequest, res) => {
+router.post('/:id/test-notification', authorize(['admin', 'operator']), async (req: AuthRequest, res) => {
     try {
         const device = await Device.findOne({ device_id: req.params.id });
         if (!device) return res.status(404).json({ message: 'Device not found' });
@@ -300,12 +370,11 @@ router.post('/:id/test-notification', async (req: AuthRequest, res) => {
         const SystemSettings = (await import('../models/SystemSettings')).default;
         const settings = await SystemSettings.findOne();
 
-        // Simulate a warning alert
         await NotificationService.send({
             subject: `[TEST] Alert Notification for ${device.name}`,
-            message: `🔔 This is a test notification from device **${device.name}** (${device.hostname || 'No Hostname'}).\nIf you are seeing this, your notification channels are correctly configured.`,
+            message: `This is a test notification from device ${device.name} (${device.hostname || 'No Hostname'}).`,
             channels: ['slack'],
-            recipients: { slackWebhook: settings?.notification_slack_webhook || device.notification_slack_webhook }
+            recipients: { slackWebhook: settings?.notification_slack_webhook || device.notification_slack_webhook },
         });
 
         res.json({ message: 'Test notification sent' });

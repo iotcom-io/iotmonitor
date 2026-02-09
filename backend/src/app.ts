@@ -16,9 +16,15 @@ import './services/mqtt'; // Initialize MQTT client
 dotenv.config();
 
 const app = express();
+const allowedOrigins = process.env.FRONTEND_ORIGIN
+    ? process.env.FRONTEND_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
+    : true;
 
 app.use(express.json());
-app.use(cors());
+app.use(cors({
+    origin: allowedOrigins,
+    credentials: true,
+}));
 app.use(helmet());
 app.use(morgan('dev'));
 

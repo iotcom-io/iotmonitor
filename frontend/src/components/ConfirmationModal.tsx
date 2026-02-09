@@ -4,26 +4,38 @@ import { clsx } from 'clsx';
 
 interface ConfirmationModalProps {
     isOpen: boolean;
-    onClose: () => void;
+    onClose?: () => void;
+    onCancel?: () => void;
     onConfirm?: () => void;
     title: string;
     message: string;
     confirmLabel?: string;
     cancelLabel?: string;
+    isDangerous?: boolean;
     type?: 'info' | 'warning' | 'danger' | 'success';
 }
 
 export const ConfirmationModal = ({
     isOpen,
-    onClose,
+    onClose = () => { },
+    onCancel,
     onConfirm,
     title,
     message,
     confirmLabel = 'Confirm',
     cancelLabel = 'Cancel',
+    isDangerous = false,
     type = 'info'
 }: ConfirmationModalProps) => {
     if (!isOpen) return null;
+    const modalType = isDangerous ? 'danger' : type;
+    const handleCancel = () => {
+        if (onCancel) {
+            onCancel();
+            return;
+        }
+        onClose();
+    };
 
     const config = {
         info: {
@@ -60,13 +72,13 @@ export const ConfirmationModal = ({
         }
     };
 
-    const { icon: Icon, color, bg, border, btn, shadow } = config[type];
+    const { icon: Icon, color, bg, border, btn, shadow } = config[modalType];
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <div
                 className="absolute inset-0 bg-black/80 backdrop-blur-md animate-in fade-in duration-300"
-                onClick={onClose}
+                onClick={handleCancel}
             />
             <div className={clsx(
                 "relative bg-slate-900 border rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200",
@@ -86,7 +98,7 @@ export const ConfirmationModal = ({
 
                     <div className="flex gap-3">
                         <button
-                            onClick={onClose}
+                            onClick={handleCancel}
                             className="flex-1 px-6 py-3.5 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white font-bold rounded-2xl transition-all"
                         >
                             {cancelLabel}

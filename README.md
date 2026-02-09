@@ -61,8 +61,8 @@ This script will:
 
 ### Default Credentials
 ```
-Email: admin@iotmonitor.com
-Password: admin123
+Email: admin@iotcom.io
+Password: admin123456
 ```
 
 ## 🔧 Manual Setup

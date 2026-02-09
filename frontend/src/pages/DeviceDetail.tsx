@@ -17,9 +17,11 @@ import { IncidentBanner } from '../components/IncidentBanner';
 import { Info, Send, Eraser, SquareTerminal as Terminal } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { ConfirmationModal } from '../components/ConfirmationModal';
+import { useAuthStore } from '../store/useAuthStore';
 
 export const DeviceDetail = () => {
     const { id } = useParams();
+    const token = useAuthStore(state => state.token);
     const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState('metrics');
     const [device, setDevice] = useState<any>(null);
@@ -98,7 +100,10 @@ export const DeviceDetail = () => {
     };
 
     useEffect(() => {
-        const socketInstance = io(); // Connect to same host
+        const socketInstance = io(import.meta.env.VITE_API_URL || undefined, {
+            transports: ['websocket'],
+            auth: { token }
+        });
         setSocket(socketInstance);
 
         socketInstance.on('connect', () => {
@@ -116,7 +121,7 @@ export const DeviceDetail = () => {
         return () => {
             socketInstance.disconnect();
         };
-    }, [id]);
+    }, [id, token]);
 
     const handleSaveCheck = async (ruleData: any | any[]) => {
         try {

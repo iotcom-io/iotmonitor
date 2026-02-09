@@ -210,7 +210,7 @@ export const AgentBuilder = () => {
                         <label className="text-sm font-medium text-slate-400 uppercase tracking-wider">Communication</label>
                         <div className="flex items-center gap-2 p-3 bg-white/5 rounded-xl border border-white/5">
                             <ShieldCheck size={18} className="text-emerald-400" />
-                            <span className="text-sm text-slate-300">TLS 1.3 Encryption Enforced</span>
+                            <span className="text-sm text-slate-300">MQTT security depends on broker TLS/auth configuration</span>
                         </div>
                     </div>
                 </div>

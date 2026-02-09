@@ -271,7 +271,7 @@ All services run on the `iotmonitor-network` bridge network:
 
 IoT agents built in the backend container can be downloaded via:
 ```
-http://localhost:3000/api/devices/{device-id}/download-agent/{filename}
+http://localhost:3000/api/devices/download/{filename}
 ```
 
 The backend container includes Go runtime for on-demand agent compilation.

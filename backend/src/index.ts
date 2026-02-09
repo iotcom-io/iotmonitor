@@ -5,9 +5,15 @@ import { initSocket } from './services/socket';
 import { startOfflineDetection } from './services/offlineDetection';
 import { startThrottlingService } from './services/notificationThrottling';
 import { startHourlyReports } from './services/scheduledReports';
+import { startSyntheticRunner } from './services/SyntheticRunner';
 import { seedMonitoringTemplates, seedDefaultNotificationChannel } from './seedMonitoring';
 
-const PORT = process.env.PORT || 5000;
+if (!process.env.JWT_SECRET) {
+    console.error('JWT_SECRET environment variable is required');
+    process.exit(1);
+}
+
+const PORT = process.env.PORT || 5001;
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/iotmonitor';
 
 const httpServer = createServer(app);
@@ -27,12 +33,13 @@ mongoose.connect(MONGODB_URI)
             console.log(`Server is running on port ${PORT}`);
         });
 
-        // Start enhanced monitoring services
-        console.log('🔍 Starting enhanced monitoring services...');
-        startOfflineDetection(); // Check every 30s for offline devices
-        startThrottlingService(); // Process throttled alerts every minute
-        startHourlyReports(); // Send hourly status updates
-        console.log('✅ All monitoring services started');
+        // Start monitoring services
+        console.log('Starting monitoring services...');
+        startOfflineDetection();
+        startThrottlingService();
+        startHourlyReports();
+        startSyntheticRunner();
+        console.log('All monitoring services started');
     })
     .catch((err) => {
         console.error('Failed to connect to MongoDB', err);

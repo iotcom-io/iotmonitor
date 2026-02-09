@@ -335,7 +335,7 @@ export const Settings = () => {
                     <Shield size={20} />
                 </div>
                 <p className="text-sm text-slate-400 leading-relaxed">
-                    <span className="text-slate-100 font-semibold">Security Note:</span> These settings are encrypted at rest and only accessible to authorized administrators. Changing the MQTT host will not affect previously generated agents unless they are manually updated with a new <code className="text-slate-200">config.json</code> file.
+                    <span className="text-slate-100 font-semibold">Security Note:</span> These settings are stored in the database and should be protected using database access controls and encrypted backups. Changing the MQTT host will not affect previously generated agents unless they are redeployed with a newly generated binary.
                 </p>
             </div>
 

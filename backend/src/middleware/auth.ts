@@ -1,10 +1,15 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+    throw new Error('JWT_SECRET environment variable is required');
+}
+
 export interface AuthRequest extends Request {
     user?: {
         id: string;
-        role: string;
+        role: 'admin' | 'operator' | 'viewer';
     };
 }
 
@@ -16,7 +21,7 @@ export const authenticate = (req: AuthRequest, res: Response, next: NextFunction
     }
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as { id: string; role: string };
+        const decoded = jwt.verify(token, JWT_SECRET) as { id: string; role: 'admin' | 'operator' | 'viewer' };
         req.user = decoded;
         next();
     } catch (err) {

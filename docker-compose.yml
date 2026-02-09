@@ -1,6 +1,20 @@
 version: '3.8'
 
 services:
+  mongodb:
+    # Optional local MongoDB. Disabled by default.
+    # Start with: docker compose --profile local-db up -d
+    profiles: ["local-db"]
+    image: mongo:7.0
+    container_name: iotmonitor-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - iotmonitor-network
+    restart: always
+
   redis:
     image: redis:7.0-alpine
     container_name: iotmonitor-redis
@@ -35,11 +49,17 @@ services:
     ports:
       - "5001:5001"
     env_file: ./backend/.env
+    environment:
+      # Use an existing MongoDB running on host by default.
+      # Override by exporting MONGODB_URI before running docker compose.
+      MONGODB_URI: ${MONGODB_URI:-mongodb://host.docker.internal:27017/iotmonitor}
     depends_on:
       redis:
         condition: service_started
       mosquitto:
         condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - iotmonitor-network
     restart: always

@@ -1,10 +1,12 @@
 import { io } from 'socket.io-client';
+import { useAuthStore } from '../store/useAuthStore';
 
-// Use same URL as API but different port/path if needed. 
-// For now assuming same origin as backend API or relative path via proxy
-const SOCKET_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const SOCKET_URL = import.meta.env.VITE_API_URL || undefined;
 
 export const socket = io(SOCKET_URL, {
     autoConnect: false,
-    transports: ['websocket']
+    transports: ['websocket'],
+    auth: (cb) => {
+        cb({ token: useAuthStore.getState().token });
+    }
 });
