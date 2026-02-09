@@ -1,6 +1,7 @@
 import axios from 'axios';
 import AlertTracking, { IAlertTracking } from '../models/AlertTracking';
 import NotificationChannel from '../models/NotificationChannel';
+const APP_TIMEZONE = process.env.APP_TIMEZONE || 'UTC';
 
 /**
  * Enhanced Notification Service
@@ -197,6 +198,12 @@ function buildAlertMessage(alert: IAlertTracking, deviceName: string, isReminder
         case 'threshold':
             typeDescription = 'Threshold Exceeded';
             break;
+        case 'rule_violation':
+            typeDescription = `Threshold Breach: ${alert.specific_service || 'monitoring rule'}`;
+            break;
+        case 'ip_change':
+            typeDescription = 'IP Address Changed';
+            break;
         default:
             typeDescription = alert.alert_type;
     }
@@ -213,7 +220,7 @@ function buildAlertMessage(alert: IAlertTracking, deviceName: string, isReminder
     text += `*Device:* ${deviceName}\n`;
     text += `*Alert:* ${typeDescription}\n`;
     const triggeredDate = alert.first_triggered instanceof Date ? alert.first_triggered : new Date(alert.first_triggered);
-    text += `*Time:* ${triggeredDate.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })}${duration}`;
+    text += `*Time:* ${triggeredDate.toLocaleString('en-US', { timeZone: APP_TIMEZONE })}${duration}`;
 
     if (alert.specific_endpoint) {
         text += `\n*Endpoint:* ${alert.specific_endpoint}`;
@@ -275,6 +282,9 @@ function buildRecoveryMessage(alert: IAlertTracking, deviceName: string): any {
         case 'threshold':
             typeDescription = 'Back to Normal';
             break;
+        case 'rule_violation':
+            typeDescription = 'Threshold Back to Normal';
+            break;
         default:
             typeDescription = 'Issue Resolved';
     }
@@ -285,7 +295,7 @@ function buildRecoveryMessage(alert: IAlertTracking, deviceName: string): any {
     if (alert.specific_endpoint) {
         text += `*Endpoint:* ${alert.specific_endpoint}\n`;
     }
-    text += `*Recovery Time:* ${alert.resolved_at ? new Date(alert.resolved_at).toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }) : 'Just now'}\n`;
+    text += `*Recovery Time:* ${alert.resolved_at ? new Date(alert.resolved_at).toLocaleString('en-US', { timeZone: APP_TIMEZONE }) : 'Just now'}\n`;
     text += `*Duration:* ${durationText}\n`;
 
     return {

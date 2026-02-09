@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -12,6 +13,34 @@ import (
 	"github.com/iotmonitor/agent/internal/monitor"
 	"github.com/iotmonitor/agent/internal/mqtt"
 )
+
+func loadEnabledModules(raw string) map[string]bool {
+	enabled := map[string]bool{
+		"system":   true,
+		"docker":   true,
+		"asterisk": true,
+		"network":  true,
+	}
+
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return enabled
+	}
+
+	// If explicitly set, only listed modules are enabled.
+	for k := range enabled {
+		enabled[k] = false
+	}
+
+	for _, module := range strings.Split(raw, ",") {
+		name := strings.ToLower(strings.TrimSpace(module))
+		if _, ok := enabled[name]; ok {
+			enabled[name] = true
+		}
+	}
+
+	return enabled
+}
 
 func main() {
 	configPath := flag.String("config", "config.json", "Path to config file")
@@ -49,35 +78,48 @@ func main() {
 	defer ticker.Stop()
 
 	log.Println("IoTMonitor Agent started successfully")
+	enabledModules := loadEnabledModules(cfg.EnabledModules)
+	asteriskContainer := strings.TrimSpace(os.Getenv("IOT_ASTERISK_CONTAINER"))
+	if asteriskContainer == "" {
+		asteriskContainer = "asterisk"
+	}
 
 	for {
 		select {
 		case <-ticker.C:
 			// System Metrics
-			sysMetrics, err := monitor.GetSystemMetrics()
-			if err == nil {
-				client.PublishMetric("system", sysMetrics)
+			if enabledModules["system"] {
+				sysMetrics, err := monitor.GetSystemMetrics()
+				if err == nil {
+					client.PublishMetric("system", sysMetrics)
+				}
 			}
 
 			// Docker Metrics
-			dockerMetrics, err := monitor.GetDockerMetrics()
-			if err == nil {
-				client.PublishMetric("docker", dockerMetrics)
+			if enabledModules["docker"] {
+				dockerMetrics, err := monitor.GetDockerMetrics()
+				if err == nil {
+					client.PublishMetric("docker", dockerMetrics)
+				}
 			}
 
 			// Asterisk Metrics
-			astMetrics, err := monitor.GetAsteriskPJSIPMetrics("asterisk")
-			if err == nil {
-				client.PublishMetric("asterisk", astMetrics)
-			} else {
-				log.Printf("Asterisk metrics error: %v", err)
+			if enabledModules["asterisk"] {
+				astMetrics, err := monitor.GetAsteriskPJSIPMetrics(asteriskContainer)
+				if err == nil {
+					client.PublishMetric("asterisk", astMetrics)
+				} else {
+					log.Printf("Asterisk metrics error: %v", err)
+				}
 			}
 
 			// Network Metrics (Example targets)
-			netMetrics := monitor.CheckNetwork([]string{"google.com", "1.1.1.1"}, []map[string]interface{}{
-				{"host": "google.com", "port": 443.0},
-			})
-			client.PublishMetric("network", netMetrics)
+			if enabledModules["network"] {
+				netMetrics := monitor.CheckNetwork([]string{"google.com", "1.1.1.1"}, []map[string]interface{}{
+					{"host": "google.com", "port": 443.0},
+				})
+				client.PublishMetric("network", netMetrics)
+			}
 
 		case sig := <-sigChan:
 			log.Printf("Received signal: %v. Shutting down...", sig)

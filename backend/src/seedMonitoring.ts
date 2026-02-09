@@ -155,7 +155,6 @@ export async function seedDefaultNotificationChannel() {
         const count = await NotificationChannel.countDocuments();
 
         if (count === 0) {
-            // Create default Slack channel
             const defaultChannel = new NotificationChannel({
                 name: 'Default Slack',
                 description: 'Default notification channel for all alerts',
@@ -165,14 +164,25 @@ export async function seedDefaultNotificationChannel() {
                     slack_webhook_url: process.env.SLACK_WEBHOOK_URL || '',
                     slack_group_name: 'General Alerts'
                 },
-                alert_types: ['offline', 'online', 'service_down', 'sip_issue', 'high_latency', 'threshold'],
+                alert_types: ['offline', 'online', 'service_down', 'sip_issue', 'high_latency', 'threshold', 'rule_violation', 'ip_change'],
                 severity_levels: ['info', 'warning', 'critical']
             });
 
             await defaultChannel.save();
-            console.log('✅ Created default notification channel');
+            console.log('Created default notification channel');
+        } else {
+            // Existing setup may miss newly introduced alert types.
+            await NotificationChannel.updateOne(
+                { name: 'Default Slack' },
+                {
+                    $addToSet: {
+                        alert_types: { $each: ['rule_violation', 'ip_change'] }
+                    }
+                }
+            );
         }
     } catch (error) {
         console.error('Error seeding notification channels:', error);
     }
 }
+

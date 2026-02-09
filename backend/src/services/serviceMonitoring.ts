@@ -3,53 +3,71 @@ import MonitoringCheck from '../models/MonitoringCheck';
 import { triggerAlert, resolveAlert } from './notificationThrottling';
 import { updateServiceMetrics } from './offlineDetection';
 
+const MODULES = ['system', 'docker', 'asterisk', 'network'] as const;
+type ModuleName = typeof MODULES[number];
+
+const getEnabledModules = (device: any): ModuleName[] => {
+    if (Array.isArray(device.enabled_modules) && device.enabled_modules.length > 0) {
+        return device.enabled_modules.filter((m: string) => MODULES.includes(m as ModuleName));
+    }
+
+    const modulesConfig = device.config?.modules;
+    if (modulesConfig && typeof modulesConfig === 'object') {
+        return MODULES.filter((module) => modulesConfig[module] === true);
+    }
+
+    return [];
+};
+
 /**
  * Service Monitoring Service
- * 
- * Monitors if specific services are responding even when device is online
- * - Checks if expected service data is present in metrics
- * - Triggers alerts for partial failures (device online but service not responding)
+ *
+ * Monitors if specific services are responding even when device is online.
  */
-
 export async function checkServiceHealth(deviceId: string, receivedMetrics: any) {
     try {
-        const device = await Device.findById(deviceId);
-        if (!device || !device.enabled_modules) return;
+        const device = await Device.findOne({ device_id: deviceId });
+        if (!device || device.monitoring_paused) return;
 
         const now = new Date();
+        const monitoredModules = new Set(getEnabledModules(device));
 
         // Process each incoming metric type
-        for (const module of Object.keys(receivedMetrics)) {
-            // If this module just reported, update its successful timestamp
-            // and resolve any existing "service_down" alerts for it.
-            await updateServiceMetrics(deviceId, module as any);
+        for (const moduleName of Object.keys(receivedMetrics)) {
+            const module = moduleName as ModuleName;
+            if (!monitoredModules.has(module)) {
+                continue;
+            }
+
+            // If this module just reported, update successful timestamp
+            // and resolve any existing "service_down" alert for it.
+            await updateServiceMetrics(device.device_id, module);
 
             await resolveAlert({
-                device_id: deviceId,
+                device_id: device.device_id,
                 device_name: device.name,
                 alert_type: 'service_down',
                 specific_service: module,
                 details: {
-                    recovery_time: now
-                }
+                    recovery_time: now,
+                },
             });
         }
 
         // Apply dynamic threshold rules for generic metrics (CPU, Memory, etc.)
         await applyThresholdRules(device, receivedMetrics);
-
     } catch (error) {
         console.error('Error checking service health:', error);
     }
 }
 
 /**
- * Apply dynamic monitoring rules from MonitoringCheck model
+ * Apply dynamic monitoring rules from MonitoringCheck model.
  */
 export async function applyThresholdRules(device: any, metrics: any) {
     if (device.monitoring_paused) return;
 
-    const checks = await MonitoringCheck.find({ device_id: device._id, enabled: true });
+    const checks = await MonitoringCheck.find({ device_id: device.device_id, enabled: true });
     if (checks.length === 0) return;
 
     for (const check of checks) {
@@ -57,7 +75,6 @@ export async function applyThresholdRules(device: any, metrics: any) {
         let isProblem = false;
         let message = '';
 
-        // Determine value based on check_type
         if (check.check_type === 'cpu') {
             value = metrics.system?.cpu_usage || metrics.system?.cpu_load;
         } else if (check.check_type === 'memory') {
@@ -70,7 +87,7 @@ export async function applyThresholdRules(device: any, metrics: any) {
             const iface = metrics.network?.interfaces?.find((i: any) => i.name === check.target);
             if (iface) {
                 if (check.check_type === 'bandwidth') {
-                    value = (iface.rx_bps + iface.tx_bps) / 1000000; // Mbps
+                    value = (iface.rx_bps + iface.tx_bps) / 1000000;
                 } else {
                     value = iface.utilization_percent;
                 }
@@ -93,7 +110,7 @@ export async function applyThresholdRules(device: any, metrics: any) {
 
                 if (criticalStates.includes(container.status.toLowerCase()) || container.health === 'unhealthy') {
                     isProblem = true;
-                    value = 100; // Binary problem for status
+                    value = 100;
                     message = `Container ${check.target} is ${container.status}${container.health ? ` (${container.health})` : ''}`;
                 } else if (warningStates.includes(container.status.toLowerCase())) {
                     isProblem = true;
@@ -113,17 +130,19 @@ export async function applyThresholdRules(device: any, metrics: any) {
                 newState = 'warning';
             }
 
-            // Persistence and State Tracking
             const stateChanged = check.last_state !== newState;
             check.last_state = newState;
             check.last_evaluated_at = new Date();
             check.last_message = message || `${check.check_type.toUpperCase()} is ${value}${unit} (Threshold: ${newState === 'critical' ? check.thresholds.critical : check.thresholds.warning}${unit})`;
             await check.save();
 
-            // Alerting integration
             if (newState !== 'ok') {
+                const throttlingConfig = newState === 'critical'
+                    ? { repeat_interval_minutes: 5, throttling_duration_minutes: 0 }
+                    : { repeat_interval_minutes: 15, throttling_duration_minutes: 60 };
+
                 await triggerAlert({
-                    device_id: device._id,
+                    device_id: device.device_id,
                     device_name: device.name,
                     alert_type: 'rule_violation',
                     severity: newState,
@@ -133,19 +152,17 @@ export async function applyThresholdRules(device: any, metrics: any) {
                         value,
                         threshold: newState === 'critical' ? check.thresholds.critical : check.thresholds.warning,
                         unit,
-                        rule_id: check._id
+                        rule_id: check._id,
                     },
-                    throttling_config: {
-                        repeat_interval_minutes: check.notification_frequency
-                    }
+                    throttling_config: throttlingConfig,
                 });
             } else if (stateChanged) {
                 await resolveAlert({
-                    device_id: device._id,
+                    device_id: device.device_id,
                     device_name: device.name,
                     alert_type: 'rule_violation',
                     specific_service: check.check_type,
-                    specific_endpoint: check.target
+                    specific_endpoint: check.target,
                 });
             }
         }
@@ -153,41 +170,21 @@ export async function applyThresholdRules(device: any, metrics: any) {
 }
 
 /**
- * Check if service data is present in metrics
- */
-function checkIfServiceDataPresent(service: string, metrics: any): boolean {
-    switch (service) {
-        case 'system':
-            return !!(metrics.system || metrics.cpu_usage !== undefined || metrics.memory_total !== undefined);
-        case 'docker':
-            return !!(metrics.docker || metrics.containers !== undefined || metrics.docker_version !== undefined);
-        case 'asterisk':
-            return !!(metrics.asterisk || metrics.sip_peers !== undefined || metrics.asterisk_version !== undefined);
-        case 'network':
-            return !!(metrics.network || metrics.interfaces !== undefined || metrics.ping_results !== undefined);
-        default:
-            return false;
-    }
-}
-
-/**
- * Monitor SIP endpoints for registration status and latency
+ * Monitor SIP endpoints for registration status and latency.
  */
 export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
     try {
-        const device = await Device.findById(deviceId);
-        if (!device) return;
+        const device = await Device.findOne({ device_id: deviceId });
+        if (!device || device.monitoring_paused) return;
 
-        // Fetch custom monitoring rules for SIP
         const sipRules = await MonitoringCheck.find({
             device_id: deviceId,
             enabled: true,
-            check_type: { $in: ['sip', 'sip_registration'] }
+            check_type: { $in: ['sip', 'sip_registration'] },
         });
 
         const rttThresholdDefault = device.sip_rtt_threshold_ms || 200;
 
-        // 1. Check SIP Registrations (Outbound trunks)
         const registrations = sipMetrics.registrations || [];
         if (registrations.length > 0) {
             for (const reg of registrations) {
@@ -205,8 +202,9 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
                             details: {
                                 issue_type: 'registration_failed',
                                 status,
-                                type: 'PJSIP Registration'
-                            }
+                                type: 'PJSIP Registration',
+                            },
+                            throttling_config: { repeat_interval_minutes: 15, throttling_duration_minutes: 60 },
                         });
                     } else {
                         await resolveAlert({
@@ -214,27 +212,25 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
                             device_name: device.name,
                             alert_type: 'sip_issue',
                             specific_service: 'sip_registration',
-                            specific_endpoint: name
+                            specific_endpoint: name,
                         });
                     }
                 }
             }
         }
 
-        // 2. Check SIP Peers/Contacts (Availability and RTT)
         const peers = sipMetrics.sip_peers || sipMetrics.contacts || [];
         for (const peer of peers) {
-            const { endpoint, status, latency_ms, contact, aor, name: peerName } = peer;
+            const { endpoint, status, latency_ms, rttMs, contact, aor, name: peerName } = peer;
             const name = endpoint || aor || peerName || 'unknown-endpoint';
+            const latencyValue = latency_ms ?? rttMs;
 
             if (!shouldMonitor(device, name)) continue;
 
-            // Check dynamic rules for this specific endpoint
             const specificRule = sipRules.find((r: any) => r.check_type === 'sip' && (r.target === name || !r.target));
             const critThresh = specificRule?.thresholds?.critical || rttThresholdDefault;
             const warnThresh = specificRule?.thresholds?.warning || rttThresholdDefault;
 
-            // Check registration/reachability status
             if (status !== 'registered' && status !== 'OK' && status !== 'Avail') {
                 await triggerAlert({
                     device_id: deviceId,
@@ -246,8 +242,9 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
                     details: {
                         issue_type: 'contact_unreachable',
                         status,
-                        contact: contact || 'N/A'
-                    }
+                        contact: contact || 'N/A',
+                    },
+                    throttling_config: { repeat_interval_minutes: 5, throttling_duration_minutes: 0 },
                 });
             } else {
                 await resolveAlert({
@@ -255,13 +252,12 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
                     device_name: device.name,
                     alert_type: 'sip_issue',
                     specific_service: 'sip_peer',
-                    specific_endpoint: name
+                    specific_endpoint: name,
                 });
             }
 
-            // Check latency against threshold (Rule or Global)
-            if (latency_ms) {
-                if (latency_ms > critThresh) {
+            if (latencyValue) {
+                if (latencyValue > critThresh) {
                     await triggerAlert({
                         device_id: deviceId,
                         device_name: device.name,
@@ -269,9 +265,10 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
                         severity: 'critical',
                         specific_service: 'sip_peer',
                         specific_endpoint: name,
-                        details: { latency_ms, threshold_ms: critThresh }
+                        details: { latency_ms: latencyValue, threshold_ms: critThresh },
+                        throttling_config: { repeat_interval_minutes: 5, throttling_duration_minutes: 0 },
                     });
-                } else if (latency_ms > warnThresh) {
+                } else if (latencyValue > warnThresh) {
                     await triggerAlert({
                         device_id: deviceId,
                         device_name: device.name,
@@ -279,7 +276,8 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
                         severity: 'warning',
                         specific_service: 'sip_peer',
                         specific_endpoint: name,
-                        details: { latency_ms, threshold_ms: warnThresh }
+                        details: { latency_ms: latencyValue, threshold_ms: warnThresh },
+                        throttling_config: { repeat_interval_minutes: 15, throttling_duration_minutes: 60 },
                     });
                 } else {
                     await resolveAlert({
@@ -287,7 +285,7 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
                         device_name: device.name,
                         alert_type: 'high_latency',
                         specific_service: 'sip_peer',
-                        specific_endpoint: name
+                        specific_endpoint: name,
                     });
                 }
             }
@@ -297,9 +295,6 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
     }
 }
 
-/**
- * Helper to check if a specific endpoint should be monitored
- */
 function shouldMonitor(device: any, endpoint: string): boolean {
     if (!device.monitored_sip_endpoints || device.monitored_sip_endpoints.length === 0) return true;
     return device.monitored_sip_endpoints.includes(endpoint) || device.monitored_sip_endpoints.includes('all');

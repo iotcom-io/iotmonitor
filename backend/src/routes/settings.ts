@@ -19,7 +19,7 @@ router.get('/', async (req: AuthRequest, res) => {
                     sip_registration: { warning: 90, critical: 75 }, // percent registered
                 },
                 default_notification_frequency: 15,
-                summary_interval_minutes: 60,
+                summary_interval_minutes: 360,
             });
         }
         res.json(settings);

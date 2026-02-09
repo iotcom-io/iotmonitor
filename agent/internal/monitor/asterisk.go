@@ -55,6 +55,32 @@ func dockerExecAsterisk(ctx context.Context, container string, cmd string) (stri
 	return out.String(), nil
 }
 
+func localExecAsterisk(ctx context.Context, cmd string) (string, error) {
+	c := exec.CommandContext(ctx, "asterisk", "-rx", cmd)
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	c.Stdout = &out
+	c.Stderr = &stderr
+
+	if err := c.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return "", errors.New(msg)
+	}
+	return out.String(), nil
+}
+
+func execAsterisk(ctx context.Context, container string, cmd string) (string, error) {
+	if container != "" {
+		if out, err := dockerExecAsterisk(ctx, container, cmd); err == nil {
+			return out, nil
+		}
+	}
+	return localExecAsterisk(ctx, cmd)
+}
+
 func parsePJSIPRegistrations(output string) []PJSIPRegistration {
 	lines := strings.Split(output, "\n")
 	var rows []string
@@ -195,11 +221,11 @@ func GetAsteriskPJSIPMetrics(container string) (AsteriskPJSIPMetrics, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 
-	regOut, err := dockerExecAsterisk(ctx, container, "pjsip show registrations")
+	regOut, err := execAsterisk(ctx, container, "pjsip show registrations")
 	if err != nil {
 		return AsteriskPJSIPMetrics{}, err
 	}
-	contOut, err := dockerExecAsterisk(ctx, container, "pjsip show contacts")
+	contOut, err := execAsterisk(ctx, container, "pjsip show contacts")
 	if err != nil {
 		return AsteriskPJSIPMetrics{}, err
 	}

@@ -6,16 +6,19 @@ import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { z } from 'zod';
+import { resolveAllActiveAlertsForDevice } from '../services/notificationThrottling';
 
 const router = Router();
 
 type BuildOS = 'linux' | 'windows';
 type BuildArch = 'amd64' | 'arm64';
+const ALL_MODULES = ['system', 'docker', 'asterisk', 'network'] as const;
 
 const buildRequestSchema = z.object({
     os: z.enum(['linux', 'windows']),
     arch: z.enum(['amd64', 'arm64']),
     name: z.string().trim().min(1).max(120).optional(),
+    modules: z.record(z.string(), z.boolean()).optional(),
 });
 
 const createAndBuildRequestSchema = buildRequestSchema.extend({
@@ -52,6 +55,18 @@ const normalizeMQTTURL = (rawValue: string | undefined) => {
     }
 
     return `mqtt://${value.includes(':') ? value : `${value}:1883`}`;
+};
+
+const modulesToCSV = (modules?: Record<string, boolean> | string[]) => {
+    if (!modules) {
+        return ALL_MODULES.join(',');
+    }
+
+    if (Array.isArray(modules)) {
+        return modules.filter((m) => ALL_MODULES.includes(m as any)).join(',');
+    }
+
+    return ALL_MODULES.filter((module) => modules[module] === true).join(',');
 };
 
 const buildAgentBinary = async ({
@@ -182,12 +197,40 @@ router.get('/:id', authorize(['admin', 'operator', 'viewer']), async (req: AuthR
 // Update device
 router.patch('/:id', authorize(['admin', 'operator']), async (req: AuthRequest, res) => {
     try {
+        const previous = await Device.findOne({ device_id: req.params.id });
+        if (!previous) return res.status(404).json({ message: 'Device not found' });
+
         const device = await Device.findOneAndUpdate(
             { device_id: req.params.id },
             { $set: req.body },
             { new: true }
         );
         if (!device) return res.status(404).json({ message: 'Device not found' });
+
+        const pausedChanged = previous.monitoring_paused !== device.monitoring_paused;
+        if (pausedChanged) {
+            const { NotificationService } = await import('../services/NotificationService');
+            const SystemSettings = (await import('../models/SystemSettings')).default;
+            const settings = await SystemSettings.findOne();
+
+            if (device.monitoring_paused) {
+                await resolveAllActiveAlertsForDevice(device.device_id, device.name, 'Monitoring paused', true);
+                await NotificationService.send({
+                    subject: `Monitoring Paused: ${device.name}`,
+                    message: `Monitoring has been paused for ${device.name}. No further monitoring alerts will be sent until resumed.`,
+                    channels: ['slack'],
+                    recipients: { slackWebhook: settings?.notification_slack_webhook || device.notification_slack_webhook },
+                });
+            } else {
+                await NotificationService.send({
+                    subject: `Monitoring Resumed: ${device.name}`,
+                    message: `Monitoring has resumed for ${device.name}. Alerts and real-time monitoring are active again.`,
+                    channels: ['slack'],
+                    recipients: { slackWebhook: settings?.notification_slack_webhook || device.notification_slack_webhook },
+                });
+            }
+        }
+
         res.json(device);
     } catch (err: any) {
         res.status(400).json({ message: err.message });
@@ -224,10 +267,11 @@ router.post('/:id/regenerate-token', authorize(['admin']), async (req: AuthReque
 // Build agent for an existing device
 router.post('/:id/generate-agent', authorize(['admin', 'operator']), async (req: AuthRequest, res) => {
     try {
-        const { os, arch, name } = buildRequestSchema.parse(req.body) as {
+        const { os, arch, name, modules } = buildRequestSchema.parse(req.body) as {
             os: BuildOS;
             arch: BuildArch;
             name?: string;
+            modules?: Record<string, boolean>;
         };
 
         const device = await Device.findOne({ device_id: req.params.id });
@@ -235,6 +279,12 @@ router.post('/:id/generate-agent', authorize(['admin', 'operator']), async (req:
 
         if (name) {
             device.name = name;
+        }
+        if (modules) {
+            device.enabled_modules = Object.keys(modules).filter((k) => modules[k]) as any;
+            device.config = { ...(device.config || {}), modules };
+        }
+        if (name || modules) {
             await device.save();
         }
 
@@ -249,10 +299,12 @@ router.post('/:id/generate-agent', authorize(['admin', 'operator']), async (req:
         const SystemSettings = (await import('../models/SystemSettings')).default;
         const settings = await SystemSettings.findOne();
         const mqttUrl = normalizeMQTTURL(settings?.mqtt_public_url || process.env.MQTT_URL);
+        const enabledModules = modulesToCSV(modules || (device.enabled_modules as string[]) || device.config?.modules);
 
         const ldflags = `-X github.com/iotmonitor/agent/internal/config.DefaultDeviceID=${device.device_id} ` +
             `-X github.com/iotmonitor/agent/internal/config.DefaultAgentToken=${device.agent_token} ` +
-            `-X github.com/iotmonitor/agent/internal/config.DefaultMQTTURL=${mqttUrl}`;
+            `-X github.com/iotmonitor/agent/internal/config.DefaultMQTTURL=${mqttUrl} ` +
+            `-X github.com/iotmonitor/agent/internal/config.DefaultEnabledModules=${enabledModules}`;
 
         await buildAgentBinary({
             agentDir,
@@ -300,6 +352,7 @@ router.post('/generate-agent', authorize(['admin', 'operator']), async (req: Aut
             agent_token,
             mqtt_topic,
             status: 'offline',
+            enabled_modules: modules ? Object.keys(modules).filter((k) => modules[k]) : undefined,
             config: { modules },
         });
         await device.save();
@@ -330,10 +383,12 @@ router.post('/generate-agent', authorize(['admin', 'operator']), async (req: Aut
         const SystemSettings = (await import('../models/SystemSettings')).default;
         const settings = await SystemSettings.findOne();
         const mqttUrl = normalizeMQTTURL(settings?.mqtt_public_url || process.env.MQTT_URL);
+        const enabledModules = modulesToCSV(modules);
 
         const ldflags = `-X github.com/iotmonitor/agent/internal/config.DefaultDeviceID=${device_id} ` +
             `-X github.com/iotmonitor/agent/internal/config.DefaultAgentToken=${agent_token} ` +
-            `-X github.com/iotmonitor/agent/internal/config.DefaultMQTTURL=${mqttUrl}`;
+            `-X github.com/iotmonitor/agent/internal/config.DefaultMQTTURL=${mqttUrl} ` +
+            `-X github.com/iotmonitor/agent/internal/config.DefaultEnabledModules=${enabledModules}`;
 
         await buildAgentBinary({
             agentDir,

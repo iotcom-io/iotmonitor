@@ -2,7 +2,7 @@ import mongoose, { Document, Schema } from 'mongoose';
 
 export interface IAlertTracking extends Document {
     device_id: string;
-    alert_type: 'offline' | 'online' | 'service_down' | 'sip_issue' | 'high_latency' | 'threshold';
+    alert_type: 'offline' | 'online' | 'service_down' | 'sip_issue' | 'high_latency' | 'threshold' | 'rule_violation' | 'ip_change';
     specific_service?: string;
     specific_endpoint?: string;
     severity: 'info' | 'warning' | 'critical';
@@ -26,7 +26,7 @@ const AlertTrackingSchema = new Schema<IAlertTracking>({
     alert_type: {
         type: String,
         required: true,
-        enum: ['offline', 'online', 'service_down', 'sip_issue', 'high_latency', 'threshold']
+        enum: ['offline', 'online', 'service_down', 'sip_issue', 'high_latency', 'threshold', 'rule_violation', 'ip_change']
     },
     specific_service: { type: String },
     specific_endpoint: { type: String },

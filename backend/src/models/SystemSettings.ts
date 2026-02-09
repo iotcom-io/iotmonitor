@@ -36,7 +36,7 @@ const SystemSettingsSchema: Schema = new Schema({
     notification_email_pass: { type: String },
     default_thresholds: { type: Schema.Types.Mixed },
     default_notification_frequency: { type: Number, default: 15 }, // minutes
-    summary_interval_minutes: { type: Number, default: 60 },
+    summary_interval_minutes: { type: Number, default: 360 },
     monitoring_check_interval_seconds: { type: Number, default: 30 },
     default_offline_threshold_multiplier: { type: Number, default: 4 },
     default_repeat_interval_minutes: { type: Number, default: 5 },
