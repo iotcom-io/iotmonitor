@@ -9,6 +9,8 @@ type Config struct {
 	DeviceID   string `json:"device_id"`
 	AgentToken string `json:"agent_token"`
 	MQTTURL    string `json:"mqtt_url"`
+	MQTTUsername string `json:"mqtt_username"`
+	MQTTPassword string `json:"mqtt_password"`
 	MQTTPort   int    `json:"mqtt_port"`
 	UseTLS     bool   `json:"use_tls"`
 	MQTTPrefix string `json:"mqtt_prefix"`
@@ -21,6 +23,8 @@ var (
 	DefaultDeviceID         = ""
 	DefaultAgentToken       = ""
 	DefaultMQTTURL          = "localhost"
+	DefaultMQTTUsername     = ""
+	DefaultMQTTPassword     = ""
 	DefaultEnabledModules   = "system,docker,asterisk,network"
 	DefaultAsteriskContainer = "asterisk"
 )
@@ -33,6 +37,8 @@ func LoadConfig(path string) (*Config, error) {
 			DeviceID:   os.Getenv("IOT_DEVICE_ID"),
 			AgentToken: os.Getenv("IOT_AGENT_TOKEN"),
 			MQTTURL:    os.Getenv("IOT_MQTT_URL"),
+			MQTTUsername: os.Getenv("IOT_MQTT_USERNAME"),
+			MQTTPassword: os.Getenv("IOT_MQTT_PASSWORD"),
 			MQTTPrefix: "iotmonitor/device",
 			EnabledModules: os.Getenv("IOT_ENABLED_MODULES"),
 			AsteriskContainer: os.Getenv("IOT_ASTERISK_CONTAINER"),
@@ -46,6 +52,12 @@ func LoadConfig(path string) (*Config, error) {
 		}
 		if cfg.MQTTURL == "" {
 			cfg.MQTTURL = DefaultMQTTURL
+		}
+		if cfg.MQTTUsername == "" {
+			cfg.MQTTUsername = DefaultMQTTUsername
+		}
+		if cfg.MQTTPassword == "" {
+			cfg.MQTTPassword = DefaultMQTTPassword
 		}
 		if cfg.EnabledModules == "" {
 			cfg.EnabledModules = DefaultEnabledModules
@@ -66,6 +78,18 @@ func LoadConfig(path string) (*Config, error) {
 
 	if cfg.MQTTPrefix == "" {
 		cfg.MQTTPrefix = "iotmonitor/device"
+	}
+	if cfg.MQTTUsername == "" {
+		cfg.MQTTUsername = os.Getenv("IOT_MQTT_USERNAME")
+	}
+	if cfg.MQTTUsername == "" {
+		cfg.MQTTUsername = DefaultMQTTUsername
+	}
+	if cfg.MQTTPassword == "" {
+		cfg.MQTTPassword = os.Getenv("IOT_MQTT_PASSWORD")
+	}
+	if cfg.MQTTPassword == "" {
+		cfg.MQTTPassword = DefaultMQTTPassword
 	}
 	if cfg.EnabledModules == "" {
 		cfg.EnabledModules = os.Getenv("IOT_ENABLED_MODULES")

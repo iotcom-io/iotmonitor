@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -20,8 +21,17 @@ func NewClient(cfg *config.Config) (*Client, error) {
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(cfg.MQTTURL)
 	opts.SetClientID(cfg.DeviceID)
-	opts.SetUsername(cfg.DeviceID)
-	opts.SetPassword(cfg.AgentToken)
+
+	// Prefer explicit broker credentials from settings/build env; fallback to device auth.
+	username := strings.TrimSpace(cfg.MQTTUsername)
+	password := cfg.MQTTPassword
+	if username == "" {
+		username = cfg.DeviceID
+		password = cfg.AgentToken
+	}
+
+	opts.SetUsername(username)
+	opts.SetPassword(password)
 	opts.SetAutoReconnect(true)
 	opts.SetMaxReconnectInterval(5 * time.Minute)
 

@@ -316,6 +316,8 @@ router.post('/:id/generate-agent', authorize(['admin', 'operator']), async (req:
         const SystemSettings = (await import('../models/SystemSettings')).default;
         const settings = await SystemSettings.findOne();
         const mqttUrl = normalizeMQTTURL(settings?.mqtt_public_url || process.env.MQTT_URL);
+        const mqttUsername = String(settings?.mqtt_username || '').trim();
+        const mqttPassword = String(settings?.mqtt_password || '').trim();
         const enabledModules = modulesToCSV(modules || (device.enabled_modules as string[]) || device.config?.modules);
         const asteriskContainer =
             asterisk_container_name ||
@@ -326,6 +328,8 @@ router.post('/:id/generate-agent', authorize(['admin', 'operator']), async (req:
         const ldflags = `-X github.com/iotmonitor/agent/internal/config.DefaultDeviceID=${device.device_id} ` +
             `-X github.com/iotmonitor/agent/internal/config.DefaultAgentToken=${device.agent_token} ` +
             `-X github.com/iotmonitor/agent/internal/config.DefaultMQTTURL=${mqttUrl} ` +
+            `-X github.com/iotmonitor/agent/internal/config.DefaultMQTTUsername=${mqttUsername} ` +
+            `-X github.com/iotmonitor/agent/internal/config.DefaultMQTTPassword=${mqttPassword} ` +
             `-X github.com/iotmonitor/agent/internal/config.DefaultEnabledModules=${enabledModules} ` +
             `-X github.com/iotmonitor/agent/internal/config.DefaultAsteriskContainer=${asteriskContainer}`;
 
@@ -408,12 +412,16 @@ router.post('/generate-agent', authorize(['admin', 'operator']), async (req: Aut
         const SystemSettings = (await import('../models/SystemSettings')).default;
         const settings = await SystemSettings.findOne();
         const mqttUrl = normalizeMQTTURL(settings?.mqtt_public_url || process.env.MQTT_URL);
+        const mqttUsername = String(settings?.mqtt_username || '').trim();
+        const mqttPassword = String(settings?.mqtt_password || '').trim();
         const enabledModules = modulesToCSV(modules);
         const asteriskContainer = asterisk_container_name || 'asterisk';
 
         const ldflags = `-X github.com/iotmonitor/agent/internal/config.DefaultDeviceID=${device_id} ` +
             `-X github.com/iotmonitor/agent/internal/config.DefaultAgentToken=${agent_token} ` +
             `-X github.com/iotmonitor/agent/internal/config.DefaultMQTTURL=${mqttUrl} ` +
+            `-X github.com/iotmonitor/agent/internal/config.DefaultMQTTUsername=${mqttUsername} ` +
+            `-X github.com/iotmonitor/agent/internal/config.DefaultMQTTPassword=${mqttPassword} ` +
             `-X github.com/iotmonitor/agent/internal/config.DefaultEnabledModules=${enabledModules} ` +
             `-X github.com/iotmonitor/agent/internal/config.DefaultAsteriskContainer=${asteriskContainer}`;
 

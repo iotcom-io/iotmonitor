@@ -4,9 +4,14 @@ import { updateDeviceHeartbeat } from './offlineDetection';
 import { checkServiceHealth, checkSIPEndpoints } from './serviceMonitoring';
 
 const MQTT_URL = process.env.MQTT_URL || 'mqtt://localhost:1883';
+const MQTT_USERNAME = process.env.MQTT_USERNAME;
+const MQTT_PASSWORD = process.env.MQTT_PASSWORD;
 const DEBUG_MQTT = process.env.DEBUG_MQTT === 'true';
 const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Asia/Kolkata';
-const client = mqtt.connect(MQTT_URL);
+const client = mqtt.connect(MQTT_URL, {
+    username: MQTT_USERNAME,
+    password: MQTT_PASSWORD,
+});
 let mqttConnectedAt = 0;
 
 const areStringArraysEqual = (a: string[] = [], b: string[] = []) => {
