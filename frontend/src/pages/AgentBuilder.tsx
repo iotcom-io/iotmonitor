@@ -33,6 +33,7 @@ export const AgentBuilder = () => {
     const { devices, fetchDevices } = useDeviceStore();
     const [selectedDeviceId, setSelectedDeviceId] = useState<string>('new');
     const [deviceName, setDeviceName] = useState<string>('');
+    const [asteriskContainerName, setAsteriskContainerName] = useState<string>('asterisk');
     const [template, setTemplate] = useState<'custom' | 'standard' | 'full'>('custom');
     const [modules, setModules] = useState({
         system: true,
@@ -44,6 +45,20 @@ export const AgentBuilder = () => {
     useEffect(() => {
         fetchDevices();
     }, []);
+
+    useEffect(() => {
+        if (selectedDeviceId === 'new') {
+            setAsteriskContainerName('asterisk');
+            return;
+        }
+
+        const selectedDevice = devices.find((d) => d.device_id === selectedDeviceId);
+        const configuredContainer =
+            selectedDevice?.asterisk_container_name ||
+            selectedDevice?.config?.asterisk_container ||
+            'asterisk';
+        setAsteriskContainerName(configuredContainer);
+    }, [selectedDeviceId, devices]);
 
     const applyTemplate = (t: 'standard' | 'full') => {
         setTemplate(t);
@@ -79,7 +94,8 @@ export const AgentBuilder = () => {
                 os,
                 arch,
                 modules,
-                name: deviceName
+                name: selectedDeviceId === 'new' ? deviceName : undefined,
+                asterisk_container_name: modules.asterisk ? asteriskContainerName.trim() || 'asterisk' : undefined,
             });
             setBuildResult({
                 url: `/api/devices/download/${data.binary_id}`,
@@ -190,6 +206,20 @@ export const AgentBuilder = () => {
                     onToggle={() => toggleModule('network')}
                 />
             </div>
+
+            {modules.asterisk && (
+                <div className="card space-y-3">
+                    <label className="text-sm font-medium text-slate-400 uppercase tracking-wider">Asterisk Container Name</label>
+                    <input
+                        type="text"
+                        value={asteriskContainerName}
+                        onChange={e => setAsteriskContainerName(e.target.value)}
+                        className="w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-3 text-white outline-none focus:border-primary-500/50"
+                        placeholder="e.g. asterisk, pbx-01, voip-core"
+                    />
+                    <p className="text-xs text-slate-500">Used by the agent for `docker exec` asterisk commands. Defaults to `asterisk`.</p>
+                </div>
+            )}
 
             <div className="card space-y-6">
                 <h3 className="text-xl font-bold text-white">Build Options</h3>

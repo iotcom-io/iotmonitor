@@ -18,6 +18,7 @@ export interface IMonitoringCheck extends Document {
     enabled: boolean;
     last_evaluated_at?: Date;
     last_state?: 'ok' | 'warning' | 'critical' | 'unknown';
+    last_value?: number;
     last_message?: string;
     created_at: Date;
     updated_at: Date;
@@ -45,6 +46,7 @@ const MonitoringCheckSchema: Schema = new Schema({
     enabled: { type: Boolean, default: true },
     last_evaluated_at: { type: Date },
     last_state: { type: String, enum: ['ok', 'warning', 'critical', 'unknown'], default: 'unknown' },
+    last_value: { type: Number },
     last_message: { type: String }
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 

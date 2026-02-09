@@ -41,7 +41,7 @@ router.get('/checks/:deviceId', async (req: AuthRequest, res) => {
 // Add a check to a device
 router.post('/', async (req: AuthRequest, res) => {
     try {
-        const { device_id, check_type, target, config, interval, thresholds, notification_frequency, notification_recipients } = req.body;
+        const { device_id, check_type, target, config, interval, thresholds, notification_frequency, notification_recipients, notify } = req.body;
         const check = new MonitoringCheck({
             device_id,
             check_type,
@@ -50,7 +50,7 @@ router.post('/', async (req: AuthRequest, res) => {
             interval,
             thresholds,
             notification_frequency,
-            notification_recipients
+            notify: notify || notification_recipients
         });
         await check.save();
         res.status(201).json(check);

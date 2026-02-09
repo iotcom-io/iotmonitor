@@ -5,6 +5,7 @@ import { checkServiceHealth, checkSIPEndpoints } from './serviceMonitoring';
 
 const MQTT_URL = process.env.MQTT_URL || 'mqtt://localhost:1883';
 const DEBUG_MQTT = process.env.DEBUG_MQTT === 'true';
+const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Asia/Kolkata';
 const client = mqtt.connect(MQTT_URL);
 let mqttConnectedAt = 0;
 
@@ -22,10 +23,18 @@ const notifyIPChange = async (device: any, type: 'public' | 'local', previousVal
 
         const previous = Array.isArray(previousValue) ? previousValue.join(', ') || 'None' : previousValue || 'None';
         const current = Array.isArray(currentValue) ? currentValue.join(', ') || 'None' : currentValue || 'None';
+        const changedAt = new Date().toLocaleString('en-US', { timeZone: APP_TIMEZONE });
+        const ipTypeLabel = type === 'public' ? 'Public IP' : 'Local IP';
 
         await NotificationService.send({
             subject: `IP Change Detected: ${device.name}`,
-            message: `${type === 'public' ? 'Public' : 'Local'} IP changed for ${device.name}\nPrevious: ${previous}\nCurrent: ${current}`,
+            message:
+                `ALERT\n\n` +
+                `Device: ${device.name}\n` +
+                `Alert: ${ipTypeLabel} Changed\n` +
+                `Time: ${changedAt}\n` +
+                `Previous: ${previous}\n` +
+                `Current: ${current}`,
             channels: ['slack'],
             recipients: { slackWebhook: settings?.notification_slack_webhook || device.notification_slack_webhook },
         });
@@ -87,15 +96,24 @@ client.on('message', async (topic, message, packet) => {
                 );
 
                 if (!device.monitoring_paused) {
-                    const { NotificationService } = await import('./NotificationService');
-                    const settings = await (await import('../models/SystemSettings')).default.findOne();
+                    // Offline/online notifications are handled by alert lifecycle logic.
+                    // Keep this only for non-primary statuses to avoid duplicate recovery noise.
+                    if (!['offline', 'online'].includes(status)) {
+                        const { NotificationService } = await import('./NotificationService');
+                        const settings = await (await import('../models/SystemSettings')).default.findOne();
+                        const changedAt = new Date().toLocaleString('en-US', { timeZone: APP_TIMEZONE });
 
-                    await NotificationService.send({
-                        subject: `Device Status Change: ${device.name}`,
-                        message: `Device ${device.name} is now ${status.toUpperCase()}`,
-                        channels: ['slack'],
-                        recipients: { slackWebhook: settings?.notification_slack_webhook },
-                    });
+                        await NotificationService.send({
+                            subject: `Device Status Change: ${device.name}`,
+                            message:
+                                `STATUS UPDATE\n\n` +
+                                `Device: ${device.name}\n` +
+                                `Status: ${status.toUpperCase()}\n` +
+                                `Time: ${changedAt}`,
+                            channels: ['slack'],
+                            recipients: { slackWebhook: settings?.notification_slack_webhook || device.notification_slack_webhook },
+                        });
+                    }
                 }
             }
             return;
@@ -173,7 +191,11 @@ client.on('message', async (topic, message, packet) => {
                             await notifyIPChange(freshDevice, 'public', previousPublicIP, nextPublicIP);
                         }
 
-                        if (!areStringArraysEqual(previousLocalIPs, nextLocalIPs)) {
+                        if (
+                            previousLocalIPs.length > 0 &&
+                            nextLocalIPs.length > 0 &&
+                            !areStringArraysEqual(previousLocalIPs, nextLocalIPs)
+                        ) {
                             await notifyIPChange(freshDevice, 'local', previousLocalIPs, nextLocalIPs);
                         }
                     }
@@ -242,7 +264,11 @@ client.on('message', async (topic, message, packet) => {
                         await notifyIPChange(freshDevice, 'public', previousPublicIP, nextPublicIP);
                     }
 
-                    if (!areStringArraysEqual(previousLocalIPs, nextLocalIPs)) {
+                    if (
+                        previousLocalIPs.length > 0 &&
+                        nextLocalIPs.length > 0 &&
+                        !areStringArraysEqual(previousLocalIPs, nextLocalIPs)
+                    ) {
                         await notifyIPChange(freshDevice, 'local', previousLocalIPs, nextLocalIPs);
                     }
 

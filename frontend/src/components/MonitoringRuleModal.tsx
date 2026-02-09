@@ -12,9 +12,8 @@ interface MonitoringRuleModalProps {
             registrations?: { name: string; status: string; serverUri: string; expiresS: number }[];
             contacts?: { aor: string; status: string; rttMs?: number }[];
             interfaces?: { name: string; rx_bps: number; tx_bps: number; rx_bytes: number; tx_bytes: number }[];
-            docker?: {
-                containers?: { name: string; state: string; status: string }[];
-            };
+            docker?: { containers?: { name?: string; names?: string[]; Names?: string[]; state: string; status: string }[] } |
+            { name?: string; names?: string[]; Names?: string[]; state: string; status: string }[];
         };
     };
 }
@@ -66,6 +65,21 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, late
 
     // Store customizations per type to prevent loss when switching tabs
     const [sessionConfigs, setSessionConfigs] = useState<Record<string, SessionConfig>>({});
+
+    const dockerContainers = React.useMemo(() => {
+        const rawDocker = latestMetrics?.extra?.docker as any;
+        const containers = Array.isArray(rawDocker) ? rawDocker : (rawDocker?.containers || []);
+        return containers.map((container: any) => ({
+            ...container,
+            displayName: String(
+                container?.name ||
+                (Array.isArray(container?.names) ? container.names[0] : undefined) ||
+                (Array.isArray(container?.Names) ? container.Names[0] : undefined) ||
+                container?.id ||
+                'unknown'
+            ).replace(/^\//, ''),
+        }));
+    }, [latestMetrics]);
 
     React.useEffect(() => {
         const prepped = prepData(initialData);
@@ -311,21 +325,23 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, late
                                         </button>
                                     ))
                                 ) : formData.check_type === 'container_status' ? (
-                                    latestMetrics?.extra?.docker?.containers?.map((c: any) => (
+                                    dockerContainers.map((c: any) => (
                                         <button
-                                            key={c.name}
+                                            key={c.displayName}
                                             type="button"
                                             onClick={() => {
                                                 const current = formData.targets || [];
-                                                const next = current.includes(c.name) ? current.filter((t: string) => t !== c.name) : [...current, c.name];
+                                                const next = current.includes(c.displayName)
+                                                    ? current.filter((t: string) => t !== c.displayName)
+                                                    : [...current, c.displayName];
                                                 updateField({ targets: next });
                                             }}
                                             className={clsx(
                                                 "px-3 py-1.5 rounded-lg border text-xs font-bold transition-all",
-                                                formData.targets?.includes(c.name) ? "bg-primary-500/20 border-primary-500 text-primary-400" : "bg-white/5 border-white/10 text-slate-500"
+                                                formData.targets?.includes(c.displayName) ? "bg-primary-500/20 border-primary-500 text-primary-400" : "bg-white/5 border-white/10 text-slate-500"
                                             )}
                                         >
-                                            {c.name}
+                                            {c.displayName}
                                         </button>
                                     ))
                                 ) : formData.check_type === 'disk' ? (

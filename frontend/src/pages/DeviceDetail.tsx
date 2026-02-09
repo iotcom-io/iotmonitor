@@ -206,6 +206,9 @@ export const DeviceDetail = () => {
         ? latest.disk_usage
         : (latest?.disk_used !== undefined && latest?.disk_total ? (latest.disk_used / latest.disk_total) * 100 : undefined);
     const pingSamples: any[] = latest?.extra?.ping_results || [];
+    const dockerContainers: any[] = Array.isArray(latest?.extra?.docker)
+        ? latest.extra.docker
+        : (latest?.extra?.docker?.containers || []);
     const successfulPings = pingSamples.filter(p => p.success);
     const avgLatency = successfulPings.length
         ? (successfulPings.reduce((sum, p) => sum + (p.latency_ms || 0), 0) / successfulPings.length)
@@ -667,12 +670,12 @@ export const DeviceDetail = () => {
                             <div className="flex gap-4">
                                 <div className="text-right">
                                     <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Total</p>
-                                    <p className="text-lg font-black text-white">{latest?.extra?.docker?.containers?.length || 0}</p>
+                                    <p className="text-lg font-black text-white">{dockerContainers.length}</p>
                                 </div>
                                 <div className="text-right">
                                     <p className="text-[10px] text-emerald-500 font-bold uppercase tracking-widest">Running</p>
                                     <p className="text-lg font-black text-emerald-400">
-                                        {latest?.extra?.docker?.containers?.filter((c: any) => c.state === 'running').length || 0}
+                                        {dockerContainers.filter((c: any) => c.state === 'running').length}
                                     </p>
                                 </div>
                             </div>
@@ -690,7 +693,7 @@ export const DeviceDetail = () => {
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-white/5">
-                                    {latest?.extra?.docker?.containers?.map((container: any) => (
+                                    {dockerContainers.map((container: any) => (
                                         <tr key={container.id} className="hover:bg-white/[0.02] transition-colors group">
                                             <td className="px-4 py-4">
                                                 <div className="flex items-center gap-2">
@@ -708,7 +711,7 @@ export const DeviceDetail = () => {
                                             </td>
                                             <td className="px-4 py-4">
                                                 <p className="text-sm font-bold text-white group-hover:text-primary-400 transition-colors">
-                                                    {container.name.replace(/^\//, '')}
+                                                    {(container.name || (Array.isArray(container.names) ? container.names[0] : undefined) || (Array.isArray(container.Names) ? container.Names[0] : '')).replace(/^\//, '')}
                                                 </p>
                                                 <p className="text-[10px] font-mono text-slate-500">{container.id.substring(0, 12)}</p>
                                             </td>
@@ -734,7 +737,7 @@ export const DeviceDetail = () => {
                                             </td>
                                         </tr>
                                     ))}
-                                    {(!latest?.extra?.docker?.containers || latest.extra.docker.containers.length === 0) && (
+                                    {dockerContainers.length === 0 && (
                                         <tr>
                                             <td colSpan={5} className="px-4 py-12 text-center text-slate-500">
                                                 No Docker containers found
@@ -1384,6 +1387,22 @@ export const DeviceDetail = () => {
                                 </div>
 
                                 <div className="space-y-5">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Asterisk Container Name</label>
+                                        <input
+                                            type="text"
+                                            className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-3 text-sm text-slate-300 placeholder:text-slate-700 outline-none focus:border-primary-500/30"
+                                            placeholder="asterisk"
+                                            defaultValue={device.asterisk_container_name || device.config?.asterisk_container || 'asterisk'}
+                                            onBlur={async (e) => {
+                                                const nextValue = e.target.value.trim() || 'asterisk';
+                                                await api.patch(`/devices/${id}`, { asterisk_container_name: nextValue });
+                                                setDevice({ ...device, asterisk_container_name: nextValue, config: { ...(device.config || {}), asterisk_container: nextValue } });
+                                            }}
+                                        />
+                                        <p className="text-[10px] text-slate-500">Used when agent runs `docker exec &lt;container&gt; asterisk -rx ...`.</p>
+                                    </div>
+
                                     <div className="flex flex-wrap gap-2">
                                         {['system', 'docker', 'asterisk', 'network'].map(mod => (
                                             <div key={mod} className={clsx(

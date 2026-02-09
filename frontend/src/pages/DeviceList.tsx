@@ -13,6 +13,7 @@ export const DeviceList = () => {
     const [newType, setNewType] = React.useState<'server' | 'network_device' | 'website'>('server');
     const [newHostname, setNewHostname] = React.useState('');
     const [enabledModules, setEnabledModules] = React.useState<string[]>(['system']);
+    const [asteriskContainerName, setAsteriskContainerName] = React.useState('asterisk');
     // Probe config state
     const [targetIp, setTargetIp] = React.useState('');
     const [targetPort, setTargetPort] = React.useState('');
@@ -34,6 +35,7 @@ export const DeviceList = () => {
                 type: newType,
                 hostname: newHostname,
                 enabled_modules: enabledModules,
+                asterisk_container_name: enabledModules.includes('asterisk') ? (asteriskContainerName.trim() || 'asterisk') : undefined,
                 probe_config: enabledModules.includes('network') ? {
                     target_ip: targetIp,
                     target_port: parseInt(targetPort) || 0,
@@ -45,6 +47,7 @@ export const DeviceList = () => {
             setNewName('');
             setNewHostname('');
             setEnabledModules(['system']);
+            setAsteriskContainerName('asterisk');
             setTargetIp('');
             setTargetPort('');
             setPingHost('');
@@ -163,6 +166,22 @@ export const DeviceList = () => {
                                     ))}
                                 </div>
                             </div>
+
+                            {/* Network Probe Config */}
+                            {enabledModules.includes('asterisk') && (
+                                <div className="p-4 rounded-xl bg-white/5 border border-white/10 space-y-2">
+                                    <h4 className="text-sm font-bold text-primary-400">Asterisk Settings</h4>
+                                    <label className="text-xs text-slate-400">Asterisk Docker Container Name</label>
+                                    <input
+                                        type="text"
+                                        className="input-field text-sm"
+                                        placeholder="asterisk"
+                                        value={asteriskContainerName}
+                                        onChange={e => setAsteriskContainerName(e.target.value)}
+                                    />
+                                    <p className="text-[11px] text-slate-500">This value is embedded into the generated agent binary.</p>
+                                </div>
+                            )}
 
                             {/* Network Probe Config */}
                             {enabledModules.includes('network') && (

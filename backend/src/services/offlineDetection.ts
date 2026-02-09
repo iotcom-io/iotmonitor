@@ -1,6 +1,6 @@
 import Device from '../models/Device';
 import SystemSettings from '../models/SystemSettings';
-import { triggerAlert, resolveAlert } from './notificationThrottling';
+import { triggerAlert, resolveAlert, resolveOfflineRecoveryBundle } from './notificationThrottling';
 
 const SERVICE_DOWN_GRACE_MS = 120000;
 const MODULES = ['system', 'docker', 'asterisk', 'network'] as const;
@@ -160,12 +160,20 @@ export async function updateDeviceHeartbeat(deviceId: string) {
         );
 
         if (oldStatus === 'offline' && !device.monitoring_paused) {
-            await resolveAlert({
-                device_id: deviceId,
-                device_name: device.name,
-                alert_type: 'offline',
-                details: { recovery_time: now },
-            });
+            const recovery = await resolveOfflineRecoveryBundle(
+                deviceId,
+                device.name,
+                device.notification_slack_webhook
+            );
+
+            if (recovery.resolvedCount === 0) {
+                await resolveAlert({
+                    device_id: deviceId,
+                    device_name: device.name,
+                    alert_type: 'offline',
+                    details: { recovery_time: now },
+                });
+            }
         }
     } catch (error) {
         console.error('Error updating device heartbeat:', error);

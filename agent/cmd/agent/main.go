@@ -79,7 +79,7 @@ func main() {
 
 	log.Println("IoTMonitor Agent started successfully")
 	enabledModules := loadEnabledModules(cfg.EnabledModules)
-	asteriskContainer := strings.TrimSpace(os.Getenv("IOT_ASTERISK_CONTAINER"))
+	asteriskContainer := strings.TrimSpace(cfg.AsteriskContainer)
 	if asteriskContainer == "" {
 		asteriskContainer = "asterisk"
 	}

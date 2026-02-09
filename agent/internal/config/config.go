@@ -13,14 +13,16 @@ type Config struct {
 	UseTLS     bool   `json:"use_tls"`
 	MQTTPrefix string `json:"mqtt_prefix"`
 	Debug      bool   `json:"debug"`
-	EnabledModules string `json:"enabled_modules"`
+	EnabledModules   string `json:"enabled_modules"`
+	AsteriskContainer string `json:"asterisk_container"`
 }
 
 var (
-	DefaultDeviceID   = ""
-	DefaultAgentToken = ""
-	DefaultMQTTURL    = "localhost"
-	DefaultEnabledModules = "system,docker,asterisk,network"
+	DefaultDeviceID         = ""
+	DefaultAgentToken       = ""
+	DefaultMQTTURL          = "localhost"
+	DefaultEnabledModules   = "system,docker,asterisk,network"
+	DefaultAsteriskContainer = "asterisk"
 )
 
 func LoadConfig(path string) (*Config, error) {
@@ -33,6 +35,7 @@ func LoadConfig(path string) (*Config, error) {
 			MQTTURL:    os.Getenv("IOT_MQTT_URL"),
 			MQTTPrefix: "iotmonitor/device",
 			EnabledModules: os.Getenv("IOT_ENABLED_MODULES"),
+			AsteriskContainer: os.Getenv("IOT_ASTERISK_CONTAINER"),
 		}
 
 		if cfg.DeviceID == "" {
@@ -46,6 +49,9 @@ func LoadConfig(path string) (*Config, error) {
 		}
 		if cfg.EnabledModules == "" {
 			cfg.EnabledModules = DefaultEnabledModules
+		}
+		if cfg.AsteriskContainer == "" {
+			cfg.AsteriskContainer = DefaultAsteriskContainer
 		}
 
 		return cfg, nil
@@ -62,7 +68,16 @@ func LoadConfig(path string) (*Config, error) {
 		cfg.MQTTPrefix = "iotmonitor/device"
 	}
 	if cfg.EnabledModules == "" {
+		cfg.EnabledModules = os.Getenv("IOT_ENABLED_MODULES")
+	}
+	if cfg.EnabledModules == "" {
 		cfg.EnabledModules = DefaultEnabledModules
+	}
+	if cfg.AsteriskContainer == "" {
+		cfg.AsteriskContainer = os.Getenv("IOT_ASTERISK_CONTAINER")
+	}
+	if cfg.AsteriskContainer == "" {
+		cfg.AsteriskContainer = DefaultAsteriskContainer
 	}
 
 	return &cfg, nil

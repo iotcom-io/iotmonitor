@@ -4,6 +4,7 @@ import Device from '../models/Device';
 import MonitoringCheck from '../models/MonitoringCheck';
 import SystemSettings from '../models/SystemSettings';
 import { sendNotification, sendRecoveryNotification } from './notifications';
+const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Asia/Kolkata';
 
 interface TriggerAlertParams {
     device_id: string;
@@ -100,6 +101,12 @@ const findDeviceForAlert = async (deviceId: string) => {
     }
 
     return device;
+};
+
+const formatDuration = (durationSeconds: number) => {
+    if (durationSeconds < 60) return `${durationSeconds}s`;
+    if (durationSeconds < 3600) return `${Math.floor(durationSeconds / 60)}m ${durationSeconds % 60}s`;
+    return `${Math.floor(durationSeconds / 3600)}h ${Math.floor((durationSeconds % 3600) / 60)}m`;
 };
 
 const isAlertStillMonitored = async (alert: any, device: any) => {
@@ -275,6 +282,76 @@ export async function resolveAllActiveAlertsForDevice(deviceId: string, deviceNa
             details: { resolution_reason: reason },
         });
     }
+}
+
+export async function resolveOfflineRecoveryBundle(
+    deviceId: string,
+    deviceName: string,
+    deviceSlackWebhook?: string
+) {
+    const activeAlerts = await AlertTracking.find({
+        device_id: deviceId,
+        alert_type: { $in: ['offline', 'service_down'] },
+        state: { $ne: 'resolved' },
+    });
+
+    if (activeAlerts.length === 0) {
+        return { resolvedCount: 0, restoredServices: [] as string[] };
+    }
+
+    const now = new Date();
+    let offlineDurationSeconds = 0;
+    const restoredServices = new Set<string>();
+
+    for (const alert of activeAlerts) {
+        const durationMs = now.getTime() - new Date(alert.first_triggered).getTime();
+        const durationSeconds = Math.floor(durationMs / 1000);
+
+        alert.state = 'resolved';
+        alert.resolved_at = now;
+        alert.details = {
+            ...alert.details,
+            resolution_reason: 'Device recovered',
+            duration_minutes: Math.floor(durationMs / 60000),
+            duration_seconds: durationSeconds,
+        };
+        await alert.save();
+
+        if (alert.alert_type === 'offline') {
+            offlineDurationSeconds = Math.max(offlineDurationSeconds, durationSeconds);
+        }
+        if (alert.alert_type === 'service_down' && alert.specific_service) {
+            restoredServices.add(alert.specific_service);
+        }
+    }
+
+    const { NotificationService } = await import('./NotificationService');
+    const settings = await SystemSettings.findOne();
+    const recoveryTime = now.toLocaleString('en-US', { timeZone: APP_TIMEZONE });
+
+    let message = `RESOLVED\n\n`;
+    message += `Device: ${deviceName}\n`;
+    message += `Status: Device Back Online\n`;
+    message += `Recovery Time: ${recoveryTime}\n`;
+    if (offlineDurationSeconds > 0) {
+        message += `Offline Duration: ${formatDuration(offlineDurationSeconds)}\n`;
+    }
+    if (restoredServices.size > 0) {
+        message += `Services Restored: ${Array.from(restoredServices).sort().join(', ')}\n`;
+    }
+    message += `Resolved Alerts: ${activeAlerts.length}`;
+
+    await NotificationService.send({
+        subject: `Device Recovery: ${deviceName}`,
+        message,
+        channels: ['slack'],
+        recipients: { slackWebhook: settings?.notification_slack_webhook || deviceSlackWebhook },
+    });
+
+    return {
+        resolvedCount: activeAlerts.length,
+        restoredServices: Array.from(restoredServices),
+    };
 }
 
 export async function processThrottledAlerts() {

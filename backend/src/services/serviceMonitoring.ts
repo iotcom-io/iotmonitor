@@ -6,6 +6,79 @@ import { updateServiceMetrics } from './offlineDetection';
 const MODULES = ['system', 'docker', 'asterisk', 'network'] as const;
 type ModuleName = typeof MODULES[number];
 
+const toNumber = (value: any): number | undefined => {
+    if (value === null || value === undefined) return undefined;
+    const parsed = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+const firstNumber = (...values: any[]): number | undefined => {
+    for (const value of values) {
+        const parsed = toNumber(value);
+        if (parsed !== undefined) {
+            return parsed;
+        }
+    }
+    return undefined;
+};
+
+const normalizeTarget = (target?: string) => String(target || '').trim().replace(/^\//, '').toLowerCase();
+
+const matchesDiskTarget = (diskEntry: any, target?: string) => {
+    const normalizedTarget = normalizeTarget(target);
+    if (!normalizedTarget || normalizedTarget === 'system-wide' || normalizedTarget === 'all') {
+        return true;
+    }
+
+    const candidateValues = [
+        diskEntry?.mount,
+        diskEntry?.mountpoint,
+        diskEntry?.path,
+        diskEntry?.name,
+        diskEntry?.device,
+    ];
+
+    return candidateValues.some((candidate) => normalizeTarget(candidate) === normalizedTarget);
+};
+
+const extractDiskUsage = (metrics: any, target?: string): number | undefined => {
+    const systemPayload = metrics?.system || metrics;
+
+    const aggregate = firstNumber(
+        systemPayload?.disk_usage,
+        systemPayload?.disk_percent,
+        systemPayload?.disk?.usage_percent,
+        systemPayload?.disk?.percent,
+        metrics?.disk_usage,
+        metrics?.disk_percent
+    );
+
+    const diskCollections = [
+        systemPayload?.disks,
+        systemPayload?.disk_info,
+        systemPayload?.diskInfo,
+        systemPayload?.partitions,
+        metrics?.disk_info,
+        metrics?.disks,
+    ];
+
+    for (const collection of diskCollections) {
+        if (!Array.isArray(collection)) continue;
+        const match = collection.find((disk) => matchesDiskTarget(disk, target));
+        if (!match) continue;
+        const value = firstNumber(
+            match?.usage_percent,
+            match?.used_percent,
+            match?.percent,
+            match?.usage,
+            match?.usedPct
+        );
+        if (value !== undefined) return value;
+    }
+
+    return aggregate;
+};
+
 const getEnabledModules = (device: any): ModuleName[] => {
     const modulesConfig = device.config?.modules;
     if (modulesConfig && typeof modulesConfig === 'object') {
@@ -76,46 +149,97 @@ export async function applyThresholdRules(device: any, metrics: any) {
         let message = '';
 
         if (check.check_type === 'cpu') {
-            value = metrics.system?.cpu_usage || metrics.system?.cpu_load;
+            const systemPayload = metrics.system || metrics;
+            value = firstNumber(
+                systemPayload?.cpu_usage,
+                systemPayload?.cpu_percent,
+                systemPayload?.cpu?.usage_percent,
+                systemPayload?.cpu?.percent,
+                metrics?.cpu_usage,
+                metrics?.cpu_percent,
+                systemPayload?.cpu_load
+            );
         } else if (check.check_type === 'memory') {
-            value = metrics.system?.memory_usage;
+            const systemPayload = metrics.system || metrics;
+            value = firstNumber(
+                systemPayload?.memory_usage,
+                systemPayload?.memory_percent,
+                systemPayload?.memory?.used_percent,
+                systemPayload?.memory?.percent,
+                metrics?.memory_usage,
+                metrics?.memory_percent
+            );
         } else if (check.check_type === 'disk') {
-            const disks = metrics.system?.disks || metrics.disk_info || [];
-            const disk = disks.find((d: any) => d.mount === check.target || d.path === check.target);
-            value = disk?.usage_percent || disk?.percent;
+            value = extractDiskUsage(metrics, check.target);
         } else if (check.check_type === 'bandwidth' || check.check_type === 'utilization') {
-            const iface = metrics.network?.interfaces?.find((i: any) => i.name === check.target);
+            const networkPayload = metrics.network || metrics;
+            const iface = networkPayload?.interfaces?.find((i: any) => i.name === check.target);
             if (iface) {
                 if (check.check_type === 'bandwidth') {
-                    value = (iface.rx_bps + iface.tx_bps) / 1000000;
+                    const rx = firstNumber(iface.rx_bps, iface.rxBps, iface.rx_bytes_per_sec, 0) || 0;
+                    const tx = firstNumber(iface.tx_bps, iface.txBps, iface.tx_bytes_per_sec, 0) || 0;
+                    value = (rx + tx) / 1000000;
                 } else {
-                    value = iface.utilization_percent;
+                    value = firstNumber(iface.utilization_percent, iface.utilization, iface.usage_percent);
                 }
             }
         } else if (check.check_type === 'sip_rtt') {
-            const peer = metrics.asterisk?.contacts?.find((c: any) => c.aor === check.target || c.endpoint === check.target);
-            value = peer?.rttMs;
+            const asteriskPayload = metrics.asterisk || metrics;
+            const peer = asteriskPayload?.contacts?.find((c: any) => c.aor === check.target || c.endpoint === check.target);
+            value = firstNumber(peer?.rttMs, peer?.latency_ms);
         } else if (check.check_type === 'sip_registration') {
-            const registrations = metrics.asterisk?.registrations || [];
+            const asteriskPayload = metrics.asterisk || metrics;
+            const registrations = asteriskPayload?.registrations || [];
             const reg = registrations.find((r: any) => r.name === check.target);
             if (reg) {
                 value = reg.status === 'Registered' ? 100 : 0;
             }
         } else if (check.check_type === 'container_status') {
-            const containers = metrics.docker?.containers || [];
-            const container = containers.find((c: any) => c.name === check.target || c.id === check.target);
+            const dockerPayload = metrics.docker;
+            const containers = Array.isArray(dockerPayload)
+                ? dockerPayload
+                : (dockerPayload?.containers || []);
+
+            const targetName = String(check.target || '').replace(/^\//, '').toLowerCase();
+            const container = containers.find((c: any) => {
+                const id = String(c.id || '');
+                if (check.target && (id === check.target || id.startsWith(check.target))) {
+                    return true;
+                }
+
+                const names: string[] = [];
+                if (typeof c.name === 'string') {
+                    names.push(c.name);
+                }
+                if (Array.isArray(c.names)) {
+                    names.push(...c.names);
+                }
+                if (Array.isArray(c.Names)) {
+                    names.push(...c.Names);
+                }
+
+                return names.some((n) => String(n).replace(/^\//, '').toLowerCase() === targetName);
+            });
             if (container) {
                 const criticalStates = check.config?.critical_states || ['stopped', 'exited', 'unhealthy'];
                 const warningStates = check.config?.warning_states || ['restarting', 'paused'];
+                const containerState = String(container.state || container.status || '').toLowerCase();
+                const statusText = String(container.status || container.state || '');
+                const isUnhealthy = /unhealthy/.test(statusText.toLowerCase());
+                const displayName =
+                    (Array.isArray(container.names) && container.names[0]) ||
+                    (Array.isArray(container.Names) && container.Names[0]) ||
+                    container.name ||
+                    check.target;
 
-                if (criticalStates.includes(container.status.toLowerCase()) || container.health === 'unhealthy') {
+                if (criticalStates.includes(containerState) || isUnhealthy || container.health === 'unhealthy') {
                     isProblem = true;
                     value = 100;
-                    message = `Container ${check.target} is ${container.status}${container.health ? ` (${container.health})` : ''}`;
-                } else if (warningStates.includes(container.status.toLowerCase())) {
+                    message = `Container ${displayName} is ${statusText}${container.health ? ` (${container.health})` : ''}`;
+                } else if (warningStates.includes(containerState)) {
                     isProblem = true;
                     value = 50;
-                    message = `Container ${check.target} is ${container.status}`;
+                    message = `Container ${displayName} is ${statusText}`;
                 }
             }
         }
@@ -124,13 +248,22 @@ export async function applyThresholdRules(device: any, metrics: any) {
             const unit = check.check_type === 'sip_rtt' ? 'ms' : (['cpu', 'memory', 'disk', 'utilization', 'sip_registration'].includes(check.check_type) ? '%' : 'Mbps');
 
             let newState: 'ok' | 'warning' | 'critical' = 'ok';
-            if (check.thresholds.critical && (value! >= check.thresholds.critical || (isProblem && value === 100))) {
-                newState = 'critical';
-            } else if (check.thresholds.warning && (value! >= check.thresholds.warning || (isProblem && value === 50))) {
-                newState = 'warning';
+            if (check.check_type === 'sip_registration') {
+                if (check.thresholds.critical !== undefined && value! <= check.thresholds.critical) {
+                    newState = 'critical';
+                } else if (check.thresholds.warning !== undefined && value! <= check.thresholds.warning) {
+                    newState = 'warning';
+                }
+            } else {
+                if (check.thresholds.critical !== undefined && (value! >= check.thresholds.critical || (isProblem && value === 100))) {
+                    newState = 'critical';
+                } else if (check.thresholds.warning !== undefined && (value! >= check.thresholds.warning || (isProblem && value === 50))) {
+                    newState = 'warning';
+                }
             }
 
             const stateChanged = check.last_state !== newState;
+            (check as any).last_value = value;
             check.last_state = newState;
             check.last_evaluated_at = new Date();
             check.last_message = message || `${check.check_type.toUpperCase()} is ${value}${unit} (Threshold: ${newState === 'critical' ? check.thresholds.critical : check.thresholds.warning}${unit})`;

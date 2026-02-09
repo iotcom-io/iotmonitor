@@ -7,9 +7,12 @@ interface Device {
     status: 'online' | 'offline' | 'warning';
     last_seen: string;
     monitoring_enabled?: boolean;
+    enabled_modules?: ('system' | 'docker' | 'asterisk' | 'network')[];
+    asterisk_container_name?: string;
     config?: {
         cpu_usage?: number;
         disk_usage?: number;
+        asterisk_container?: string;
         [key: string]: any;
     };
 }

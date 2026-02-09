@@ -22,10 +22,14 @@ export async function sendNotification(
     isReminder: boolean = false
 ) {
     try {
+        const alertTypeFilters = alert.alert_type === 'rule_violation'
+            ? [alert.alert_type, 'threshold', 'all']
+            : [alert.alert_type, 'all'];
+
         // Find matching notification channels
         const channels = await NotificationChannel.find({
             enabled: true,
-            alert_types: { $in: [alert.alert_type, 'all'] },
+            alert_types: { $in: alertTypeFilters },
             severity_levels: { $in: [alert.severity, 'all'] }
         });
 
@@ -58,9 +62,13 @@ export async function sendRecoveryNotification(
     deviceName: string
 ) {
     try {
+        const alertTypeFilters = alert.alert_type === 'rule_violation'
+            ? [alert.alert_type, 'threshold', 'all']
+            : [alert.alert_type, 'all'];
+
         const channels = await NotificationChannel.find({
             enabled: true,
-            alert_types: { $in: [alert.alert_type, 'all'] }
+            alert_types: { $in: alertTypeFilters }
         });
 
         const message = buildRecoveryMessage(alert, deviceName);
