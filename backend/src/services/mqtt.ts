@@ -101,6 +101,26 @@ client.on('message', async (topic, message, packet) => {
                 );
 
                 if (!device.monitoring_paused) {
+                    if (status === 'offline') {
+                        // Immediate offline alert when agent explicitly reports offline.
+                        // Offline detection still covers abrupt disconnect cases.
+                        const { triggerAlert } = await import('./notificationThrottling');
+                        await triggerAlert({
+                            device_id,
+                            device_name: device.name,
+                            alert_type: 'offline',
+                            severity: 'critical',
+                            throttling_config: {
+                                repeat_interval_minutes: 15,
+                                throttling_duration_minutes: 60,
+                            },
+                            details: {
+                                last_seen: device.last_seen,
+                                source: 'agent_status',
+                            },
+                        });
+                    }
+
                     // Offline/online notifications are handled by alert lifecycle logic.
                     // Keep this only for non-primary statuses to avoid duplicate recovery noise.
                     if (!['offline', 'online'].includes(status)) {
