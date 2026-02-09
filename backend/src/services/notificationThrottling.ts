@@ -34,6 +34,7 @@ const severityRank: Record<string, number> = {
     warning: 1,
     critical: 2,
 };
+const GLOBAL_TARGETS = new Set(['', 'all', 'system-wide', '*']);
 
 const getEnabledModules = (device: any): string[] => {
     const modulesConfig = device.config?.modules;
@@ -109,6 +110,31 @@ const formatDuration = (durationSeconds: number) => {
     return `${Math.floor(durationSeconds / 3600)}h ${Math.floor((durationSeconds % 3600) / 60)}m`;
 };
 
+const normalizeTarget = (value?: string) => String(value || '').trim().toLowerCase();
+
+const hasMatchingEnabledCheck = async (
+    deviceId: string,
+    checkTypes: string[],
+    endpoint?: string
+) => {
+    if (!checkTypes.length) return false;
+
+    const checks = await MonitoringCheck.find({
+        device_id: deviceId,
+        check_type: { $in: checkTypes },
+        enabled: true,
+    }).select({ target: 1 });
+
+    if (checks.length === 0) return false;
+    if (!endpoint) return true;
+
+    const normalizedEndpoint = normalizeTarget(endpoint);
+    return checks.some((check: any) => {
+        const target = normalizeTarget(check.target);
+        return GLOBAL_TARGETS.has(target) || target === normalizedEndpoint;
+    });
+};
+
 const isAlertStillMonitored = async (alert: any, device: any) => {
     if (device.monitoring_paused || !device.monitoring_enabled) {
         return false;
@@ -120,17 +146,22 @@ const isAlertStillMonitored = async (alert: any, device: any) => {
     }
 
     if (alert.alert_type === 'rule_violation') {
-        const query: any = {
-            device_id: device.device_id,
-            check_type: alert.specific_service,
-            enabled: true,
-        };
-        if (alert.specific_endpoint) {
-            query.target = alert.specific_endpoint;
+        const checkType = String(alert.specific_service || '').trim();
+        if (!checkType) return false;
+        return hasMatchingEnabledCheck(device.device_id, [checkType], alert.specific_endpoint);
+    }
+
+    if (alert.alert_type === 'sip_issue' || alert.alert_type === 'high_latency') {
+        let checkTypes: string[] = [];
+
+        if (alert.alert_type === 'sip_issue' && alert.specific_service === 'sip_registration') {
+            checkTypes = ['sip_registration'];
+        } else {
+            // Keep legacy "sip" type for backward compatibility.
+            checkTypes = ['sip_rtt', 'sip'];
         }
 
-        const check = await MonitoringCheck.findOne(query);
-        return !!check;
+        return hasMatchingEnabledCheck(device.device_id, checkTypes, alert.specific_endpoint);
     }
 
     return true;
@@ -152,6 +183,20 @@ export async function triggerAlert(params: TriggerAlertParams) {
         const device = await findDeviceForAlert(device_id);
         if (device && (device.monitoring_paused || !device.monitoring_enabled)) {
             return null;
+        }
+
+        if (device && alert_type !== 'offline') {
+            const monitored = await isAlertStillMonitored(
+                {
+                    alert_type,
+                    specific_service,
+                    specific_endpoint,
+                },
+                device
+            );
+            if (!monitored) {
+                return null;
+            }
         }
 
         const existingAlert = await AlertTracking.findOne({
@@ -383,7 +428,7 @@ export async function processThrottledAlerts() {
                         alert_type: alert.alert_type,
                         specific_service: alert.specific_service,
                         specific_endpoint: alert.specific_endpoint,
-                        details: { resolution_reason: 'Monitoring paused/disabled' },
+                        details: { resolution_reason: 'Service/endpoint no longer monitored' },
                     });
                 }
                 continue;

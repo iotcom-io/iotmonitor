@@ -5,6 +5,7 @@ import { updateServiceMetrics } from './offlineDetection';
 
 const MODULES = ['system', 'docker', 'asterisk', 'network'] as const;
 type ModuleName = typeof MODULES[number];
+const GLOBAL_SIP_TARGETS = new Set(['', 'all', 'system-wide', '*']);
 
 const toNumber = (value: any): number | undefined => {
     if (value === null || value === undefined) return undefined;
@@ -90,6 +91,25 @@ const getEnabledModules = (device: any): ModuleName[] => {
     }
 
     return [];
+};
+
+const normalizeText = (value?: string) => String(value || '').trim().toLowerCase();
+
+const endpointMatchesRuleTarget = (endpoint: string, target?: string) => {
+    const normalizedTarget = normalizeText(target);
+    if (GLOBAL_SIP_TARGETS.has(normalizedTarget)) return true;
+    return normalizeText(endpoint) === normalizedTarget;
+};
+
+const isEndpointMonitoredByRules = (rules: any[], endpoint: string) => {
+    if (!rules || rules.length === 0) return false;
+    return rules.some((rule) => endpointMatchesRuleTarget(endpoint, rule.target));
+};
+
+const pickRuleForEndpoint = (rules: any[], endpoint: string) => {
+    const endpointRule = rules.find((rule) => normalizeText(rule.target) === normalizeText(endpoint));
+    if (endpointRule) return endpointRule;
+    return rules.find((rule) => GLOBAL_SIP_TARGETS.has(normalizeText(rule.target)));
 };
 
 /**
@@ -313,8 +333,10 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
         const sipRules = await MonitoringCheck.find({
             device_id: deviceId,
             enabled: true,
-            check_type: { $in: ['sip', 'sip_registration'] },
+            check_type: { $in: ['sip_rtt', 'sip_registration', 'sip'] }, // keep legacy 'sip' for backward compatibility
         });
+        const registrationRules = sipRules.filter((rule: any) => rule.check_type === 'sip_registration');
+        const rttRules = sipRules.filter((rule: any) => rule.check_type === 'sip_rtt' || rule.check_type === 'sip');
 
         const rttThresholdDefault = device.sip_rtt_threshold_ms || 200;
 
@@ -323,31 +345,41 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
             for (const reg of registrations) {
                 const { name, status } = reg;
 
-                if (shouldMonitor(device, name)) {
-                    if (status !== 'Registered' && status !== 'OK') {
-                        await triggerAlert({
-                            device_id: deviceId,
-                            device_name: device.name,
-                            alert_type: 'sip_issue',
-                            severity: 'warning',
-                            specific_service: 'sip_registration',
-                            specific_endpoint: name,
-                            details: {
-                                issue_type: 'registration_failed',
-                                status,
-                                type: 'PJSIP Registration',
-                            },
-                            throttling_config: { repeat_interval_minutes: 15, throttling_duration_minutes: 60 },
-                        });
-                    } else {
-                        await resolveAlert({
-                            device_id: deviceId,
-                            device_name: device.name,
-                            alert_type: 'sip_issue',
-                            specific_service: 'sip_registration',
-                            specific_endpoint: name,
-                        });
-                    }
+                if (!isEndpointMonitoredByRules(registrationRules, name)) {
+                    await resolveAlert({
+                        device_id: deviceId,
+                        device_name: device.name,
+                        alert_type: 'sip_issue',
+                        specific_service: 'sip_registration',
+                        specific_endpoint: name,
+                        details: { resolution_reason: 'Endpoint not monitored' },
+                    });
+                    continue;
+                }
+
+                if (status !== 'Registered' && status !== 'OK') {
+                    await triggerAlert({
+                        device_id: deviceId,
+                        device_name: device.name,
+                        alert_type: 'sip_issue',
+                        severity: 'warning',
+                        specific_service: 'sip_registration',
+                        specific_endpoint: name,
+                        details: {
+                            issue_type: 'registration_failed',
+                            status,
+                            type: 'PJSIP Registration',
+                        },
+                        throttling_config: { repeat_interval_minutes: 15, throttling_duration_minutes: 60 },
+                    });
+                } else {
+                    await resolveAlert({
+                        device_id: deviceId,
+                        device_name: device.name,
+                        alert_type: 'sip_issue',
+                        specific_service: 'sip_registration',
+                        specific_endpoint: name,
+                    });
                 }
             }
         }
@@ -358,9 +390,27 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
             const name = endpoint || aor || peerName || 'unknown-endpoint';
             const latencyValue = latency_ms ?? rttMs;
 
-            if (!shouldMonitor(device, name)) continue;
+            if (!isEndpointMonitoredByRules(rttRules, name)) {
+                await resolveAlert({
+                    device_id: deviceId,
+                    device_name: device.name,
+                    alert_type: 'sip_issue',
+                    specific_service: 'sip_peer',
+                    specific_endpoint: name,
+                    details: { resolution_reason: 'Endpoint not monitored' },
+                });
+                await resolveAlert({
+                    device_id: deviceId,
+                    device_name: device.name,
+                    alert_type: 'high_latency',
+                    specific_service: 'sip_peer',
+                    specific_endpoint: name,
+                    details: { resolution_reason: 'Endpoint not monitored' },
+                });
+                continue;
+            }
 
-            const specificRule = sipRules.find((r: any) => r.check_type === 'sip' && (r.target === name || !r.target));
+            const specificRule = pickRuleForEndpoint(rttRules, name);
             const critThresh = specificRule?.thresholds?.critical || rttThresholdDefault;
             const warnThresh = specificRule?.thresholds?.warning || rttThresholdDefault;
 
@@ -426,9 +476,4 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
     } catch (error) {
         console.error('Error checking SIP endpoints:', error);
     }
-}
-
-function shouldMonitor(device: any, endpoint: string): boolean {
-    if (!device.monitored_sip_endpoints || device.monitored_sip_endpoints.length === 0) return true;
-    return device.monitored_sip_endpoints.includes(endpoint) || device.monitored_sip_endpoints.includes('all');
 }
