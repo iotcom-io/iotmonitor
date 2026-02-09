@@ -30,6 +30,14 @@ yarn-error.log*
 iotmonitor-agent
 iotmonitor-agent-*
 vendor/
+.gocache/
+agent/.gocache/
+.gomodcache/
+agent/.gomodcache/
+.gotmp/
+agent/.gotmp/
+.gotelemetry/
+agent/.gotelemetry/
 
 # Temporary
 tmp/
