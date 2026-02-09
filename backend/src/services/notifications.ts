@@ -1,7 +1,7 @@
 import axios from 'axios';
 import AlertTracking, { IAlertTracking } from '../models/AlertTracking';
 import NotificationChannel from '../models/NotificationChannel';
-const APP_TIMEZONE = process.env.APP_TIMEZONE || 'UTC';
+const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Asia/Kolkata';
 
 /**
  * Enhanced Notification Service

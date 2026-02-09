@@ -4,7 +4,7 @@ import NotificationChannel from '../models/NotificationChannel';
 import SystemSettings from '../models/SystemSettings';
 import axios from 'axios';
 
-const APP_TIMEZONE = process.env.APP_TIMEZONE || 'UTC';
+const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Asia/Kolkata';
 const DEFAULT_SUMMARY_INTERVAL_MINUTES = 360; // 4 summaries/day
 
 export async function sendHourlyStatusUpdate() {
@@ -62,6 +62,9 @@ function buildDigest(
     const deviceMap = new Map<string, any>();
     for (const d of devices) {
         deviceMap.set(String(d.device_id), d);
+        if (d._id) {
+            deviceMap.set(String(d._id), d);
+        }
     }
 
     let message = `IoT Monitor Status Summary\n`;
@@ -73,10 +76,11 @@ function buildDigest(
     message += `Warning: ${warning.length}\n\n`;
 
     if (alerts.length > 0) {
-        message += `Active Alerts (${alerts.length})\n`;
-        alerts.forEach((alert, index) => {
+        const visibleAlerts = alerts.filter((alert) => deviceMap.has(String(alert.device_id)));
+        message += `Active Alerts (${visibleAlerts.length})\n`;
+        visibleAlerts.forEach((alert, index) => {
             const device = deviceMap.get(String(alert.device_id));
-            const deviceName = device ? device.name : `Unknown (${alert.device_id})`;
+            const deviceName = device ? device.name : String(alert.device_id);
             const duration = Math.floor((now.getTime() - new Date(alert.first_triggered).getTime()) / 60000);
             const servicePart = alert.specific_service ? `/${alert.specific_service}` : '';
 

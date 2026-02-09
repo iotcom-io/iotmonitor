@@ -7,13 +7,13 @@ const MODULES = ['system', 'docker', 'asterisk', 'network'] as const;
 type ModuleName = typeof MODULES[number];
 
 const getEnabledModules = (device: any): ModuleName[] => {
-    if (Array.isArray(device.enabled_modules) && device.enabled_modules.length > 0) {
-        return device.enabled_modules.filter((m: string) => MODULES.includes(m as ModuleName));
-    }
-
     const modulesConfig = device.config?.modules;
     if (modulesConfig && typeof modulesConfig === 'object') {
         return MODULES.filter((module) => modulesConfig[module] === true);
+    }
+
+    if (Array.isArray(device.enabled_modules) && device.enabled_modules.length > 0) {
+        return device.enabled_modules.filter((m: string) => MODULES.includes(m as ModuleName));
     }
 
     return [];

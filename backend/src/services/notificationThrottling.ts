@@ -35,13 +35,13 @@ const severityRank: Record<string, number> = {
 };
 
 const getEnabledModules = (device: any): string[] => {
-    if (Array.isArray(device.enabled_modules) && device.enabled_modules.length > 0) {
-        return device.enabled_modules;
-    }
-
     const modulesConfig = device.config?.modules;
     if (modulesConfig && typeof modulesConfig === 'object') {
         return Object.keys(modulesConfig).filter((m) => modulesConfig[m] === true);
+    }
+
+    if (Array.isArray(device.enabled_modules) && device.enabled_modules.length > 0) {
+        return device.enabled_modules;
     }
 
     return [];
@@ -349,7 +349,57 @@ export async function processThrottledAlerts() {
     }
 }
 
+export async function normalizeAlertDeviceIds() {
+    try {
+        const activeAlerts = await AlertTracking.find({ state: { $ne: 'resolved' } });
+        for (const alert of activeAlerts) {
+            const currentId = String(alert.device_id || '');
+            if (!currentId) continue;
+
+            const byDeviceId = await Device.findOne({ device_id: currentId }).select({ _id: 1, device_id: 1, status: 1 });
+            if (byDeviceId) {
+                if (alert.alert_type === 'offline' && byDeviceId.status === 'online') {
+                    const now = new Date();
+                    const durationMs = now.getTime() - new Date(alert.first_triggered).getTime();
+                    alert.state = 'resolved';
+                    alert.resolved_at = now;
+                    alert.details = {
+                        ...alert.details,
+                        resolution_reason: 'Auto-resolved during startup normalization',
+                        duration_minutes: Math.floor(durationMs / 60000),
+                        duration_seconds: Math.floor(durationMs / 1000),
+                    };
+                    await alert.save();
+                }
+                continue;
+            }
+
+            if (!mongoose.Types.ObjectId.isValid(currentId)) continue;
+            const byObjectId = await Device.findById(currentId).select({ _id: 1, device_id: 1, status: 1 });
+            if (!byObjectId) continue;
+
+            alert.device_id = byObjectId.device_id;
+            if (alert.alert_type === 'offline' && byObjectId.status === 'online') {
+                const now = new Date();
+                const durationMs = now.getTime() - new Date(alert.first_triggered).getTime();
+                alert.state = 'resolved';
+                alert.resolved_at = now;
+                alert.details = {
+                    ...alert.details,
+                    resolution_reason: 'Auto-resolved during startup normalization',
+                    duration_minutes: Math.floor(durationMs / 60000),
+                    duration_seconds: Math.floor(durationMs / 1000),
+                };
+            }
+            await alert.save();
+        }
+    } catch (error) {
+        console.error('Error normalizing alert device IDs:', error);
+    }
+}
+
 export function startThrottlingService() {
     console.log('Starting notification throttling service...');
+    normalizeAlertDeviceIds();
     setInterval(processThrottledAlerts, 60000);
 }

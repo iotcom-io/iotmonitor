@@ -6,6 +6,7 @@ import { checkServiceHealth, checkSIPEndpoints } from './serviceMonitoring';
 const MQTT_URL = process.env.MQTT_URL || 'mqtt://localhost:1883';
 const DEBUG_MQTT = process.env.DEBUG_MQTT === 'true';
 const client = mqtt.connect(MQTT_URL);
+let mqttConnectedAt = 0;
 
 const areStringArraysEqual = (a: string[] = [], b: string[] = []) => {
     if (a.length !== b.length) return false;
@@ -35,12 +36,13 @@ const notifyIPChange = async (device: any, type: 'public' | 'local', previousVal
 
 client.on('connect', () => {
     console.log('Connected to MQTT Broker');
+    mqttConnectedAt = Date.now();
     client.subscribe('iotmonitor/device/+/status');
     client.subscribe('iotmonitor/device/+/metrics/+');
     client.subscribe('iotmonitor/device/+/responses');
 });
 
-client.on('message', async (topic, message) => {
+client.on('message', async (topic, message, packet) => {
     try {
         if (DEBUG_MQTT) {
             console.log(`[MQTT][IN] ${topic} (${message.length} bytes)`);
@@ -57,6 +59,17 @@ client.on('message', async (topic, message) => {
         if (type === 'status') {
             const status = message.toString().trim().toLowerCase();
             const oldStatus = String(device.status || '').toLowerCase();
+            const isRetained = packet?.retain === true;
+            const isStartupSync = Date.now() - mqttConnectedAt < 60000;
+
+            // Do not treat retained status as heartbeat/notification events.
+            // On backend restart, broker retained messages are state sync snapshots, not fresh transitions.
+            if (isRetained && isStartupSync) {
+                if (oldStatus !== status) {
+                    await Device.findOneAndUpdate({ device_id }, { status });
+                }
+                return;
+            }
 
             // Heartbeat only for non-offline status to avoid false "back online"
             // from retained offline messages.
