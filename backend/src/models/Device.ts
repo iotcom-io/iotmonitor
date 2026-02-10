@@ -3,6 +3,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface IDevice extends Document {
     device_id: string; // Unique identifier (e.g., serial or HW ID)
     name: string;
+    owner?: string;
     hostname: string;
     type: 'server' | 'pbx' | 'media_gateway' | 'network_device' | 'website';
     memory_total?: number;
@@ -60,6 +61,7 @@ export interface IDevice extends Document {
 const DeviceSchema: Schema = new Schema({
     device_id: { type: String, required: true, unique: true },
     name: { type: String, required: true },
+    owner: { type: String },
     hostname: { type: String },
     type: { type: String, enum: ['server', 'pbx', 'media_gateway', 'network_device', 'website'], default: 'server' },
     memory_total: { type: Number },

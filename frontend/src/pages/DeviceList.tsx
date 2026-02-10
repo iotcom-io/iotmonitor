@@ -18,6 +18,13 @@ const DEVICE_TYPE_LABELS: Record<DeviceType, string> = {
     network_device: 'Network Device',
     website: 'Website',
 };
+const DEVICE_TYPE_FILTERS: Array<{ value: 'all' | DeviceType; label: string }> = [
+    { value: 'all', label: 'All Types' },
+    { value: 'server', label: 'Servers' },
+    { value: 'pbx', label: 'PBX' },
+    { value: 'network_device', label: 'Network Devices' },
+    { value: 'website', label: 'Websites' },
+];
 
 const normalizeDeviceType = (value?: string): DeviceType => {
     if (value === 'server' || value === 'pbx' || value === 'network_device' || value === 'website') {
@@ -28,7 +35,7 @@ const normalizeDeviceType = (value?: string): DeviceType => {
 
 const formatUptime = (seconds?: number) => {
     const total = Number(seconds || 0);
-    if (!Number.isFinite(total) || total <= 0) return '—';
+    if (!Number.isFinite(total) || total <= 0) return '--';
 
     const days = Math.floor(total / 86400);
     const hours = Math.floor((total % 86400) / 3600);
@@ -46,11 +53,15 @@ export const DeviceList = () => {
     const [isEditMode, setIsEditMode] = React.useState(false);
     const [editingDeviceId, setEditingDeviceId] = React.useState<string | null>(null);
     const [newName, setNewName] = React.useState('');
+    const [newOwner, setNewOwner] = React.useState('');
     const [newType, setNewType] = React.useState<DeviceType>('server');
     const [newHostname, setNewHostname] = React.useState('');
     const [enabledModules, setEnabledModules] = React.useState<string[]>([...MODULE_DEFAULTS_BY_DEVICE_TYPE.server]);
     const [asteriskContainerName, setAsteriskContainerName] = React.useState('asterisk');
     const [pingHost, setPingHost] = React.useState('');
+    const [searchQuery, setSearchQuery] = React.useState('');
+    const [typeFilter, setTypeFilter] = React.useState<'all' | DeviceType>('all');
+    const [groupByType, setGroupByType] = React.useState(true);
 
     const [registering, setRegistering] = React.useState(false);
     const [buildingId, setBuildingId] = React.useState<string | null>(null);
@@ -63,6 +74,7 @@ export const DeviceList = () => {
         setIsEditMode(false);
         setEditingDeviceId(null);
         setNewName('');
+        setNewOwner('');
         setNewType('server');
         setNewHostname('');
         setEnabledModules([...MODULE_DEFAULTS_BY_DEVICE_TYPE.server]);
@@ -80,6 +92,7 @@ export const DeviceList = () => {
         setIsEditMode(true);
         setEditingDeviceId(device.device_id);
         setNewName(device.name || '');
+        setNewOwner(device.owner || '');
         setNewType(normalizeDeviceType(device.type));
         setNewHostname(device.hostname || '');
         const nextModules = Array.isArray(device.enabled_modules) && device.enabled_modules.length > 0
@@ -97,6 +110,7 @@ export const DeviceList = () => {
         try {
             const payload = {
                 name: newName,
+                owner: newOwner.trim() || undefined,
                 type: newType,
                 hostname: newHostname,
                 enabled_modules: enabledModules,
@@ -175,6 +189,37 @@ export const DeviceList = () => {
         await toggleMonitoring(deviceId);
     };
 
+    const normalizedSearch = searchQuery.trim().toLowerCase();
+    const filteredDevices = devices
+        .filter((device: any) => {
+            const normalizedType = normalizeDeviceType(device.type);
+            if (typeFilter !== 'all' && normalizedType !== typeFilter) {
+                return false;
+            }
+            if (!normalizedSearch) return true;
+            const haystack = [
+                device.name,
+                device.owner,
+                device.hostname,
+                device.device_id,
+                DEVICE_TYPE_LABELS[normalizedType],
+            ].filter(Boolean).join(' ').toLowerCase();
+            return haystack.includes(normalizedSearch);
+        })
+        .sort((a: any, b: any) => {
+            const aType = normalizeDeviceType(a.type);
+            const bType = normalizeDeviceType(b.type);
+            if (aType !== bType) return aType.localeCompare(bType);
+            return String(a.name || '').localeCompare(String(b.name || ''));
+        });
+
+    const groupedDevices = filteredDevices.reduce((acc: Record<DeviceType, any[]>, device: any) => {
+        const key = normalizeDeviceType(device.type);
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(device);
+        return acc;
+    }, {} as Record<DeviceType, any[]>);
+
     return (
         <div className="space-y-6">
             <div className="flex justify-between items-center">
@@ -205,6 +250,16 @@ export const DeviceList = () => {
                                     placeholder="e.g. Production Web 01"
                                     value={newName}
                                     onChange={e => setNewName(e.target.value)}
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-slate-300">Owner (Name or Email)</label>
+                                <input
+                                    type="text"
+                                    className="input-field"
+                                    placeholder="e.g. noc@iotcom.io"
+                                    value={newOwner}
+                                    onChange={e => setNewOwner(e.target.value)}
                                 />
                             </div>
                             <div className="space-y-2">
@@ -322,12 +377,33 @@ export const DeviceList = () => {
                         type="text"
                         className="w-full bg-dark-surface border border-dark-border rounded-xl py-2 pl-10 pr-4 text-white focus:border-primary-500/50 outline-none"
                         placeholder="Search devices..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
                     />
                 </div>
-                <button className="px-4 py-2 bg-dark-surface border border-dark-border rounded-xl text-slate-300 flex items-center gap-2 hover:bg-white/5 transition-colors">
-                    <Filter size={18} />
-                    Filter
-                </button>
+                <div className="flex items-center gap-2 px-3 py-2 bg-dark-surface border border-dark-border rounded-xl text-slate-300">
+                    <Filter size={16} />
+                    <select
+                        className="bg-transparent text-sm outline-none"
+                        value={typeFilter}
+                        onChange={(e) => setTypeFilter(e.target.value as ('all' | DeviceType))}
+                    >
+                        {DEVICE_TYPE_FILTERS.map((option) => (
+                            <option key={option.value} value={option.value} className="bg-slate-900">
+                                {option.label}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+                <label className="px-3 py-2 bg-dark-surface border border-dark-border rounded-xl text-slate-300 flex items-center gap-2 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        className="rounded border-dark-border bg-dark-bg"
+                        checked={groupByType}
+                        onChange={(e) => setGroupByType(e.target.checked)}
+                    />
+                    <span className="text-sm">Group by Type</span>
+                </label>
             </div>
 
             <div className="card overflow-hidden p-0">
@@ -336,6 +412,8 @@ export const DeviceList = () => {
                         <tr className="border-b border-dark-border bg-white/[0.02]">
                             <th className="px-6 py-4 text-sm font-semibold text-slate-400">Device Name</th>
                             <th className="px-6 py-4 text-sm font-semibold text-slate-400">ID</th>
+                            <th className="px-6 py-4 text-sm font-semibold text-slate-400">Type</th>
+                            <th className="px-6 py-4 text-sm font-semibold text-slate-400">Owner</th>
                             <th className="px-6 py-4 text-sm font-semibold text-slate-400">Status</th>
                             <th className="px-6 py-4 text-sm font-semibold text-slate-400">Last Seen</th>
                             <th className="px-6 py-4 text-sm font-semibold text-slate-400">Uptime</th>
@@ -343,92 +421,120 @@ export const DeviceList = () => {
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-dark-border">
-                        {devices.map((device) => (
-                            <tr
-                                key={device.device_id}
-                                className="hover:bg-white/[0.02] transition-colors cursor-pointer group"
-                                onClick={() => navigate(`/devices/${device.device_id}`)}
-                            >
-                                <td className="px-6 py-4">
-                                    <div className="flex items-center gap-3">
-                                        <div className={clsx(
-                                            "w-10 h-10 rounded-lg flex items-center justify-center",
-                                            device.status === 'online' ? "bg-emerald-500/10 text-emerald-400" :
-                                                device.status === 'warning' ? "bg-amber-500/10 text-amber-400" : "bg-slate-500/10 text-slate-400"
-                                        )}>
-                                            <Server size={20} />
-                                        </div>
-                                        <div>
-                                            <div className="text-sm font-bold text-white mb-0.5">{device.name}</div>
-                                            <div className="text-xs text-slate-500">{DEVICE_TYPE_LABELS[(device.type as DeviceType) || 'server'] || 'Server'}</div>
-                                        </div>
-                                    </div>
-                                </td>
-                                <td className="px-6 py-4 text-sm text-slate-400 font-mono">
-                                    {device.device_id}
-                                </td>
-                                <td className="px-6 py-4">
-                                    <div className={clsx(
-                                        "inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-semibold",
-                                        device.status === 'online' ? "bg-emerald-500/10 text-emerald-400" :
-                                            device.status === 'warning' ? "bg-amber-500/10 text-amber-400" : "bg-red-500/10 text-red-400"
-                                    )}>
-                                        {device.status === 'online' ? <Wifi size={14} /> :
-                                            device.status === 'warning' ? <AlertCircle size={14} /> : <WifiOff size={14} />}
-                                        <span className="capitalize">{device.status}</span>
-                                    </div>
-                                </td>
-                                <td className="px-6 py-4 text-sm text-slate-400">
-                                    {new Date(device.last_seen).toLocaleString()}
-                                </td>
-                                <td className="px-6 py-4 text-sm text-slate-300 font-mono">
-                                    {formatUptime(device.uptime_seconds)}
-                                </td>
-                                <td className="px-6 py-4 text-right">
-                                    <div className="flex justify-end gap-2">
-                                        <button
-                                            onClick={(e) => openEditModal(e, device)}
-                                            title="Edit Device"
-                                            className="p-2 rounded-lg transition-all text-slate-400 hover:text-white hover:bg-white/5"
-                                        >
-                                            <Pencil size={16} />
-                                        </button>
-                                        <button
-                                            onClick={(e) => handleToggle(e, device.device_id)}
-                                            title={device.monitoring_enabled === false ? "Resume Monitoring" : "Pause Monitoring"}
-                                            className={clsx(
-                                                "p-2 rounded-lg transition-all",
-                                                device.monitoring_enabled === false ? "text-amber-400 hover:bg-amber-500/10" : "text-slate-400 hover:bg-white/5"
-                                            )}
-                                        >
-                                            {device.monitoring_enabled === false ? <Play size={18} /> : <Pause size={18} />}
-                                        </button>
-                                        <button
-                                            onClick={(e) => handleBuild(e, device.device_id)}
-                                            disabled={!!buildingId}
-                                            title="Build Agent Binary"
-                                            className={clsx(
-                                                "p-2 rounded-lg transition-all",
-                                                buildingId === device.device_id ? "bg-primary-500/20 text-primary-400" : "text-primary-400 hover:text-white hover:bg-primary-500/10"
-                                            )}
-                                        >
-                                            {buildingId === device.device_id ? <Loader2 size={18} className="animate-spin" /> : <Hammer size={18} />}
-                                        </button>
-                                        <button
-                                            onClick={(e) => handleDelete(e, device.device_id)}
-                                            title="Delete Device"
-                                            className="p-2 rounded-lg text-red-400 hover:text-red-500 hover:bg-red-500/10 transition-all ml-2"
-                                        >
-                                            <Trash2 size={18} />
-                                        </button>
-                                    </div>
-                                </td>
-                            </tr>
-                        ))}
-                        {!loading && devices.length === 0 && (
+                        {(() => {
+                            const renderRow = (device: any) => {
+                                const deviceType = normalizeDeviceType(device.type);
+                                return (
+                                    <tr
+                                        key={device.device_id}
+                                        className="hover:bg-white/[0.02] transition-colors cursor-pointer group"
+                                        onClick={() => navigate(`/devices/${device.device_id}`)}
+                                    >
+                                        <td className="px-6 py-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className={clsx(
+                                                    "w-10 h-10 rounded-lg flex items-center justify-center",
+                                                    device.status === 'online' ? "bg-emerald-500/10 text-emerald-400" :
+                                                        device.status === 'warning' ? "bg-amber-500/10 text-amber-400" : "bg-slate-500/10 text-slate-400"
+                                                )}>
+                                                    <Server size={20} />
+                                                </div>
+                                                <div>
+                                                    <div className="text-sm font-bold text-white mb-0.5">{device.name}</div>
+                                                    <div className="text-xs text-slate-500">{device.hostname || 'No hostname'}</div>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4 text-sm text-slate-400 font-mono">
+                                            {device.device_id}
+                                        </td>
+                                        <td className="px-6 py-4 text-sm text-slate-300">
+                                            {DEVICE_TYPE_LABELS[deviceType]}
+                                        </td>
+                                        <td className="px-6 py-4 text-sm text-slate-300">
+                                            {device.owner || '—'}
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <div className={clsx(
+                                                "inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-semibold",
+                                                device.status === 'online' ? "bg-emerald-500/10 text-emerald-400" :
+                                                    device.status === 'warning' ? "bg-amber-500/10 text-amber-400" : "bg-red-500/10 text-red-400"
+                                            )}>
+                                                {device.status === 'online' ? <Wifi size={14} /> :
+                                                    device.status === 'warning' ? <AlertCircle size={14} /> : <WifiOff size={14} />}
+                                                <span className="capitalize">{device.status}</span>
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4 text-sm text-slate-400">
+                                            {new Date(device.last_seen).toLocaleString()}
+                                        </td>
+                                        <td className="px-6 py-4 text-sm text-slate-300 font-mono">
+                                            {formatUptime(device.uptime_seconds)}
+                                        </td>
+                                        <td className="px-6 py-4 text-right">
+                                            <div className="flex justify-end gap-2">
+                                                <button
+                                                    onClick={(e) => openEditModal(e, device)}
+                                                    title="Edit Device"
+                                                    className="p-2 rounded-lg transition-all text-slate-400 hover:text-white hover:bg-white/5"
+                                                >
+                                                    <Pencil size={16} />
+                                                </button>
+                                                <button
+                                                    onClick={(e) => handleToggle(e, device.device_id)}
+                                                    title={device.monitoring_enabled === false ? "Resume Monitoring" : "Pause Monitoring"}
+                                                    className={clsx(
+                                                        "p-2 rounded-lg transition-all",
+                                                        device.monitoring_enabled === false ? "text-amber-400 hover:bg-amber-500/10" : "text-slate-400 hover:bg-white/5"
+                                                    )}
+                                                >
+                                                    {device.monitoring_enabled === false ? <Play size={18} /> : <Pause size={18} />}
+                                                </button>
+                                                <button
+                                                    onClick={(e) => handleBuild(e, device.device_id)}
+                                                    disabled={!!buildingId}
+                                                    title="Build Agent Binary"
+                                                    className={clsx(
+                                                        "p-2 rounded-lg transition-all",
+                                                        buildingId === device.device_id ? "bg-primary-500/20 text-primary-400" : "text-primary-400 hover:text-white hover:bg-primary-500/10"
+                                                    )}
+                                                >
+                                                    {buildingId === device.device_id ? <Loader2 size={18} className="animate-spin" /> : <Hammer size={18} />}
+                                                </button>
+                                                <button
+                                                    onClick={(e) => handleDelete(e, device.device_id)}
+                                                    title="Delete Device"
+                                                    className="p-2 rounded-lg text-red-400 hover:text-red-500 hover:bg-red-500/10 transition-all ml-2"
+                                                >
+                                                    <Trash2 size={18} />
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                );
+                            };
+
+                            if (groupByType) {
+                                return (Object.keys(DEVICE_TYPE_LABELS) as DeviceType[]).flatMap((typeKey) => {
+                                    const groupItems = groupedDevices[typeKey] || [];
+                                    if (groupItems.length === 0) return [];
+                                    return [
+                                        <tr key={`group-${typeKey}`} className="bg-white/[0.02]">
+                                            <td colSpan={8} className="px-6 py-2 text-[11px] font-bold uppercase tracking-widest text-slate-500">
+                                                {DEVICE_TYPE_LABELS[typeKey]} ({groupItems.length})
+                                            </td>
+                                        </tr>,
+                                        ...groupItems.map(renderRow),
+                                    ];
+                                });
+                            }
+
+                            return filteredDevices.map(renderRow);
+                        })()}
+                        {!loading && filteredDevices.length === 0 && (
                             <tr>
-                                <td colSpan={6} className="px-6 py-12 text-center text-slate-500">
-                                    No devices registered yet.
+                                <td colSpan={8} className="px-6 py-12 text-center text-slate-500">
+                                    No devices match the current filters.
                                 </td>
                             </tr>
                         )}
@@ -438,3 +544,4 @@ export const DeviceList = () => {
         </div>
     );
 };
+

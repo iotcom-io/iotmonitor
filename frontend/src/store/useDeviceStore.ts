@@ -4,6 +4,7 @@ import api from '../lib/axios';
 interface Device {
     device_id: string;
     name: string;
+    owner?: string;
     hostname?: string;
     type?: 'server' | 'pbx' | 'network_device' | 'website';
     status: 'online' | 'offline' | 'warning' | 'not_monitored';

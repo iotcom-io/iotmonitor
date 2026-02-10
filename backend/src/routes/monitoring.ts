@@ -428,6 +428,8 @@ const applyModuleFilter = (row: any, enabledModules: Set<ModuleName>) => {
     if (!enabledModules.has('asterisk')) {
         normalized.sip_rtt_avg_ms = null;
         normalized.sip_registration_percent = null;
+        normalized.sip_rtt_endpoints = [];
+        normalized.sip_registration_endpoints = [];
     }
     return normalized;
 };

@@ -232,7 +232,7 @@ router.get('/', authorize(['admin', 'operator', 'viewer']), async (_req: AuthReq
 // Register a new device
 router.post('/register', authorize(['admin', 'operator']), async (req: AuthRequest, res) => {
     try {
-        const { name, type, hostname, enabled_modules, probe_config, asterisk_container_name } = req.body;
+        const { name, owner, type, hostname, enabled_modules, probe_config, asterisk_container_name } = req.body;
         const normalizedType = normalizeDeviceType(type);
         const effectiveModules = resolveEffectiveModules({
             deviceModules: sanitizeModules(enabled_modules),
@@ -250,6 +250,7 @@ router.post('/register', authorize(['admin', 'operator']), async (req: AuthReque
         const device = new Device({
             device_id,
             name,
+            owner: typeof owner === 'string' ? owner.trim() : undefined,
             type: normalizedType,
             hostname,
             agent_token,
@@ -336,6 +337,16 @@ router.patch('/:id', authorize(['admin', 'operator']), async (req: AuthRequest, 
                 updateBody.type = 'server';
             } else {
                 delete updateBody.type;
+            }
+        }
+
+        if (typeof updateBody.owner === 'string') {
+            const normalizedOwner = updateBody.owner.trim();
+            if (normalizedOwner) {
+                updateBody.owner = normalizedOwner;
+            } else {
+                delete updateBody.owner;
+                unsetFields.owner = '';
             }
         }
 
