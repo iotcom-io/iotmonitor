@@ -362,23 +362,6 @@ export const DeviceDetail = () => {
         }
     }, [activeTab, visibleTabs]);
 
-    if (loading) {
-        return (
-            <div className="h-[60vh] flex items-center justify-center">
-                <Loader2 size={40} className="text-primary-500 animate-spin" />
-            </div>
-        );
-    }
-
-    if (!device) {
-        return (
-            <div className="card text-center py-12">
-                <p className="text-slate-400 mb-4">Device not found or error loading data</p>
-                <button onClick={() => navigate('/devices')} className="btn-primary">Back to Devices</button>
-            </div>
-        );
-    }
-
     const formatGB = (bytes?: number) => bytes ? (bytes / (1024 ** 3)).toFixed(1) : '0.0';
     const formatBps = (bps?: number) => {
         if (!bps) return '0 bps';
@@ -498,6 +481,23 @@ export const DeviceDetail = () => {
 
         return { criticalCount, warningCount };
     };
+
+    if (loading) {
+        return (
+            <div className="h-[60vh] flex items-center justify-center">
+                <Loader2 size={40} className="text-primary-500 animate-spin" />
+            </div>
+        );
+    }
+
+    if (!device) {
+        return (
+            <div className="card text-center py-12">
+                <p className="text-slate-400 mb-4">Device not found or error loading data</p>
+                <button onClick={() => navigate('/devices')} className="btn-primary">Back to Devices</button>
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-8">
