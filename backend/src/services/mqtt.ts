@@ -76,10 +76,10 @@ client.on('message', async (topic, message, packet) => {
             const isRetained = packet?.retain === true;
             const isStartupSync = Date.now() - mqttConnectedAt < 60000;
 
-            // Do not treat retained status as heartbeat/notification events.
-            // On backend restart, broker retained messages are state sync snapshots, not fresh transitions.
-            if (isRetained && isStartupSync) {
-                if (oldStatus !== status) {
+            // Never treat retained status messages as live transition events.
+            // Keep startup retained status only as passive state sync.
+            if (isRetained) {
+                if (isStartupSync && oldStatus !== status) {
                     await Device.findOneAndUpdate({ device_id }, { status });
                 }
                 return;
@@ -171,6 +171,7 @@ client.on('message', async (topic, message, packet) => {
 
                 if (check_type === 'system') {
                     if (payload.cpu_usage !== undefined) updateData.cpu_usage = payload.cpu_usage;
+                    if (payload.uptime !== undefined) updateData.uptime = payload.uptime;
                     if (payload.cpu_load !== undefined) updateData.cpu_load = payload.cpu_load;
                     if (payload.cpu_per_core) updateData.cpu_per_core = payload.cpu_per_core;
                     if (payload.memory_usage !== undefined) updateData.memory_usage = payload.memory_usage;
@@ -178,12 +179,18 @@ client.on('message', async (topic, message, packet) => {
                     if (payload.memory_available !== undefined) updateData.memory_available = payload.memory_available;
                     if (payload.memory_cached !== undefined) updateData.memory_cached = payload.memory_cached;
                     if (payload.memory_buffers !== undefined) updateData.memory_buffers = payload.memory_buffers;
-                    if (payload.memory_total !== undefined) {
-                        updateData.memory_total = payload.memory_total;
+                    if (
+                        payload.memory_total !== undefined ||
+                        payload.disk_total !== undefined ||
+                        payload.hostname !== undefined ||
+                        payload.uptime !== undefined
+                    ) {
+                        if (payload.memory_total !== undefined) updateData.memory_total = payload.memory_total;
                         await Device.findOneAndUpdate({ device_id }, {
-                            memory_total: payload.memory_total,
-                            disk_total: payload.disk_total,
+                            memory_total: payload.memory_total ?? freshDevice.memory_total,
+                            disk_total: payload.disk_total ?? freshDevice.disk_total,
                             hostname: payload.hostname || freshDevice.hostname,
+                            uptime_seconds: payload.uptime ?? freshDevice.uptime_seconds,
                         });
                     }
                     if (payload.disk_usage !== undefined) updateData.disk_usage = payload.disk_usage;
@@ -246,17 +253,19 @@ client.on('message', async (topic, message, packet) => {
                 await recentTelemetry.save();
             } else {
                 if (check_type === 'system') {
-                    if (payload.hostname || payload.memory_total || payload.disk_total) {
+                    if (payload.hostname || payload.memory_total || payload.disk_total || payload.uptime !== undefined) {
                         await Device.findOneAndUpdate({ device_id }, {
                             hostname: payload.hostname || freshDevice.hostname,
                             memory_total: payload.memory_total || freshDevice.memory_total,
                             disk_total: payload.disk_total || freshDevice.disk_total,
+                            uptime_seconds: payload.uptime ?? freshDevice.uptime_seconds,
                         });
                     }
 
                     await new Telemetry({
                         device_id,
                         cpu_usage: payload.cpu_usage || 0,
+                        uptime: payload.uptime,
                         cpu_load: payload.cpu_load,
                         cpu_per_core: payload.cpu_per_core,
                         memory_usage: payload.memory_usage || 0,

@@ -13,12 +13,14 @@ const router = Router();
 type BuildOS = 'linux' | 'windows';
 type BuildArch = 'amd64' | 'arm64';
 const ALL_MODULES = ['system', 'docker', 'asterisk', 'network'] as const;
-const DEVICE_TYPES = ['server', 'pbx', 'media_gateway', 'network_device', 'website'] as const;
+const DEVICE_TYPES = ['server', 'pbx', 'network_device', 'website'] as const;
 type DeviceType = typeof DEVICE_TYPES[number];
+const LEGACY_DEVICE_TYPE_ALIASES: Record<string, DeviceType> = {
+    media_gateway: 'server',
+};
 const MODULE_DEFAULTS_BY_DEVICE_TYPE: Record<DeviceType, readonly (typeof ALL_MODULES[number])[]> = {
     server: ['system', 'docker', 'network'],
-    pbx: ['system', 'asterisk', 'network'],
-    media_gateway: ['system', 'network'],
+    pbx: ['system', 'docker', 'asterisk', 'network'],
     network_device: ['network'],
     website: ['system', 'network'],
 };
@@ -29,7 +31,8 @@ const buildRequestSchema = z.object({
     name: z.string().trim().min(1).max(120).optional(),
     modules: z.record(z.string(), z.boolean()).optional(),
     asterisk_container_name: z.string().trim().min(1).max(120).regex(/^[a-zA-Z0-9_.-]+$/).optional(),
-    device_type: z.enum(DEVICE_TYPES).optional(),
+    device_type: z.string().trim().min(1).max(120).optional(),
+    ping_host: z.string().trim().min(1).max(255).optional(),
 });
 
 const createAndBuildRequestSchema = buildRequestSchema.extend({
@@ -86,10 +89,33 @@ const sanitizeModules = (modules?: unknown): string[] => {
     return modules.filter((m) => typeof m === 'string' && ALL_MODULES.includes(m as any));
 };
 
+const normalizeDeviceType = (rawType?: unknown): DeviceType => {
+    const type = typeof rawType === 'string' ? rawType.trim() : '';
+    if ((DEVICE_TYPES as readonly string[]).includes(type)) {
+        return type as DeviceType;
+    }
+    if (type && LEGACY_DEVICE_TYPE_ALIASES[type]) {
+        return LEGACY_DEVICE_TYPE_ALIASES[type];
+    }
+    return 'server';
+};
+
+const sanitizePingHost = (rawHost?: unknown): string | undefined => {
+    if (typeof rawHost !== 'string') return undefined;
+    const host = rawHost.trim();
+    if (!host) return undefined;
+    if (!/^[a-zA-Z0-9_.:-]+$/.test(host)) return undefined;
+    return host;
+};
+
+const sanitizeProbeConfig = (probeConfig?: any) => {
+    const pingHost = sanitizePingHost(probeConfig?.ping_host);
+    if (!pingHost) return undefined;
+    return { ping_host: pingHost };
+};
+
 const getTypeDefaultModules = (deviceType?: string) => {
-    const normalizedType = (DEVICE_TYPES as readonly string[]).includes(deviceType || '')
-        ? (deviceType as DeviceType)
-        : 'server';
+    const normalizedType = normalizeDeviceType(deviceType);
     return [...MODULE_DEFAULTS_BY_DEVICE_TYPE[normalizedType]];
 };
 
@@ -207,11 +233,12 @@ router.get('/', authorize(['admin', 'operator', 'viewer']), async (_req: AuthReq
 router.post('/register', authorize(['admin', 'operator']), async (req: AuthRequest, res) => {
     try {
         const { name, type, hostname, enabled_modules, probe_config, asterisk_container_name } = req.body;
-        const normalizedType = (DEVICE_TYPES as readonly string[]).includes(type) ? type : 'server';
+        const normalizedType = normalizeDeviceType(type);
         const effectiveModules = resolveEffectiveModules({
             deviceModules: sanitizeModules(enabled_modules),
             deviceType: normalizedType,
         });
+        const normalizedProbeConfig = sanitizeProbeConfig(probe_config);
         const asteriskEnabled = effectiveModules.includes('asterisk');
         const normalizedAsteriskContainer = asteriskEnabled
             ? (String(asterisk_container_name || '').trim() || 'asterisk')
@@ -228,7 +255,7 @@ router.post('/register', authorize(['admin', 'operator']), async (req: AuthReque
             agent_token,
             mqtt_topic,
             enabled_modules: effectiveModules,
-            probe_config,
+            probe_config: normalizedProbeConfig,
             config: {
                 modules: modulesArrayToConfig(effectiveModules),
                 ...(normalizedAsteriskContainer ? { asterisk_container: normalizedAsteriskContainer } : {}),
@@ -302,8 +329,24 @@ router.patch('/:id', authorize(['admin', 'operator']), async (req: AuthRequest, 
             }
         }
 
-        if (typeof updateBody.type === 'string' && !(DEVICE_TYPES as readonly string[]).includes(updateBody.type)) {
-            delete updateBody.type;
+        if (typeof updateBody.type === 'string') {
+            if ((DEVICE_TYPES as readonly string[]).includes(updateBody.type)) {
+                // keep as-is
+            } else if (updateBody.type === 'media_gateway') {
+                updateBody.type = 'server';
+            } else {
+                delete updateBody.type;
+            }
+        }
+
+        if (updateBody.probe_config !== undefined) {
+            const normalizedProbeConfig = sanitizeProbeConfig(updateBody.probe_config);
+            if (normalizedProbeConfig) {
+                updateBody.probe_config = normalizedProbeConfig;
+            } else {
+                delete updateBody.probe_config;
+                unsetFields.probe_config = '';
+            }
         }
 
         const updateDoc: any = { $set: updateBody };
@@ -378,12 +421,13 @@ router.post('/:id/regenerate-token', authorize(['admin']), async (req: AuthReque
 // Build agent for an existing device
 router.post('/:id/generate-agent', authorize(['admin', 'operator']), async (req: AuthRequest, res) => {
     try {
-        const { os, arch, name, modules, asterisk_container_name } = buildRequestSchema.parse(req.body) as {
+        const { os, arch, name, modules, asterisk_container_name, ping_host } = buildRequestSchema.parse(req.body) as {
             os: BuildOS;
             arch: BuildArch;
             name?: string;
             modules?: Record<string, boolean>;
             asterisk_container_name?: string;
+            ping_host?: string;
         };
 
         const device = await Device.findOne({ device_id: req.params.id });
@@ -425,7 +469,16 @@ router.post('/:id/generate-agent', authorize(['admin', 'operator']), async (req:
         if (!asteriskEnabled) {
             device.asterisk_container_name = undefined;
         }
-        if (name || modules || asterisk_container_name) {
+        if (ping_host !== undefined) {
+            const normalizedPingHost = sanitizePingHost(ping_host);
+            if (normalizedPingHost) {
+                device.probe_config = {
+                    ...(device.probe_config || {}),
+                    ping_host: normalizedPingHost,
+                };
+            }
+        }
+        if (name || modules || asterisk_container_name || ping_host !== undefined) {
             await device.save();
         }
 
@@ -452,6 +505,11 @@ router.post('/:id/generate-agent', authorize(['admin', 'operator']), async (req:
                 'asterisk'
             )
             : '';
+        const pingHost = sanitizePingHost(
+            ping_host ||
+            device.probe_config?.ping_host ||
+            device.hostname
+        ) || '1.1.1.1';
 
         const ldflags = `-X github.com/iotmonitor/agent/internal/config.DefaultDeviceID=${device.device_id} ` +
             `-X github.com/iotmonitor/agent/internal/config.DefaultAgentToken=${device.agent_token} ` +
@@ -459,7 +517,8 @@ router.post('/:id/generate-agent', authorize(['admin', 'operator']), async (req:
             `-X github.com/iotmonitor/agent/internal/config.DefaultMQTTUsername=${mqttUsername} ` +
             `-X github.com/iotmonitor/agent/internal/config.DefaultMQTTPassword=${mqttPassword} ` +
             `-X github.com/iotmonitor/agent/internal/config.DefaultEnabledModules=${enabledModules} ` +
-            `-X github.com/iotmonitor/agent/internal/config.DefaultAsteriskContainer=${asteriskContainer}`;
+            `-X github.com/iotmonitor/agent/internal/config.DefaultAsteriskContainer=${asteriskContainer} ` +
+            `-X github.com/iotmonitor/agent/internal/config.DefaultPingHost=${pingHost}`;
 
         await buildAgentBinary({
             agentDir,
@@ -489,17 +548,16 @@ router.post('/:id/generate-agent', authorize(['admin', 'operator']), async (req:
 // Generate and build agent binary (creates a new device)
 router.post('/generate-agent', authorize(['admin', 'operator']), async (req: AuthRequest, res) => {
     try {
-        const { os, arch, modules, name, asterisk_container_name, device_type } = createAndBuildRequestSchema.parse(req.body) as {
+        const { os, arch, modules, name, asterisk_container_name, device_type, ping_host } = createAndBuildRequestSchema.parse(req.body) as {
             os: BuildOS;
             arch: BuildArch;
             modules?: Record<string, boolean>;
             name?: string;
             asterisk_container_name?: string;
-            device_type?: DeviceType;
+            device_type?: string;
+            ping_host?: string;
         };
-        const normalizedType = (DEVICE_TYPES as readonly string[]).includes(device_type || '')
-            ? (device_type as DeviceType)
-            : 'server';
+        const normalizedType = normalizeDeviceType(device_type);
         const effectiveModules = resolveEffectiveModules({
             requestedModules: modules,
             deviceType: normalizedType,
@@ -517,6 +575,7 @@ router.post('/generate-agent', authorize(['admin', 'operator']), async (req: Aut
         if (normalizedAsteriskContainer) {
             config.asterisk_container = normalizedAsteriskContainer;
         }
+        const normalizedPingHost = sanitizePingHost(ping_host);
 
         const device = new Device({
             device_id,
@@ -526,6 +585,7 @@ router.post('/generate-agent', authorize(['admin', 'operator']), async (req: Aut
             mqtt_topic,
             status: 'offline',
             enabled_modules: effectiveModules,
+            ...(normalizedPingHost ? { probe_config: { ping_host: normalizedPingHost } } : {}),
             config,
             asterisk_container_name: normalizedAsteriskContainer,
         });
@@ -561,6 +621,7 @@ router.post('/generate-agent', authorize(['admin', 'operator']), async (req: Aut
         const mqttPassword = String(settings?.mqtt_password || '').trim();
         const enabledModules = modulesToCSV(effectiveModules);
         const asteriskContainer = normalizedAsteriskContainer || '';
+        const pingHost = normalizedPingHost || sanitizePingHost(device.hostname) || '1.1.1.1';
 
         const ldflags = `-X github.com/iotmonitor/agent/internal/config.DefaultDeviceID=${device_id} ` +
             `-X github.com/iotmonitor/agent/internal/config.DefaultAgentToken=${agent_token} ` +
@@ -568,7 +629,8 @@ router.post('/generate-agent', authorize(['admin', 'operator']), async (req: Aut
             `-X github.com/iotmonitor/agent/internal/config.DefaultMQTTUsername=${mqttUsername} ` +
             `-X github.com/iotmonitor/agent/internal/config.DefaultMQTTPassword=${mqttPassword} ` +
             `-X github.com/iotmonitor/agent/internal/config.DefaultEnabledModules=${enabledModules} ` +
-            `-X github.com/iotmonitor/agent/internal/config.DefaultAsteriskContainer=${asteriskContainer}`;
+            `-X github.com/iotmonitor/agent/internal/config.DefaultAsteriskContainer=${asteriskContainer} ` +
+            `-X github.com/iotmonitor/agent/internal/config.DefaultPingHost=${pingHost}`;
 
         await buildAgentBinary({
             agentDir,

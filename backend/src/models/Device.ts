@@ -7,6 +7,7 @@ export interface IDevice extends Document {
     type: 'server' | 'pbx' | 'media_gateway' | 'network_device' | 'website';
     memory_total?: number;
     disk_total?: number;
+    uptime_seconds?: number;
     public_ip?: string;
     local_ips?: string[];
     agent_token: string;
@@ -18,8 +19,6 @@ export interface IDevice extends Document {
     monitoring_paused: boolean;
     enabled_modules?: ('system' | 'docker' | 'asterisk' | 'network')[];
     probe_config?: {
-        target_ip?: string;
-        target_port?: number;
         ping_host?: string;
     };
     network_interfaces?: {
@@ -65,6 +64,7 @@ const DeviceSchema: Schema = new Schema({
     type: { type: String, enum: ['server', 'pbx', 'media_gateway', 'network_device', 'website'], default: 'server' },
     memory_total: { type: Number },
     disk_total: { type: Number },
+    uptime_seconds: { type: Number },
     public_ip: { type: String },
     local_ips: [{ type: String }],
     agent_token: { type: String, required: true },
@@ -76,8 +76,6 @@ const DeviceSchema: Schema = new Schema({
     monitoring_paused: { type: Boolean, default: false },
     enabled_modules: [{ type: String, enum: ['system', 'docker', 'asterisk', 'network'] }],
     probe_config: {
-        target_ip: { type: String },
-        target_port: { type: Number },
         ping_host: { type: String }
     },
     network_interfaces: [{

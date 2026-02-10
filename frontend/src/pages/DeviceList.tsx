@@ -1,38 +1,55 @@
 import React, { useEffect } from 'react';
 import { useDeviceStore } from '../store/useDeviceStore';
-import { Plus, Search, Filter, Wifi, WifiOff, AlertCircle, Server, Hammer, Loader2, Trash2, Pause, Play } from 'lucide-react';
+import { Plus, Search, Filter, Wifi, WifiOff, AlertCircle, Server, Hammer, Loader2, Trash2, Pause, Play, Pencil } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useNavigate } from 'react-router-dom';
 import api from '../lib/axios';
 
-type DeviceType = 'server' | 'pbx' | 'media_gateway' | 'network_device' | 'website';
+type DeviceType = 'server' | 'pbx' | 'network_device' | 'website';
 const MODULE_DEFAULTS_BY_DEVICE_TYPE: Record<DeviceType, string[]> = {
     server: ['system', 'docker', 'network'],
-    pbx: ['system', 'asterisk', 'network'],
-    media_gateway: ['system', 'network'],
+    pbx: ['system', 'docker', 'asterisk', 'network'],
     network_device: ['network'],
     website: ['system', 'network'],
 };
 const DEVICE_TYPE_LABELS: Record<DeviceType, string> = {
     server: 'Server',
     pbx: 'PBX',
-    media_gateway: 'Media Gateway',
     network_device: 'Network Device',
     website: 'Website',
+};
+
+const normalizeDeviceType = (value?: string): DeviceType => {
+    if (value === 'server' || value === 'pbx' || value === 'network_device' || value === 'website') {
+        return value;
+    }
+    return 'server';
+};
+
+const formatUptime = (seconds?: number) => {
+    const total = Number(seconds || 0);
+    if (!Number.isFinite(total) || total <= 0) return '—';
+
+    const days = Math.floor(total / 86400);
+    const hours = Math.floor((total % 86400) / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+
+    if (days > 0) return `${days}d ${hours}h`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${minutes}m`;
 };
 
 export const DeviceList = () => {
     const { devices, loading, fetchDevices } = useDeviceStore();
     const navigate = useNavigate();
     const [showModal, setShowModal] = React.useState(false);
+    const [isEditMode, setIsEditMode] = React.useState(false);
+    const [editingDeviceId, setEditingDeviceId] = React.useState<string | null>(null);
     const [newName, setNewName] = React.useState('');
     const [newType, setNewType] = React.useState<DeviceType>('server');
     const [newHostname, setNewHostname] = React.useState('');
     const [enabledModules, setEnabledModules] = React.useState<string[]>([...MODULE_DEFAULTS_BY_DEVICE_TYPE.server]);
     const [asteriskContainerName, setAsteriskContainerName] = React.useState('asterisk');
-    // Probe config state
-    const [targetIp, setTargetIp] = React.useState('');
-    const [targetPort, setTargetPort] = React.useState('');
     const [pingHost, setPingHost] = React.useState('');
 
     const [registering, setRegistering] = React.useState(false);
@@ -42,35 +59,64 @@ export const DeviceList = () => {
         fetchDevices();
     }, []);
 
-    const handleRegister = async (e: React.FormEvent) => {
+    const resetForm = () => {
+        setIsEditMode(false);
+        setEditingDeviceId(null);
+        setNewName('');
+        setNewType('server');
+        setNewHostname('');
+        setEnabledModules([...MODULE_DEFAULTS_BY_DEVICE_TYPE.server]);
+        setAsteriskContainerName('asterisk');
+        setPingHost('');
+    };
+
+    const openCreateModal = () => {
+        resetForm();
+        setShowModal(true);
+    };
+
+    const openEditModal = (e: React.MouseEvent, device: any) => {
+        e.stopPropagation();
+        setIsEditMode(true);
+        setEditingDeviceId(device.device_id);
+        setNewName(device.name || '');
+        setNewType(normalizeDeviceType(device.type));
+        setNewHostname(device.hostname || '');
+        const nextModules = Array.isArray(device.enabled_modules) && device.enabled_modules.length > 0
+            ? device.enabled_modules
+            : [...MODULE_DEFAULTS_BY_DEVICE_TYPE[normalizeDeviceType(device.type)]];
+        setEnabledModules(nextModules);
+        setAsteriskContainerName(device.asterisk_container_name || device.config?.asterisk_container || 'asterisk');
+        setPingHost(device.probe_config?.ping_host || device.hostname || '');
+        setShowModal(true);
+    };
+
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setRegistering(true);
         try {
-            await api.post('/devices/register', {
+            const payload = {
                 name: newName,
                 type: newType,
                 hostname: newHostname,
                 enabled_modules: enabledModules,
                 asterisk_container_name: enabledModules.includes('asterisk') ? (asteriskContainerName.trim() || 'asterisk') : undefined,
                 probe_config: enabledModules.includes('network') ? {
-                    target_ip: targetIp,
-                    target_port: parseInt(targetPort) || 0,
-                    ping_host: pingHost
+                    ping_host: pingHost.trim() || undefined,
                 } : undefined
-            });
+            };
+
+            if (isEditMode && editingDeviceId) {
+                await api.patch(`/devices/${editingDeviceId}`, payload);
+            } else {
+                await api.post('/devices/register', payload);
+            }
             await fetchDevices();
             setShowModal(false);
-            setNewName('');
-            setNewType('server');
-            setNewHostname('');
-            setEnabledModules([...MODULE_DEFAULTS_BY_DEVICE_TYPE.server]);
-            setAsteriskContainerName('asterisk');
-            setTargetIp('');
-            setTargetPort('');
-            setPingHost('');
+            resetForm();
         } catch (error) {
-            console.error('Registration failed', error);
-            alert('Failed to register device');
+            console.error('Save device failed', error);
+            alert(isEditMode ? 'Failed to update device' : 'Failed to register device');
         } finally {
             setRegistering(false);
         }
@@ -137,7 +183,7 @@ export const DeviceList = () => {
                     <p className="text-slate-400">View and manage all registered monitoring agents</p>
                 </div>
                 <button
-                    onClick={() => setShowModal(true)}
+                    onClick={openCreateModal}
                     className="btn-primary flex items-center gap-2"
                 >
                     <Plus size={18} />
@@ -148,8 +194,8 @@ export const DeviceList = () => {
             {showModal && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                     <div className="card max-w-lg w-full animate-in fade-in zoom-in duration-200 max-h-[90vh] overflow-y-auto">
-                        <h3 className="text-xl font-bold text-white mb-6">Register New Device</h3>
-                        <form onSubmit={handleRegister} className="space-y-4">
+                        <h3 className="text-xl font-bold text-white mb-6">{isEditMode ? 'Edit Device' : 'Register New Device'}</h3>
+                        <form onSubmit={handleSubmit} className="space-y-4">
                             <div className="space-y-2">
                                 <label className="text-sm font-medium text-slate-300">Device Name</label>
                                 <input
@@ -170,7 +216,6 @@ export const DeviceList = () => {
                                 >
                                     <option value="server">Linux/Windows Server</option>
                                     <option value="pbx">PBX / VoIP Server</option>
-                                    <option value="media_gateway">Media Gateway</option>
                                     <option value="network_device">Network Device</option>
                                     <option value="website">Website/URL</option>
                                 </select>
@@ -222,37 +267,16 @@ export const DeviceList = () => {
                                     <h4 className="text-sm font-bold text-primary-400 flex items-center gap-2">
                                         <Wifi size={14} /> Network Probe Configuration
                                     </h4>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div className="space-y-1">
-                                            <label className="text-xs text-slate-400">Target IP/Host</label>
-                                            <input
-                                                type="text"
-                                                className="input-field text-sm py-1.5"
-                                                placeholder="192.168.1.1"
-                                                value={targetIp}
-                                                onChange={e => setTargetIp(e.target.value)}
-                                            />
-                                        </div>
-                                        <div className="space-y-1">
-                                            <label className="text-xs text-slate-400">Target Port</label>
-                                            <input
-                                                type="number"
-                                                className="input-field text-sm py-1.5"
-                                                placeholder="80, 5060..."
-                                                value={targetPort}
-                                                onChange={e => setTargetPort(e.target.value)}
-                                            />
-                                        </div>
-                                        <div className="col-span-2 space-y-1">
-                                            <label className="text-xs text-slate-400">Ping Host (ICMP)</label>
-                                            <input
-                                                type="text"
-                                                className="input-field text-sm py-1.5"
-                                                placeholder="8.8.8.8"
-                                                value={pingHost}
-                                                onChange={e => setPingHost(e.target.value)}
-                                            />
-                                        </div>
+                                    <div className="space-y-1">
+                                        <label className="text-xs text-slate-400">Ping Host</label>
+                                        <input
+                                            type="text"
+                                            className="input-field text-sm py-1.5"
+                                            placeholder="e.g. monitoring.iotcom.io or 1.1.1.1"
+                                            value={pingHost}
+                                            onChange={e => setPingHost(e.target.value)}
+                                        />
+                                        <p className="text-[11px] text-slate-500">Agent pings only this host for network probe metrics.</p>
                                     </div>
                                 </div>
                             )}
@@ -270,7 +294,10 @@ export const DeviceList = () => {
                             <div className="flex gap-4 pt-4">
                                 <button
                                     type="button"
-                                    onClick={() => setShowModal(false)}
+                                    onClick={() => {
+                                        setShowModal(false);
+                                        resetForm();
+                                    }}
                                     className="flex-1 px-4 py-2 border border-dark-border rounded-xl text-slate-300 hover:bg-white/5 transition-colors"
                                 >
                                     Cancel
@@ -280,7 +307,7 @@ export const DeviceList = () => {
                                     disabled={registering}
                                     className="flex-1 btn-primary"
                                 >
-                                    {registering ? 'Registering...' : 'Confirm'}
+                                    {registering ? (isEditMode ? 'Updating...' : 'Registering...') : (isEditMode ? 'Update Device' : 'Confirm')}
                                 </button>
                             </div>
                         </form>
@@ -311,6 +338,7 @@ export const DeviceList = () => {
                             <th className="px-6 py-4 text-sm font-semibold text-slate-400">ID</th>
                             <th className="px-6 py-4 text-sm font-semibold text-slate-400">Status</th>
                             <th className="px-6 py-4 text-sm font-semibold text-slate-400">Last Seen</th>
+                            <th className="px-6 py-4 text-sm font-semibold text-slate-400">Uptime</th>
                             <th className="px-6 py-4 text-sm font-semibold text-slate-400 text-right">Actions</th>
                         </tr>
                     </thead>
@@ -353,8 +381,18 @@ export const DeviceList = () => {
                                 <td className="px-6 py-4 text-sm text-slate-400">
                                     {new Date(device.last_seen).toLocaleString()}
                                 </td>
+                                <td className="px-6 py-4 text-sm text-slate-300 font-mono">
+                                    {formatUptime(device.uptime_seconds)}
+                                </td>
                                 <td className="px-6 py-4 text-right">
                                     <div className="flex justify-end gap-2">
+                                        <button
+                                            onClick={(e) => openEditModal(e, device)}
+                                            title="Edit Device"
+                                            className="p-2 rounded-lg transition-all text-slate-400 hover:text-white hover:bg-white/5"
+                                        >
+                                            <Pencil size={16} />
+                                        </button>
                                         <button
                                             onClick={(e) => handleToggle(e, device.device_id)}
                                             title={device.monitoring_enabled === false ? "Resume Monitoring" : "Pause Monitoring"}
@@ -387,6 +425,13 @@ export const DeviceList = () => {
                                 </td>
                             </tr>
                         ))}
+                        {!loading && devices.length === 0 && (
+                            <tr>
+                                <td colSpan={6} className="px-6 py-12 text-center text-slate-500">
+                                    No devices registered yet.
+                                </td>
+                            </tr>
+                        )}
                     </tbody>
                 </table>
             </div>

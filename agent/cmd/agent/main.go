@@ -89,6 +89,10 @@ func main() {
 	if asteriskContainer == "" {
 		asteriskContainer = "asterisk"
 	}
+	pingHost := strings.TrimSpace(cfg.PingHost)
+	if pingHost == "" {
+		pingHost = "1.1.1.1"
+	}
 
 	for {
 		select {
@@ -119,11 +123,9 @@ func main() {
 				}
 			}
 
-			// Network Metrics (Example targets)
+			// Network Metrics
 			if enabledModules["network"] {
-				netMetrics := monitor.CheckNetwork([]string{"google.com", "1.1.1.1"}, []map[string]interface{}{
-					{"host": "google.com", "port": 443.0},
-				})
+				netMetrics := monitor.CheckNetwork([]string{pingHost}, nil)
 				client.PublishMetric("network", netMetrics)
 			}
 

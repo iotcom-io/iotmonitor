@@ -5,13 +5,19 @@ import api from '../lib/axios';
 import { useDeviceStore } from '../store/useDeviceStore';
 import { useEffect } from 'react';
 
-type DeviceType = 'server' | 'pbx' | 'media_gateway' | 'network_device' | 'website';
+type DeviceType = 'server' | 'pbx' | 'network_device' | 'website';
 const MODULE_DEFAULTS_BY_DEVICE_TYPE: Record<DeviceType, Array<keyof ModuleState>> = {
     server: ['system', 'docker', 'network'],
-    pbx: ['system', 'asterisk', 'network'],
-    media_gateway: ['system', 'network'],
+    pbx: ['system', 'docker', 'asterisk', 'network'],
     network_device: ['network'],
     website: ['system', 'network'],
+};
+
+const normalizeDeviceType = (value?: string): DeviceType => {
+    if (value === 'server' || value === 'pbx' || value === 'network_device' || value === 'website') {
+        return value;
+    }
+    return 'server';
 };
 
 type ModuleState = {
@@ -58,6 +64,7 @@ export const AgentBuilder = () => {
     const [deviceName, setDeviceName] = useState<string>('');
     const [deviceType, setDeviceType] = useState<DeviceType>('server');
     const [asteriskContainerName, setAsteriskContainerName] = useState<string>('asterisk');
+    const [pingHost, setPingHost] = useState<string>('');
     const [template, setTemplate] = useState<'custom' | 'standard' | 'full'>('custom');
     const [modules, setModules] = useState<ModuleState>(toModuleState(MODULE_DEFAULTS_BY_DEVICE_TYPE.server as string[]));
 
@@ -69,6 +76,7 @@ export const AgentBuilder = () => {
         if (selectedDeviceId !== 'new') return;
         setModules(toModuleState(MODULE_DEFAULTS_BY_DEVICE_TYPE[deviceType] as string[]));
         setAsteriskContainerName('asterisk');
+        setPingHost('');
     }, [selectedDeviceId, deviceType]);
 
     useEffect(() => {
@@ -80,13 +88,14 @@ export const AgentBuilder = () => {
                 ? selectedDevice.enabled_modules
                 : ['system'];
             setModules(toModuleState(selectedModules as string[]));
-            setDeviceType((selectedDevice.type as DeviceType) || 'server');
+            setDeviceType(normalizeDeviceType(selectedDevice.type));
         }
         const configuredContainer =
             selectedDevice?.asterisk_container_name ||
             selectedDevice?.config?.asterisk_container ||
             'asterisk';
         setAsteriskContainerName(configuredContainer);
+        setPingHost(selectedDevice?.probe_config?.ping_host || selectedDevice?.hostname || '');
     }, [selectedDeviceId, devices]);
 
     const applyTemplate = (t: 'standard' | 'full') => {
@@ -145,6 +154,7 @@ export const AgentBuilder = () => {
                 name: selectedDeviceId === 'new' ? deviceName : undefined,
                 device_type: selectedDeviceId === 'new' ? deviceType : undefined,
                 asterisk_container_name: modules.asterisk ? asteriskContainerName.trim() || 'asterisk' : undefined,
+                ping_host: modules.network ? (pingHost.trim() || undefined) : undefined,
             });
             setBuildResult({
                 url: `/api/devices/download/${data.binary_id}`,
@@ -200,7 +210,6 @@ export const AgentBuilder = () => {
                             >
                                 <option value="server">Server</option>
                                 <option value="pbx">PBX</option>
-                                <option value="media_gateway">Media Gateway</option>
                                 <option value="network_device">Network Device</option>
                                 <option value="website">Website</option>
                             </select>
@@ -266,7 +275,7 @@ export const AgentBuilder = () => {
                 <ModuleToggle
                     icon={Wifi}
                     label="Network Probe"
-                    description="Perform ICMP pings and TCP port checks periodically from the agent."
+                    description="Perform periodic host reachability and latency checks from the agent."
                     enabled={modules.network}
                     onToggle={() => toggleModule('network')}
                 />
@@ -283,6 +292,20 @@ export const AgentBuilder = () => {
                         placeholder="e.g. asterisk, pbx-01, voip-core"
                     />
                     <p className="text-xs text-slate-500">Used by the agent for `docker exec` asterisk commands. Defaults to `asterisk`.</p>
+                </div>
+            )}
+
+            {modules.network && (
+                <div className="card space-y-3">
+                    <label className="text-sm font-medium text-slate-400 uppercase tracking-wider">Ping Host</label>
+                    <input
+                        type="text"
+                        value={pingHost}
+                        onChange={e => setPingHost(e.target.value)}
+                        className="w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-3 text-white outline-none focus:border-primary-500/50"
+                        placeholder="e.g. monitoring.iotcom.io or 1.1.1.1"
+                    />
+                    <p className="text-xs text-slate-500">Embedded in the agent as the network probe target host.</p>
                 </div>
             )}
 

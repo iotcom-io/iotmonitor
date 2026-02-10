@@ -4,12 +4,18 @@ import api from '../lib/axios';
 interface Device {
     device_id: string;
     name: string;
-    type?: 'server' | 'pbx' | 'media_gateway' | 'network_device' | 'website';
+    hostname?: string;
+    type?: 'server' | 'pbx' | 'network_device' | 'website';
     status: 'online' | 'offline' | 'warning' | 'not_monitored';
     last_seen: string;
+    uptime_seconds?: number;
     monitoring_enabled?: boolean;
     enabled_modules?: ('system' | 'docker' | 'asterisk' | 'network')[];
     asterisk_container_name?: string;
+    probe_config?: {
+        ping_host?: string;
+        [key: string]: any;
+    };
     config?: {
         cpu_usage?: number;
         disk_usage?: number;
@@ -72,7 +78,12 @@ export const useDeviceStore = create<DeviceState>((set, get) => ({
                     devices: state.devices.map(d => {
                         if (d.device_id === device_id) {
                             // Merge metrics if available (this is partial since IStore doesn't fully type 'metrics' yet)
-                            return { ...d, status: status || d.status, last_seen: new Date().toISOString() };
+                            return {
+                                ...d,
+                                status: status || d.status,
+                                last_seen: new Date().toISOString(),
+                                ...(metrics?.uptime !== undefined ? { uptime_seconds: Number(metrics.uptime) || 0 } : {}),
+                            };
                         }
                         return d;
                     })

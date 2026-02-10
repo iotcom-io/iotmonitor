@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid,
-    Tooltip, ResponsiveContainer, AreaChart, Area
+    Tooltip, ResponsiveContainer, AreaChart, Area, Legend
 } from 'recharts';
 import api from '../lib/axios';
 import { clsx } from 'clsx';
@@ -56,6 +56,67 @@ const numberOrNull = (value: unknown): number | null => {
     return Number.isFinite(parsed) ? parsed : null;
 };
 
+const SIP_LINE_COLORS = ['#f59e0b', '#22c55e', '#3b82f6', '#ef4444', '#14b8a6', '#a855f7', '#f97316', '#84cc16'];
+
+const toEndpointKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+
+const normalizeEndpointName = (value: unknown): string | null => {
+    if (value === null || value === undefined) return null;
+    const text = String(value).trim();
+    if (!text) return null;
+
+    if (text.includes('@')) {
+        const parts = text.split('@').map(part => part.trim()).filter(Boolean);
+        if (parts.length > 1) return parts[1];
+    }
+
+    const sanitized = text.replace(/^sip[:/]+/i, '').replace(/[<>"]/g, '').trim();
+    return sanitized || null;
+};
+
+const parseRegistrationPercent = (status: unknown): number | null => {
+    const normalized = String(status || '').toLowerCase().trim();
+    if (!normalized) return null;
+    if (normalized === 'registered' || normalized === 'ok') return 100;
+    return 0;
+};
+
+const formatDecimal = (value: unknown, decimals = 2, fallback = '--') => {
+    const num = numberOrNull(value);
+    if (num === null) return fallback;
+    return num.toFixed(decimals);
+};
+
+const formatWithUnit = (value: unknown, unit: string, decimals = 2, fallback = '--') => {
+    const formatted = formatDecimal(value, decimals, fallback);
+    if (formatted === fallback) return fallback;
+    return `${formatted}${unit}`;
+};
+
+const formatDurationFromSeconds = (seconds?: number | null) => {
+    const total = Number(seconds || 0);
+    if (!Number.isFinite(total) || total <= 0) return '--';
+    const days = Math.floor(total / 86400);
+    const hours = Math.floor((total % 86400) / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${minutes}m`;
+};
+
+const getCheckUnit = (checkType?: string) => {
+    if (!checkType) return '';
+    if (['cpu', 'memory', 'disk', 'utilization', 'sip_registration'].includes(checkType)) return '%';
+    if (['sip_rtt', 'latency'].includes(checkType)) return ' ms';
+    if (checkType === 'bandwidth') return ' Mbps';
+    return '';
+};
+
+const formatCheckValue = (checkType: string, value: unknown) => {
+    const unit = getCheckUnit(checkType);
+    return unit ? formatWithUnit(value, unit, 2, '—') : formatDecimal(value, 2, '—');
+};
+
 export const DeviceDetail = () => {
     const { id } = useParams();
     const token = useAuthStore(state => state.token);
@@ -72,6 +133,7 @@ export const DeviceDetail = () => {
     const [historyBucket, setHistoryBucket] = useState<HistoryBucket>('auto');
     const [historyFrom, setHistoryFrom] = useState('');
     const [historyTo, setHistoryTo] = useState('');
+    const [showHistoricalTrends, setShowHistoricalTrends] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingCheck, setEditingCheck] = useState<any>(null);
     const [incidents, setIncidents] = useState<any[]>([]);
@@ -362,11 +424,11 @@ export const DeviceDetail = () => {
         }
     }, [activeTab, visibleTabs]);
 
-    const formatGB = (bytes?: number) => bytes ? (bytes / (1024 ** 3)).toFixed(1) : '0.0';
+    const formatGB = (bytes?: number) => bytes ? (bytes / (1024 ** 3)).toFixed(2) : '0.00';
     const formatBps = (bps?: number) => {
         if (!bps) return '0 bps';
-        if (bps > 1000000) return (bps / 1000000).toFixed(1) + ' Mbps';
-        if (bps > 1000) return (bps / 1000).toFixed(1) + ' Kbps';
+        if (bps > 1000000) return (bps / 1000000).toFixed(2) + ' Mbps';
+        if (bps > 1000) return (bps / 1000).toFixed(2) + ' Kbps';
         return bps.toFixed(0) + ' bps';
     };
 
@@ -387,6 +449,7 @@ export const DeviceDetail = () => {
     const avgLatency = successfulPings.length
         ? (successfulPings.reduce((sum, p) => sum + (p.latency_ms || 0), 0) / successfulPings.length)
         : null;
+    const currentUptimeSeconds = numberOrNull(latest?.uptime) ?? numberOrNull(device?.uptime_seconds);
     const historyWindowMs = useMemo(() => {
         if (!historyFrom || !historyTo) return 0;
         const fromDate = new Date(historyFrom);
@@ -410,6 +473,18 @@ export const DeviceDetail = () => {
         }
         return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     };
+
+    const monitoredSipEndpoints = useMemo(() => {
+        const endpoints = new Set<string>();
+        checks.forEach((check: any) => {
+            if (!String(check?.check_type || '').startsWith('sip')) return;
+            const endpoint = normalizeEndpointName(check?.target);
+            if (endpoint) {
+                endpoints.add(endpoint);
+            }
+        });
+        return Array.from(endpoints).sort();
+    }, [checks]);
 
     const historicalSeries = useMemo(() => {
         return historicalMetrics.map((sample: any) => {
@@ -454,14 +529,80 @@ export const DeviceDetail = () => {
             }
             const sipRegistrationValue = precomputedSipRegistration !== null ? precomputedSipRegistration : sipRegistrationPercent;
 
-            return {
+            const endpointNames = new Set<string>(monitoredSipEndpoints);
+            const sipRttByEndpoint: Record<string, number | null> = {};
+            const sipRegistrationByEndpoint: Record<string, number | null> = {};
+
+            const precomputedRttSeries = Array.isArray(sample?.sip_rtt_endpoints) ? sample.sip_rtt_endpoints : [];
+            if (precomputedRttSeries.length > 0) {
+                precomputedRttSeries.forEach((entry: any) => {
+                    const endpoint = normalizeEndpointName(entry?.endpoint);
+                    if (!endpoint) return;
+                    endpointNames.add(endpoint);
+                    sipRttByEndpoint[endpoint] = numberOrNull(entry?.value);
+                });
+            } else {
+                contacts.forEach((contact: any) => {
+                    const endpoint = normalizeEndpointName(contact?.aor || contact?.endpoint || contact?.name);
+                    if (!endpoint) return;
+                    endpointNames.add(endpoint);
+                    sipRttByEndpoint[endpoint] = numberOrNull(contact?.rttMs ?? contact?.latency_ms);
+                });
+            }
+
+            const precomputedRegSeries = Array.isArray(sample?.sip_registration_endpoints) ? sample.sip_registration_endpoints : [];
+            if (precomputedRegSeries.length > 0) {
+                precomputedRegSeries.forEach((entry: any) => {
+                    const endpoint = normalizeEndpointName(entry?.endpoint);
+                    if (!endpoint) return;
+                    endpointNames.add(endpoint);
+                    sipRegistrationByEndpoint[endpoint] = numberOrNull(entry?.value);
+                });
+            } else {
+                registrations.forEach((registration: any) => {
+                    const endpoint = normalizeEndpointName(registration?.name || registration?.endpoint || registration?.serverUri);
+                    if (!endpoint) return;
+                    endpointNames.add(endpoint);
+                    sipRegistrationByEndpoint[endpoint] = parseRegistrationPercent(registration?.status);
+                });
+            }
+
+            const row: Record<string, any> = {
                 ...sample,
                 bandwidth_mbps: bandwidthMbps,
                 sip_rtt_avg_ms: sipRttValue,
                 sip_registration_percent: sipRegistrationValue,
+                _sip_endpoints: Array.from(endpointNames),
             };
+
+            endpointNames.forEach((endpoint) => {
+                const endpointKey = toEndpointKey(endpoint);
+                row[`sip_rtt_endpoint_${endpointKey}`] = sipRttByEndpoint[endpoint] ?? null;
+                row[`sip_registration_endpoint_${endpointKey}`] = sipRegistrationByEndpoint[endpoint] ?? null;
+            });
+
+            return row;
         });
-    }, [historicalMetrics]);
+    }, [historicalMetrics, monitoredSipEndpoints]);
+
+    const sipEndpointLines = useMemo(() => {
+        const discovered = new Set<string>(monitoredSipEndpoints);
+        historicalSeries.forEach((sample: any) => {
+            const names = Array.isArray(sample?._sip_endpoints) ? sample._sip_endpoints : [];
+            names.forEach((endpoint: string) => {
+                const normalized = normalizeEndpointName(endpoint);
+                if (normalized) discovered.add(normalized);
+            });
+        });
+
+        const monitoredSet = new Set<string>(monitoredSipEndpoints);
+        return Array.from(discovered).sort().map((endpoint, index) => ({
+            endpoint,
+            key: toEndpointKey(endpoint),
+            monitored: monitoredSet.has(endpoint),
+            color: SIP_LINE_COLORS[index % SIP_LINE_COLORS.length],
+        }));
+    }, [historicalSeries, monitoredSipEndpoints]);
 
     const isOffline = device?.status === 'offline';
 
@@ -539,6 +680,11 @@ export const DeviceDetail = () => {
                                     <span className="text-[10px] font-bold text-slate-600 uppercase tracking-widest">Host:</span>
                                     {device.hostname || '—'}
                                 </span>
+                                <span className="w-1 h-1 bg-slate-800 rounded-full" />
+                                <span className="flex items-center gap-1.5">
+                                    <span className="text-[10px] font-bold text-slate-600 uppercase tracking-widest">Uptime:</span>
+                                    {formatDurationFromSeconds(currentUptimeSeconds)}
+                                </span>
                             </div>
                         </div>
                     </div>
@@ -610,18 +756,18 @@ export const DeviceDetail = () => {
                                     <Info size={16} className="text-slate-500" data-tooltip="Hover to see per-core usage" />
                                 </div>
                                 <span className="text-xs text-primary-400 font-bold bg-primary-400/10 px-2 py-0.5 rounded" title="1 minute load average">
-                                    Load: {metrics[metrics.length - 1]?.cpu_load?.toFixed(2) || '0.00'}
+                                    Load: {formatDecimal(metrics[metrics.length - 1]?.cpu_load, 2, '0.00')}
                                 </span>
                             </div>
                             <h4 className="text-slate-400 text-sm font-medium mb-1">CPU Usage</h4>
-                            <p className="text-2xl font-bold text-white">{latest?.cpu_usage !== undefined ? latest.cpu_usage.toFixed(1) : '0.0'}%</p>
+                            <p className="text-2xl font-bold text-white">{formatWithUnit(latest?.cpu_usage, '%', 2, '0.00%')}</p>
                             {latest?.cpu_per_core && latest.cpu_per_core.length > 0 && !isOffline && (
                                 <div className="mt-3">
                                     <p className="text-[10px] uppercase text-slate-500 font-bold mb-1">Per-core</p>
                                     <div className="flex flex-wrap gap-2 text-xs text-slate-400">
                                         {latest.cpu_per_core.map((val: number, idx: number) => (
-                                            <span key={idx} className="px-2 py-1 bg-white/5 rounded border border-white/10" title={`Core ${idx}: ${val.toFixed(1)}%`}>
-                                                C{idx}: {val.toFixed(0)}%
+                                            <span key={idx} className="px-2 py-1 bg-white/5 rounded border border-white/10" title={`Core ${idx}: ${formatDecimal(val, 2, '0.00')}%`}>
+                                                C{idx}: {formatDecimal(val, 2, '0.00')}%
                                             </span>
                                         ))}
                                     </div>
@@ -636,7 +782,7 @@ export const DeviceDetail = () => {
                                 </span>
                             </div>
                             <h4 className="text-slate-400 text-sm font-medium mb-1">RAM Usage</h4>
-                            <p className="text-2xl font-bold text-white">{memPct !== undefined ? Math.min(memPct, 100).toFixed(1) : '0.0'}%</p>
+                            <p className="text-2xl font-bold text-white">{formatWithUnit(memPct !== undefined ? Math.min(memPct, 100) : null, '%', 2, '0.00%')}</p>
                             <p className="text-[10px] text-slate-500 mt-1">
                                 cache+buffers: {cacheBuffers ? `${cacheBuffers / (1024 ** 3) < 0.01 ? '<0.01' : (cacheBuffers / (1024 ** 3)).toFixed(2)} GB` : '0 GB'}
                             </p>
@@ -649,7 +795,7 @@ export const DeviceDetail = () => {
                                 </span>
                             </div>
                             <h4 className="text-slate-400 text-sm font-medium mb-1">Storage</h4>
-                            <p className="text-2xl font-bold text-white">{diskPct !== undefined ? diskPct.toFixed(1) : '0.0'}%</p>
+                            <p className="text-2xl font-bold text-white">{formatWithUnit(diskPct, '%', 2, '0.00%')}</p>
                         </div>
                         <div className="card">
                             <div className="flex justify-between items-center mb-4">
@@ -663,7 +809,7 @@ export const DeviceDetail = () => {
                             </div>
                             <h4 className="text-slate-400 text-sm font-medium mb-1">Latency</h4>
                             <p className="text-2xl font-bold text-white">
-                                {avgLatency !== null ? `${avgLatency.toFixed(1)}ms` : '—'}
+                                {avgLatency !== null ? `${formatDecimal(avgLatency, 2)}ms` : '—'}
                             </p>
                         </div>
                     </div>
@@ -751,9 +897,18 @@ export const DeviceDetail = () => {
                                         Last {preset}
                                     </button>
                                 ))}
+                                <button
+                                    onClick={() => setShowHistoricalTrends((prev) => !prev)}
+                                    className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all border bg-white/5 border-white/10 text-slate-300 hover:text-white flex items-center gap-1.5"
+                                >
+                                    {showHistoricalTrends ? 'Hide Trends' : 'Show Trends'}
+                                    {showHistoricalTrends ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                                </button>
                             </div>
                         </div>
 
+                        {showHistoricalTrends && (
+                            <>
                         <div className="grid grid-cols-1 xl:grid-cols-[1fr_1fr_180px_auto_auto] gap-3">
                             <input
                                 type="datetime-local"
@@ -814,9 +969,9 @@ export const DeviceDetail = () => {
                                 No archival telemetry found for the selected range.
                             </div>
                         ) : (
-                            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 {enabledModules.includes('system') && (
-                                    <div className="space-y-6">
+                                    <div className="space-y-6 md:space-y-0 md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
                                         <div className="h-72 border border-white/10 rounded-2xl p-4 bg-white/[0.02]">
                                             <h4 className="text-sm font-bold text-white mb-3">CPU Usage (%)</h4>
                                             <ResponsiveContainer width="100%" height="90%">
@@ -827,7 +982,7 @@ export const DeviceDetail = () => {
                                                     <Tooltip
                                                         contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
                                                         labelFormatter={(value) => new Date(String(value)).toLocaleString()}
-                                                        formatter={(value: any) => [value !== null && value !== undefined ? `${Number(value).toFixed(1)}%` : '--', 'CPU']}
+                                                        formatter={(value: any) => [formatWithUnit(value, '%', 2, '--'), 'CPU']}
                                                     />
                                                     <Line type="monotone" dataKey="cpu_usage" stroke="#0ea5e9" strokeWidth={2} dot={false} />
                                                 </LineChart>
@@ -843,7 +998,7 @@ export const DeviceDetail = () => {
                                                     <Tooltip
                                                         contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
                                                         labelFormatter={(value) => new Date(String(value)).toLocaleString()}
-                                                        formatter={(value: any) => [value !== null && value !== undefined ? `${Number(value).toFixed(1)}%` : '--', 'Memory']}
+                                                        formatter={(value: any) => [formatWithUnit(value, '%', 2, '--'), 'Memory']}
                                                     />
                                                     <Line type="monotone" dataKey="memory_usage" stroke="#10b981" strokeWidth={2} dot={false} />
                                                 </LineChart>
@@ -872,7 +1027,7 @@ export const DeviceDetail = () => {
                                 )}
 
                                 {enabledModules.includes('asterisk') && (
-                                    <div className="space-y-6">
+                                    <div className="space-y-6 md:space-y-0 md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
                                         <div className="h-72 border border-white/10 rounded-2xl p-4 bg-white/[0.02]">
                                             <h4 className="text-sm font-bold text-white mb-3">SIP RTT Average (ms)</h4>
                                             <ResponsiveContainer width="100%" height="90%">
@@ -883,7 +1038,7 @@ export const DeviceDetail = () => {
                                                     <Tooltip
                                                         contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
                                                         labelFormatter={(value) => new Date(String(value)).toLocaleString()}
-                                                        formatter={(value: any) => [value !== null && value !== undefined ? `${Number(value).toFixed(1)} ms` : '--', 'SIP RTT']}
+                                                        formatter={(value: any) => [formatWithUnit(value, ' ms', 2, '--'), 'SIP RTT']}
                                                     />
                                                     <Line type="monotone" dataKey="sip_rtt_avg_ms" stroke="#f59e0b" strokeWidth={2} dot={false} />
                                                 </LineChart>
@@ -899,15 +1054,75 @@ export const DeviceDetail = () => {
                                                     <Tooltip
                                                         contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
                                                         labelFormatter={(value) => new Date(String(value)).toLocaleString()}
-                                                        formatter={(value: any) => [value !== null && value !== undefined ? `${Number(value).toFixed(1)}%` : '--', 'Registration']}
+                                                        formatter={(value: any) => [formatWithUnit(value, '%', 2, '--'), 'Registration']}
                                                     />
                                                     <Line type="monotone" dataKey="sip_registration_percent" stroke="#22c55e" strokeWidth={2} dot={false} />
                                                 </LineChart>
                                             </ResponsiveContainer>
                                         </div>
+                                        {sipEndpointLines.length > 0 && (
+                                            <div className="h-72 border border-white/10 rounded-2xl p-4 bg-white/[0.02]">
+                                                <h4 className="text-sm font-bold text-white mb-3">SIP RTT by Endpoint (ms)</h4>
+                                                <ResponsiveContainer width="100%" height="90%">
+                                                    <LineChart data={historicalSeries}>
+                                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" />
+                                                        <XAxis dataKey="timestamp" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} tickFormatter={historyTickFormatter} />
+                                                        <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                                                        <Tooltip
+                                                            contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
+                                                            labelFormatter={(value) => new Date(String(value)).toLocaleString()}
+                                                            formatter={(value: any, name: any) => [formatWithUnit(value, ' ms', 2, '--'), name]}
+                                                        />
+                                                        <Legend wrapperStyle={{ fontSize: '10px' }} />
+                                                        {sipEndpointLines.map((line) => (
+                                                            <Line
+                                                                key={`sip-rtt-${line.key}`}
+                                                                type="monotone"
+                                                                dataKey={`sip_rtt_endpoint_${line.key}`}
+                                                                name={line.monitored ? line.endpoint : `${line.endpoint} (unmonitored)`}
+                                                                stroke={line.color}
+                                                                strokeWidth={2}
+                                                                dot={false}
+                                                            />
+                                                        ))}
+                                                    </LineChart>
+                                                </ResponsiveContainer>
+                                            </div>
+                                        )}
+                                        {sipEndpointLines.length > 0 && (
+                                            <div className="h-72 border border-white/10 rounded-2xl p-4 bg-white/[0.02]">
+                                                <h4 className="text-sm font-bold text-white mb-3">SIP Registration by Endpoint (%)</h4>
+                                                <ResponsiveContainer width="100%" height="90%">
+                                                    <LineChart data={historicalSeries}>
+                                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" />
+                                                        <XAxis dataKey="timestamp" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} tickFormatter={historyTickFormatter} />
+                                                        <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} domain={[0, 100]} />
+                                                        <Tooltip
+                                                            contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
+                                                            labelFormatter={(value) => new Date(String(value)).toLocaleString()}
+                                                            formatter={(value: any, name: any) => [formatWithUnit(value, '%', 2, '--'), name]}
+                                                        />
+                                                        <Legend wrapperStyle={{ fontSize: '10px' }} />
+                                                        {sipEndpointLines.map((line) => (
+                                                            <Line
+                                                                key={`sip-reg-${line.key}`}
+                                                                type="monotone"
+                                                                dataKey={`sip_registration_endpoint_${line.key}`}
+                                                                name={line.monitored ? line.endpoint : `${line.endpoint} (unmonitored)`}
+                                                                stroke={line.color}
+                                                                strokeWidth={2}
+                                                                dot={false}
+                                                            />
+                                                        ))}
+                                                    </LineChart>
+                                                </ResponsiveContainer>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>
+                        )}
+                            </>
                         )}
                     </div>
                 </>
@@ -1080,7 +1295,7 @@ export const DeviceDetail = () => {
                                                 !contact.rttMs ? "text-slate-600" :
                                                     contact.rttMs > 200 ? "text-amber-400" : "text-emerald-400"
                                             )}>
-                                                {contact.rttMs ? `${contact.rttMs.toFixed(1)}ms` : '--'}
+                                                {contact.rttMs ? `${formatDecimal(contact.rttMs, 2)}ms` : '--'}
                                             </p>
                                         </div>
                                     </div>
@@ -1416,8 +1631,6 @@ export const DeviceDetail = () => {
                                                     check.last_state === 'ok' ? "🟢" :
                                                         check.last_state === 'warning' ? "🟡" : "🔴";
 
-                                            const unit = ['sip_rtt', 'latency'].includes(check.check_type) ? 'ms' : check.check_type === 'bandwidth' ? 'Mbps' : '%';
-
                                             // Icon mapping
                                             const Icon = check.check_type === 'cpu' ? Cpu :
                                                 check.check_type === 'memory' ? Memory :
@@ -1456,7 +1669,7 @@ export const DeviceDetail = () => {
                                                         <div className="w-20 sm:w-28 hidden md:block">
                                                             <p className="text-[9px] text-slate-500 uppercase font-black tracking-tighter mb-0.5 opacity-50">Current</p>
                                                             <p className={clsx("font-mono font-bold leading-none", density === 'comfortable' ? "text-sm" : "text-xs", statusColor)}>
-                                                                {check.last_value !== undefined ? `${check.last_value}${unit}` : '—'}
+                                                                {formatCheckValue(check.check_type, check.last_value)}
                                                             </p>
                                                         </div>
                                                         <div className="hidden lg:block w-32 text-right pr-4">
@@ -1546,10 +1759,7 @@ export const DeviceDetail = () => {
                                                 <div className="flex justify-between items-end">
                                                     <span className="text-[10px] font-bold text-slate-500">Latest Value</span>
                                                     <span className="text-2xl font-black text-white font-mono">
-                                                        {selectedRule.last_value ?? '—'}
-                                                        <span className="text-xs text-slate-600 ml-1 font-sans">
-                                                            {['sip_rtt', 'latency'].includes(selectedRule.check_type) ? 'ms' : selectedRule.check_type === 'bandwidth' ? 'Mbps' : '%'}
-                                                        </span>
+                                                        {formatCheckValue(selectedRule.check_type, selectedRule.last_value)}
                                                     </span>
                                                 </div>
                                                 <div className="flex justify-between text-[10px]">

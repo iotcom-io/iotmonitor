@@ -310,6 +310,105 @@ const buildSipRegistrationExpr = () => ({
     },
 });
 
+const buildEndpointLabelExpr = (input: any) => ({
+    $let: {
+        vars: {
+            rawValue: {
+                $trim: {
+                    input: {
+                        $toString: {
+                            $ifNull: [input, ''],
+                        },
+                    },
+                },
+            },
+        },
+        in: {
+            $cond: [
+                { $gt: [{ $strLenCP: '$$rawValue' }, 0] },
+                {
+                    $let: {
+                        vars: {
+                            parts: { $split: ['$$rawValue', '@'] },
+                        },
+                        in: {
+                            $trim: {
+                                input: {
+                                    $cond: [
+                                        { $gt: [{ $size: '$$parts' }, 1] },
+                                        { $arrayElemAt: ['$$parts', 1] },
+                                        { $arrayElemAt: ['$$parts', 0] },
+                                    ],
+                                },
+                            },
+                        },
+                    },
+                },
+                null,
+            ],
+        },
+    },
+});
+
+const buildSipRttEndpointsExpr = () => ({
+    $filter: {
+        input: {
+            $map: {
+                input: { $ifNull: ['$extra.contacts', []] },
+                as: 'contact',
+                in: {
+                    endpoint: buildEndpointLabelExpr({
+                        $ifNull: ['$$contact.aor', { $ifNull: ['$$contact.endpoint', '$$contact.name'] }],
+                    }),
+                    value: toNumberExpr({ $ifNull: ['$$contact.rttMs', '$$contact.latency_ms'] }, true),
+                },
+            },
+        },
+        as: 'entry',
+        cond: {
+            $and: [
+                { $ne: ['$$entry.endpoint', null] },
+                { $ne: ['$$entry.endpoint', ''] },
+            ],
+        },
+    },
+});
+
+const buildSipRegistrationEndpointsExpr = () => ({
+    $filter: {
+        input: {
+            $map: {
+                input: { $ifNull: ['$extra.registrations', []] },
+                as: 'registration',
+                in: {
+                    endpoint: buildEndpointLabelExpr({
+                        $ifNull: ['$$registration.name', { $ifNull: ['$$registration.endpoint', '$$registration.serverUri'] }],
+                    }),
+                    value: {
+                        $cond: [
+                            {
+                                $in: [
+                                    { $toLower: { $ifNull: ['$$registration.status', ''] } },
+                                    ['registered', 'ok'],
+                                ],
+                            },
+                            100,
+                            0,
+                        ],
+                    },
+                },
+            },
+        },
+        as: 'entry',
+        cond: {
+            $and: [
+                { $ne: ['$$entry.endpoint', null] },
+                { $ne: ['$$entry.endpoint', ''] },
+            ],
+        },
+    },
+});
+
 const toNumber = (value: unknown): number | null => {
     if (value === null || value === undefined) return null;
     const parsed = typeof value === 'number' ? value : Number(value);
@@ -403,6 +502,24 @@ const buildMatchStage = (deviceId: string, from: Date, to: Date) => ({
     },
 });
 
+const normalizeEndpoint = (value: unknown): string | null => {
+    if (value === null || value === undefined) return null;
+    const raw = String(value).trim();
+    if (!raw) return null;
+    if (raw.includes('@')) {
+        const parts = raw.split('@').map((part) => part.trim()).filter(Boolean);
+        if (parts.length > 1) return parts[1];
+    }
+    return raw;
+};
+
+const registrationStatusPercent = (status: unknown): number | null => {
+    const normalized = String(status || '').toLowerCase().trim();
+    if (!normalized) return null;
+    if (normalized === 'registered' || normalized === 'ok') return 100;
+    return 0;
+};
+
 const buildRawHistoryRows = (metrics: any[]) => {
     return metrics.map((metric) => {
         const interfaces = Array.isArray(metric?.extra?.interfaces) ? metric.extra.interfaces : [];
@@ -438,6 +555,24 @@ const buildRawHistoryRows = (metrics: any[]) => {
             registrationPct = (registeredCount / registrations.length) * 100;
         }
 
+        const sipRttEndpoints = contacts.map((contact: any) => {
+            const endpoint = normalizeEndpoint(contact?.aor || contact?.endpoint || contact?.name);
+            if (!endpoint) return null;
+            return {
+                endpoint,
+                value: toNumber(contact?.rttMs ?? contact?.latency_ms),
+            };
+        }).filter((entry: any) => entry && entry.endpoint);
+
+        const sipRegistrationEndpoints = registrations.map((registration: any) => {
+            const endpoint = normalizeEndpoint(registration?.name || registration?.endpoint || registration?.serverUri);
+            if (!endpoint) return null;
+            return {
+                endpoint,
+                value: registrationStatusPercent(registration?.status),
+            };
+        }).filter((entry: any) => entry && entry.endpoint);
+
         return {
             timestamp: metric.timestamp,
             cpu_usage: toNumber(metric.cpu_usage),
@@ -446,6 +581,8 @@ const buildRawHistoryRows = (metrics: any[]) => {
             bandwidth_mbps: bandwidthBps !== null ? bandwidthBps / 1000000 : null,
             sip_rtt_avg_ms: sipRttAvg,
             sip_registration_percent: registrationPct,
+            sip_rtt_endpoints: sipRttEndpoints,
+            sip_registration_endpoints: sipRegistrationEndpoints,
             point_count: 1,
         };
     });
@@ -517,6 +654,8 @@ router.get('/metrics/:deviceId', async (req: AuthRequest, res) => {
                     _bandwidth_mbps: buildBandwidthExpr(),
                     _sip_rtt_avg_ms: buildSipRttExpr(),
                     _sip_registration_percent: buildSipRegistrationExpr(),
+                    _sip_rtt_endpoints: buildSipRttEndpointsExpr(),
+                    _sip_registration_endpoints: buildSipRegistrationEndpointsExpr(),
                     _bucket_ts: {
                         $dateTrunc: {
                             date: '$timestamp',
@@ -535,6 +674,8 @@ router.get('/metrics/:deviceId', async (req: AuthRequest, res) => {
                     bandwidth_mbps: { $avg: '$_bandwidth_mbps' },
                     sip_rtt_avg_ms: { $avg: '$_sip_rtt_avg_ms' },
                     sip_registration_percent: { $avg: '$_sip_registration_percent' },
+                    sip_rtt_endpoints: { $last: '$_sip_rtt_endpoints' },
+                    sip_registration_endpoints: { $last: '$_sip_registration_endpoints' },
                     point_count: { $sum: 1 },
                 },
             },
@@ -550,6 +691,8 @@ router.get('/metrics/:deviceId', async (req: AuthRequest, res) => {
             bandwidth_mbps: toNumber(row.bandwidth_mbps),
             sip_rtt_avg_ms: toNumber(row.sip_rtt_avg_ms),
             sip_registration_percent: toNumber(row.sip_registration_percent),
+            sip_rtt_endpoints: Array.isArray(row.sip_rtt_endpoints) ? row.sip_rtt_endpoints : [],
+            sip_registration_endpoints: Array.isArray(row.sip_registration_endpoints) ? row.sip_registration_endpoints : [],
             point_count: row.point_count || 0,
         }, enabledModules));
 

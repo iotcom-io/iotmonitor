@@ -64,24 +64,6 @@ export async function checkOfflineDevices() {
                 continue;
             }
 
-            if (device.status === 'offline') {
-                console.log(`Device ${device.name} is back online`);
-
-                await Device.findOneAndUpdate({ device_id: device.device_id }, {
-                    status: 'online',
-                    consecutive_missed_messages: 0,
-                });
-
-                await resolveAlert({
-                    device_id: device.device_id,
-                    device_name: device.name,
-                    alert_type: 'offline',
-                    details: {
-                        offline_duration_minutes: Math.floor(timeSinceLastMessage / 60000),
-                    },
-                });
-            }
-
             if (device.status === 'online') {
                 const modules = getEnabledModules(device).filter((m) => m !== 'system');
                 for (const module of modules) {
