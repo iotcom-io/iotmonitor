@@ -464,6 +464,21 @@ export const DeviceDetail = () => {
     const latestAsterisk = [...metrics].reverse().find(hasAsteriskPayload) || latestAny;
     const latestDocker = [...metrics].reverse().find(hasDockerPayload) || latestAny;
     const latest = latestSystem || latestAny;
+    const latestForRuleModal = useMemo(() => {
+        const mergedExtra = {
+            ...(latestAny?.extra || {}),
+            interfaces: latestNetwork?.extra?.interfaces || latestAny?.extra?.interfaces || [],
+            ping_results: latestNetwork?.extra?.ping_results || latestAny?.extra?.ping_results || [],
+            registrations: latestAsterisk?.extra?.registrations || latestAny?.extra?.registrations || [],
+            contacts: latestAsterisk?.extra?.contacts || latestAny?.extra?.contacts || [],
+            docker: latestDocker?.extra?.docker || latestAny?.extra?.docker || [],
+        };
+
+        return {
+            ...(latestAny || latest || {}),
+            extra: mergedExtra,
+        };
+    }, [latest, latestAny, latestAsterisk, latestDocker, latestNetwork]);
     // Memory: agent already reports used = total - available (includes cache/buffers). Use that directly.
     const memPct = latest?.memory_usage ?? (latest?.memory_used !== undefined && latest?.memory_total
         ? (latest.memory_used / latest.memory_total) * 100
@@ -476,6 +491,20 @@ export const DeviceDetail = () => {
     const dockerContainers: any[] = Array.isArray(latestDocker?.extra?.docker)
         ? latestDocker.extra.docker
         : (latestDocker?.extra?.docker?.containers || []);
+    const availableDockerTargets = useMemo(() => {
+        const names = new Set<string>();
+        dockerContainers.forEach((container: any) => {
+            const name = String(
+                container?.name
+                || (Array.isArray(container?.names) ? container.names[0] : container?.names)
+                || (Array.isArray(container?.Names) ? container.Names[0] : container?.Names)
+                || container?.id
+                || ''
+            ).replace(/^\//, '').trim();
+            if (name) names.add(name);
+        });
+        return Array.from(names).sort((a, b) => a.localeCompare(b));
+    }, [dockerContainers]);
     const sipContacts: any[] = Array.isArray(latestAsterisk?.extra?.contacts) ? latestAsterisk.extra.contacts : [];
     const sipRegistrations: any[] = Array.isArray(latestAsterisk?.extra?.registrations) ? latestAsterisk.extra.registrations : [];
     const sipRttAverage = sipContacts
@@ -904,10 +933,17 @@ export const DeviceDetail = () => {
                                         axisLine={false}
                                         tickFormatter={(val) => new Date(val).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                     />
-                                    <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                                    <YAxis
+                                        stroke="#64748b"
+                                        fontSize={12}
+                                        tickLine={false}
+                                        axisLine={false}
+                                        tickFormatter={(value) => `${formatDecimal(value, 0, '0')}%`}
+                                    />
                                     <Tooltip
                                         contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
                                         itemStyle={{ color: '#0ea5e9' }}
+                                        formatter={(value: any) => [formatWithUnit(value, '%', 2, '--'), 'CPU']}
                                     />
                                     <Area type="monotone" dataKey="cpu_usage" stroke="#0ea5e9" fillOpacity={1} fill="url(#colorCpu)" strokeWidth={3} />
                                 </AreaChart>
@@ -932,10 +968,17 @@ export const DeviceDetail = () => {
                                         axisLine={false}
                                         tickFormatter={(val) => new Date(val).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                     />
-                                    <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                                    <YAxis
+                                        stroke="#64748b"
+                                        fontSize={12}
+                                        tickLine={false}
+                                        axisLine={false}
+                                        tickFormatter={(value) => `${formatDecimal(value, 0, '0')}%`}
+                                    />
                                     <Tooltip
                                         contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
                                         itemStyle={{ color: '#10b981' }}
+                                        formatter={(value: any) => [formatWithUnit(value, '%', 2, '--'), 'Memory']}
                                     />
                                     <Area type="monotone" dataKey="memory_usage" stroke="#10b981" fillOpacity={1} fill="url(#colorMem)" strokeWidth={3} />
                                 </AreaChart>
@@ -2252,8 +2295,9 @@ export const DeviceDetail = () => {
                 onClose={() => { setIsModalOpen(false); setEditingCheck(null); }}
                 onSave={handleSaveCheck}
                 initialData={editingCheck}
-                latestMetrics={latest}
+                latestMetrics={latestForRuleModal}
                 enabledModules={enabledModules}
+                availableDockerTargets={availableDockerTargets}
             />
 
             <ConfirmationModal

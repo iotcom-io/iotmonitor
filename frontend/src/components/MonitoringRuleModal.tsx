@@ -30,6 +30,7 @@ interface MonitoringRuleModalProps {
     onSave: (rules: any[]) => void;
     initialData?: any;
     enabledModules?: ModuleName[];
+    availableDockerTargets?: string[];
     latestMetrics?: {
         extra?: {
             registrations?: { name: string; status: string; serverUri: string; expiresS: number }[];
@@ -41,7 +42,17 @@ interface MonitoringRuleModalProps {
     };
 }
 
-export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, latestMetrics, enabledModules }: MonitoringRuleModalProps) => {
+const normalizeContainerName = (container: any): string | null => {
+    const raw = container?.name
+        || (Array.isArray(container?.names) ? container.names[0] : container?.names)
+        || (Array.isArray(container?.Names) ? container.Names[0] : container?.Names)
+        || container?.id;
+    if (!raw) return null;
+    const normalized = String(raw).replace(/^\//, '').trim();
+    return normalized || null;
+};
+
+export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, latestMetrics, enabledModules, availableDockerTargets }: MonitoringRuleModalProps) => {
     // Default thresholds for each rule type
     const TYPE_DEFAULTS: Record<string, any> = {
         cpu: { thresholds: { warning: 70, critical: 90 }, target: 'System-wide' },
@@ -74,6 +85,7 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, late
     };
 
     const [formData, setFormData] = useState(prepData(initialData));
+    const [customDockerTarget, setCustomDockerTarget] = useState('');
 
     // Track which types have been modified in this session
     const [modifiedTypes, setModifiedTypes] = useState<Set<string>>(new Set<string>(initialData ? [initialData.check_type] : []));
@@ -89,20 +101,31 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, late
     // Store customizations per type to prevent loss when switching tabs
     const [sessionConfigs, setSessionConfigs] = useState<Record<string, SessionConfig>>({});
 
-    const dockerContainers = React.useMemo(() => {
+    const dockerContainerTargets = React.useMemo(() => {
         const rawDocker = latestMetrics?.extra?.docker as any;
-        const containers = Array.isArray(rawDocker) ? rawDocker : (rawDocker?.containers || []);
-        return containers.map((container: any) => ({
-            ...container,
-            displayName: String(
-                container?.name ||
-                (Array.isArray(container?.names) ? container.names[0] : undefined) ||
-                (Array.isArray(container?.Names) ? container.Names[0] : undefined) ||
-                container?.id ||
-                'unknown'
-            ).replace(/^\//, ''),
-        }));
-    }, [latestMetrics]);
+        const telemetryContainers = Array.isArray(rawDocker) ? rawDocker : (rawDocker?.containers || []);
+        const names = new Set<string>();
+
+        telemetryContainers.forEach((container: any) => {
+            const normalized = normalizeContainerName(container);
+            if (normalized) names.add(normalized);
+        });
+
+        if (Array.isArray(availableDockerTargets)) {
+            availableDockerTargets.forEach((name) => {
+                const normalized = String(name || '').replace(/^\//, '').trim();
+                if (normalized) names.add(normalized);
+            });
+        }
+
+        const selectedTargets = Array.isArray(formData?.targets) ? formData.targets : [];
+        selectedTargets.forEach((name: string) => {
+            const normalized = String(name || '').replace(/^\//, '').trim();
+            if (normalized) names.add(normalized);
+        });
+
+        return Array.from(names).sort((a, b) => a.localeCompare(b));
+    }, [availableDockerTargets, formData?.targets, latestMetrics]);
 
     const checkTypes = React.useMemo(() => {
         if (!enabledModules || enabledModules.length === 0) {
@@ -178,6 +201,16 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, late
             }));
             return next;
         });
+    };
+
+    const addCustomDockerTarget = () => {
+        const normalized = customDockerTarget.replace(/^\//, '').trim();
+        if (!normalized) return;
+        const currentTargets: string[] = Array.isArray(formData.targets) ? formData.targets : [];
+        if (!currentTargets.includes(normalized)) {
+            updateField({ targets: [...currentTargets, normalized] });
+        }
+        setCustomDockerTarget('');
     };
 
     if (!isOpen) return null;
@@ -370,25 +403,53 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, late
                                         </button>
                                     ))
                                 ) : formData.check_type === 'container_status' ? (
-                                    dockerContainers.map((c: any) => (
-                                        <button
-                                            key={c.displayName}
-                                            type="button"
-                                            onClick={() => {
-                                                const current = formData.targets || [];
-                                                const next = current.includes(c.displayName)
-                                                    ? current.filter((t: string) => t !== c.displayName)
-                                                    : [...current, c.displayName];
-                                                updateField({ targets: next });
-                                            }}
-                                            className={clsx(
-                                                "px-3 py-1.5 rounded-lg border text-xs font-bold transition-all",
-                                                formData.targets?.includes(c.displayName) ? "bg-primary-500/20 border-primary-500 text-primary-400" : "bg-white/5 border-white/10 text-slate-500"
-                                            )}
-                                        >
-                                            {c.displayName}
-                                        </button>
-                                    ))
+                                    <>
+                                        {dockerContainerTargets.length > 0 ? (
+                                            dockerContainerTargets.map((containerName: string) => (
+                                                <button
+                                                    key={containerName}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        const current = formData.targets || [];
+                                                        const next = current.includes(containerName)
+                                                            ? current.filter((t: string) => t !== containerName)
+                                                            : [...current, containerName];
+                                                        updateField({ targets: next });
+                                                    }}
+                                                    className={clsx(
+                                                        "px-3 py-1.5 rounded-lg border text-xs font-bold transition-all",
+                                                        formData.targets?.includes(containerName) ? "bg-primary-500/20 border-primary-500 text-primary-400" : "bg-white/5 border-white/10 text-slate-500"
+                                                    )}
+                                                >
+                                                    {containerName}
+                                                </button>
+                                            ))
+                                        ) : (
+                                            <span className="text-xs text-slate-500 italic">No containers discovered yet from agent telemetry.</span>
+                                        )}
+                                        <div className="w-full flex items-center gap-2 mt-2">
+                                            <input
+                                                type="text"
+                                                value={customDockerTarget}
+                                                onChange={(e) => setCustomDockerTarget(e.target.value)}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                        e.preventDefault();
+                                                        addCustomDockerTarget();
+                                                    }
+                                                }}
+                                                placeholder="Add container name manually"
+                                                className="flex-1 input-field"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={addCustomDockerTarget}
+                                                className="px-3 py-2 rounded-lg border border-primary-500/30 text-primary-400 text-xs font-bold hover:bg-primary-500/10 transition-all"
+                                            >
+                                                Add
+                                            </button>
+                                        </div>
+                                    </>
                                 ) : formData.check_type === 'disk' ? (
                                     ['/', '/var', '/boot'].map(path => (
                                         <button
