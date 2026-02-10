@@ -5,14 +5,30 @@ import { clsx } from 'clsx';
 import { useNavigate } from 'react-router-dom';
 import api from '../lib/axios';
 
+type DeviceType = 'server' | 'pbx' | 'media_gateway' | 'network_device' | 'website';
+const MODULE_DEFAULTS_BY_DEVICE_TYPE: Record<DeviceType, string[]> = {
+    server: ['system', 'docker', 'network'],
+    pbx: ['system', 'asterisk', 'network'],
+    media_gateway: ['system', 'network'],
+    network_device: ['network'],
+    website: ['system', 'network'],
+};
+const DEVICE_TYPE_LABELS: Record<DeviceType, string> = {
+    server: 'Server',
+    pbx: 'PBX',
+    media_gateway: 'Media Gateway',
+    network_device: 'Network Device',
+    website: 'Website',
+};
+
 export const DeviceList = () => {
     const { devices, loading, fetchDevices } = useDeviceStore();
     const navigate = useNavigate();
     const [showModal, setShowModal] = React.useState(false);
     const [newName, setNewName] = React.useState('');
-    const [newType, setNewType] = React.useState<'server' | 'network_device' | 'website'>('server');
+    const [newType, setNewType] = React.useState<DeviceType>('server');
     const [newHostname, setNewHostname] = React.useState('');
-    const [enabledModules, setEnabledModules] = React.useState<string[]>(['system']);
+    const [enabledModules, setEnabledModules] = React.useState<string[]>([...MODULE_DEFAULTS_BY_DEVICE_TYPE.server]);
     const [asteriskContainerName, setAsteriskContainerName] = React.useState('asterisk');
     // Probe config state
     const [targetIp, setTargetIp] = React.useState('');
@@ -45,8 +61,9 @@ export const DeviceList = () => {
             await fetchDevices();
             setShowModal(false);
             setNewName('');
+            setNewType('server');
             setNewHostname('');
-            setEnabledModules(['system']);
+            setEnabledModules([...MODULE_DEFAULTS_BY_DEVICE_TYPE.server]);
             setAsteriskContainerName('asterisk');
             setTargetIp('');
             setTargetPort('');
@@ -60,9 +77,23 @@ export const DeviceList = () => {
     };
 
     const toggleModule = (module: string) => {
-        setEnabledModules(prev =>
-            prev.includes(module) ? prev.filter(m => m !== module) : [...prev, module]
-        );
+        setEnabledModules(prev => {
+            if (prev.includes(module)) {
+                if (prev.length === 1) {
+                    return prev;
+                }
+                return prev.filter(m => m !== module);
+            }
+            return [...prev, module];
+        });
+    };
+
+    const handleTypeChange = (nextType: DeviceType) => {
+        setNewType(nextType);
+        setEnabledModules([...MODULE_DEFAULTS_BY_DEVICE_TYPE[nextType]]);
+        if (!MODULE_DEFAULTS_BY_DEVICE_TYPE[nextType].includes('asterisk')) {
+            setAsteriskContainerName('asterisk');
+        }
     };
 
     const handleBuild = async (e: React.MouseEvent, deviceId: string) => {
@@ -135,9 +166,11 @@ export const DeviceList = () => {
                                 <select
                                     className="input-field"
                                     value={newType}
-                                    onChange={e => setNewType(e.target.value as any)}
+                                    onChange={e => handleTypeChange(e.target.value as DeviceType)}
                                 >
                                     <option value="server">Linux/Windows Server</option>
+                                    <option value="pbx">PBX / VoIP Server</option>
+                                    <option value="media_gateway">Media Gateway</option>
                                     <option value="network_device">Network Device</option>
                                     <option value="website">Website/URL</option>
                                 </select>
@@ -299,7 +332,7 @@ export const DeviceList = () => {
                                         </div>
                                         <div>
                                             <div className="text-sm font-bold text-white mb-0.5">{device.name}</div>
-                                            <div className="text-xs text-slate-500">Enterprise Server</div>
+                                            <div className="text-xs text-slate-500">{DEVICE_TYPE_LABELS[(device.type as DeviceType) || 'server'] || 'Server'}</div>
                                         </div>
                                     </div>
                                 </td>

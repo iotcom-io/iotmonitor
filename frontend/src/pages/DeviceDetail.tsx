@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
     Activity, Cpu, HardDrive, Wifi, MemoryStick as Memory,
@@ -19,6 +19,43 @@ import { io } from 'socket.io-client';
 import { ConfirmationModal } from '../components/ConfirmationModal';
 import { useAuthStore } from '../store/useAuthStore';
 
+type ModuleName = 'system' | 'docker' | 'asterisk' | 'network';
+const ALL_MODULES: ModuleName[] = ['system', 'docker', 'asterisk', 'network'];
+type HistoryPreset = '1h' | '6h' | '24h' | '7d' | 'custom';
+type HistoryBucket = 'auto' | 'raw' | '1m' | '5m' | '15m' | '1h' | '6h' | '1d';
+
+const HISTORY_BUCKET_OPTIONS: Array<{ value: HistoryBucket; label: string }> = [
+    { value: 'auto', label: 'Auto' },
+    { value: 'raw', label: 'Raw' },
+    { value: '1m', label: '1 min' },
+    { value: '5m', label: '5 min' },
+    { value: '15m', label: '15 min' },
+    { value: '1h', label: '1 hour' },
+    { value: '6h', label: '6 hour' },
+    { value: '1d', label: '1 day' },
+];
+
+const toDateTimeLocalValue = (value: Date) => {
+    const local = new Date(value.getTime() - value.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 16);
+};
+
+const presetToRange = (preset: Exclude<HistoryPreset, 'custom'>) => {
+    const to = new Date();
+    const from = new Date(to);
+    if (preset === '1h') from.setHours(from.getHours() - 1);
+    if (preset === '6h') from.setHours(from.getHours() - 6);
+    if (preset === '24h') from.setHours(from.getHours() - 24);
+    if (preset === '7d') from.setDate(from.getDate() - 7);
+    return { from, to };
+};
+
+const numberOrNull = (value: unknown): number | null => {
+    if (value === null || value === undefined) return null;
+    const parsed = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
 export const DeviceDetail = () => {
     const { id } = useParams();
     const token = useAuthStore(state => state.token);
@@ -26,8 +63,15 @@ export const DeviceDetail = () => {
     const [activeTab, setActiveTab] = useState('metrics');
     const [device, setDevice] = useState<any>(null);
     const [metrics, setMetrics] = useState<any[]>([]);
+    const [historicalMetrics, setHistoricalMetrics] = useState<any[]>([]);
     const [checks, setChecks] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
+    const [historyLoading, setHistoryLoading] = useState(false);
+    const [historyExporting, setHistoryExporting] = useState(false);
+    const [historyPreset, setHistoryPreset] = useState<HistoryPreset>('24h');
+    const [historyBucket, setHistoryBucket] = useState<HistoryBucket>('auto');
+    const [historyFrom, setHistoryFrom] = useState('');
+    const [historyTo, setHistoryTo] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingCheck, setEditingCheck] = useState<any>(null);
     const [incidents, setIncidents] = useState<any[]>([]);
@@ -78,6 +122,110 @@ export const DeviceDetail = () => {
             console.error('Failed to fetch device data', error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const fetchHistoricalData = async (fromValue: string, toValue: string, bucketValue: HistoryBucket = historyBucket) => {
+        if (!id) return;
+        const fromDate = new Date(fromValue);
+        const toDate = new Date(toValue);
+
+        if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
+            return;
+        }
+
+        setHistoryLoading(true);
+        try {
+            const response = await api.get(`/monitoring/metrics/${id}`, {
+                params: {
+                    from: fromDate.toISOString(),
+                    to: toDate.toISOString(),
+                    bucket: bucketValue,
+                    limit: 60000,
+                    max_points: 1200,
+                }
+            });
+            setHistoricalMetrics(Array.isArray(response.data) ? response.data : []);
+        } catch (error) {
+            console.error('Failed to fetch historical metrics', error);
+            setHistoricalMetrics([]);
+        } finally {
+            setHistoryLoading(false);
+        }
+    };
+
+    const applyHistoryPreset = (preset: Exclude<HistoryPreset, 'custom'>) => {
+        const range = presetToRange(preset);
+        const nextFrom = toDateTimeLocalValue(range.from);
+        const nextTo = toDateTimeLocalValue(range.to);
+        setHistoryPreset(preset);
+        setHistoryFrom(nextFrom);
+        setHistoryTo(nextTo);
+        fetchHistoricalData(nextFrom, nextTo, historyBucket);
+    };
+
+    const handleApplyCustomHistory = () => {
+        if (!historyFrom || !historyTo) return;
+        const fromDate = new Date(historyFrom);
+        const toDate = new Date(historyTo);
+        if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()) || fromDate > toDate) return;
+
+        setHistoryPreset('custom');
+        fetchHistoricalData(historyFrom, historyTo, historyBucket);
+    };
+
+    useEffect(() => {
+        const range = presetToRange('24h');
+        const nextFrom = toDateTimeLocalValue(range.from);
+        const nextTo = toDateTimeLocalValue(range.to);
+        setHistoryPreset('24h');
+        setHistoryBucket('auto');
+        setHistoryFrom(nextFrom);
+        setHistoryTo(nextTo);
+        fetchHistoricalData(nextFrom, nextTo, 'auto');
+    }, [id]);
+
+    useEffect(() => {
+        if (!historyFrom || !historyTo) return;
+        const fromDate = new Date(historyFrom);
+        const toDate = new Date(historyTo);
+        if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()) || fromDate > toDate) return;
+        fetchHistoricalData(historyFrom, historyTo, historyBucket);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [historyBucket]);
+
+    const handleExportHistoricalCsv = async () => {
+        if (!id || !historyFrom || !historyTo) return;
+        const fromDate = new Date(historyFrom);
+        const toDate = new Date(historyTo);
+        if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()) || fromDate > toDate) return;
+
+        setHistoryExporting(true);
+        try {
+            const response = await api.get(`/monitoring/metrics/${id}/export`, {
+                params: {
+                    from: fromDate.toISOString(),
+                    to: toDate.toISOString(),
+                    bucket: historyBucket,
+                    max_points: 5000,
+                    limit: 250000,
+                },
+                responseType: 'blob',
+            });
+
+            const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `telemetry-${id}-${historyBucket}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error('Failed to export telemetry CSV', error);
+        } finally {
+            setHistoryExporting(false);
         }
     };
 
@@ -171,6 +319,49 @@ export const DeviceDetail = () => {
         }
     };
 
+    const enabledModules = useMemo<ModuleName[]>(() => {
+        if (!device) return ['system'];
+
+        const modulesFromConfig = device?.config?.modules;
+        if (modulesFromConfig && typeof modulesFromConfig === 'object') {
+            const selected = ALL_MODULES.filter((module) => modulesFromConfig[module] === true);
+            if (selected.length > 0) {
+                return selected;
+            }
+        }
+
+        if (Array.isArray(device?.enabled_modules)) {
+            const selected = device.enabled_modules.filter((module: string) => ALL_MODULES.includes(module as ModuleName));
+            if (selected.length > 0) {
+                return selected as ModuleName[];
+            }
+        }
+
+        return ['system'];
+    }, [device]);
+
+    const tabs = useMemo(() => ([
+        { id: 'metrics', label: 'Real-time Metrics', icon: Activity, requiredModule: 'system' as ModuleName | null },
+        { id: 'network', label: 'Network & IPs', icon: Globe, requiredModule: 'network' as ModuleName | null },
+        { id: 'sip', label: 'SIP (Asterisk)', icon: Phone, requiredModule: 'asterisk' as ModuleName | null },
+        { id: 'docker', label: 'Docker Containers', icon: Box, requiredModule: 'docker' as ModuleName | null },
+        { id: 'terminal', label: 'Remote Terminal', icon: TerminalIcon, requiredModule: null },
+        { id: 'checks', label: 'Monitor Checks', icon: ShieldCheck, requiredModule: null },
+        { id: 'settings', label: 'Configuration', icon: Settings, requiredModule: null },
+    ]), []);
+
+    const visibleTabs = useMemo(
+        () => tabs.filter((tab) => !tab.requiredModule || enabledModules.includes(tab.requiredModule)),
+        [tabs, enabledModules]
+    );
+
+    useEffect(() => {
+        if (visibleTabs.length === 0) return;
+        if (!visibleTabs.some((tab) => tab.id === activeTab)) {
+            setActiveTab(visibleTabs[0].id);
+        }
+    }, [activeTab, visibleTabs]);
+
     if (loading) {
         return (
             <div className="h-[60vh] flex items-center justify-center">
@@ -213,6 +404,81 @@ export const DeviceDetail = () => {
     const avgLatency = successfulPings.length
         ? (successfulPings.reduce((sum, p) => sum + (p.latency_ms || 0), 0) / successfulPings.length)
         : null;
+    const historyWindowMs = useMemo(() => {
+        if (!historyFrom || !historyTo) return 0;
+        const fromDate = new Date(historyFrom);
+        const toDate = new Date(historyTo);
+        if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) return 0;
+        return Math.max(0, toDate.getTime() - fromDate.getTime());
+    }, [historyFrom, historyTo]);
+    const historyRangeInvalid = useMemo(() => {
+        if (!historyFrom || !historyTo) return false;
+        const fromDate = new Date(historyFrom);
+        const toDate = new Date(historyTo);
+        if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) return true;
+        return fromDate > toDate;
+    }, [historyFrom, historyTo]);
+
+    const historyTickFormatter = (value: string) => {
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return '--';
+        if (historyWindowMs > 48 * 60 * 60 * 1000) {
+            return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        }
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    };
+
+    const historicalSeries = useMemo(() => {
+        return historicalMetrics.map((sample: any) => {
+            const precomputedBandwidth = numberOrNull(sample?.bandwidth_mbps);
+            const interfaces = Array.isArray(sample?.extra?.interfaces) ? sample.extra.interfaces : [];
+            let totalBandwidthBps = 0;
+            for (const iface of interfaces) {
+                const ifaceName = String(iface?.name || '').toLowerCase();
+                if (ifaceName === 'lo' || ifaceName.startsWith('loopback')) continue;
+                totalBandwidthBps += (numberOrNull(iface?.rx_bps) || 0) + (numberOrNull(iface?.tx_bps) || 0);
+            }
+            if (totalBandwidthBps === 0) {
+                totalBandwidthBps = (numberOrNull(sample?.network_in) || 0) + (numberOrNull(sample?.network_out) || 0);
+            }
+            const computedBandwidth = totalBandwidthBps > 0 ? totalBandwidthBps / 1000000 : null;
+            const bandwidthMbps = precomputedBandwidth !== null ? precomputedBandwidth : computedBandwidth;
+
+            const precomputedSipRtt = numberOrNull(sample?.sip_rtt_avg_ms);
+            const contacts = Array.isArray(sample?.extra?.contacts) ? sample.extra.contacts : [];
+            const rttValues = contacts
+                .map((contact: any) => numberOrNull(contact?.rttMs))
+                .filter((value: number | null): value is number => value !== null && value >= 0);
+            const sipRttAvg = rttValues.length > 0
+                ? rttValues.reduce((sum: number, value: number) => sum + value, 0) / rttValues.length
+                : null;
+            const sipRttValue = precomputedSipRtt !== null ? precomputedSipRtt : sipRttAvg;
+
+            const precomputedSipRegistration = numberOrNull(sample?.sip_registration_percent);
+            const registrations = Array.isArray(sample?.extra?.registrations) ? sample.extra.registrations : [];
+            const summary = sample?.extra?.summary || {};
+            const totalRegs = numberOrNull(summary?.registrationsTotal);
+            const okRegs = numberOrNull(summary?.registrationsRegistered);
+            let sipRegistrationPercent: number | null = null;
+            if (totalRegs && totalRegs > 0 && okRegs !== null) {
+                sipRegistrationPercent = (okRegs / totalRegs) * 100;
+            } else if (registrations.length > 0) {
+                const registeredCount = registrations.filter((registration: any) => {
+                    const status = String(registration?.status || '').toLowerCase();
+                    return status === 'registered' || status === 'ok';
+                }).length;
+                sipRegistrationPercent = (registeredCount / registrations.length) * 100;
+            }
+            const sipRegistrationValue = precomputedSipRegistration !== null ? precomputedSipRegistration : sipRegistrationPercent;
+
+            return {
+                ...sample,
+                bandwidth_mbps: bandwidthMbps,
+                sip_rtt_avg_ms: sipRttValue,
+                sip_registration_percent: sipRegistrationValue,
+            };
+        });
+    }, [historicalMetrics]);
 
     const isOffline = device?.status === 'offline';
 
@@ -288,15 +554,7 @@ export const DeviceDetail = () => {
                 </div>
 
                 <div className="flex gap-2 p-1 bg-dark-surface/50 border border-dark-border rounded-xl w-full">
-                    {[
-                        { id: 'metrics', label: 'Real-time Metrics', icon: Activity },
-                        { id: 'network', label: 'Network & IPs', icon: Globe },
-                        { id: 'sip', label: 'SIP (Asterisk)', icon: Phone },
-                        { id: 'docker', label: 'Docker Containers', icon: Box },
-                        { id: 'terminal', label: 'Remote Terminal', icon: TerminalIcon },
-                        { id: 'checks', label: 'Monitor Checks', icon: ShieldCheck },
-                        { id: 'settings', label: 'Configuration', icon: Settings },
-                    ].map(tab => {
+                    {visibleTabs.map(tab => {
                         const { criticalCount, warningCount } = getTabAlerts(tab.id);
                         const hasAlert = (criticalCount > 0 || warningCount > 0) && tab.id !== 'checks';
                         const alertColor = criticalCount > 0 ? 'bg-red-500' : 'bg-amber-500';
@@ -470,6 +728,187 @@ export const DeviceDetail = () => {
                                 </AreaChart>
                             </ResponsiveContainer>
                         </div>
+                    </div>
+
+                    <div className="card space-y-6">
+                        <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-6">
+                            <div>
+                                <h3 className="text-lg font-bold text-white">Historical Trends</h3>
+                                <p className="text-sm text-slate-500">Select a date range to review archival telemetry for enabled modules.</p>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                {(['1h', '6h', '24h', '7d'] as const).map((preset) => (
+                                    <button
+                                        key={preset}
+                                        onClick={() => applyHistoryPreset(preset)}
+                                        className={clsx(
+                                            "px-3 py-1.5 rounded-lg text-xs font-bold transition-all border",
+                                            historyPreset === preset
+                                                ? "bg-primary-500/20 border-primary-500 text-primary-400"
+                                                : "bg-white/5 border-white/10 text-slate-400 hover:text-white"
+                                        )}
+                                    >
+                                        Last {preset}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 xl:grid-cols-[1fr_1fr_180px_auto_auto] gap-3">
+                            <input
+                                type="datetime-local"
+                                value={historyFrom}
+                                onChange={(e) => setHistoryFrom(e.target.value)}
+                                className="input-field"
+                            />
+                            <input
+                                type="datetime-local"
+                                value={historyTo}
+                                onChange={(e) => setHistoryTo(e.target.value)}
+                                className="input-field"
+                            />
+                            <select
+                                value={historyBucket}
+                                onChange={(e) => setHistoryBucket(e.target.value as HistoryBucket)}
+                                className="input-field"
+                            >
+                                {HISTORY_BUCKET_OPTIONS.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                        {option.label}
+                                    </option>
+                                ))}
+                            </select>
+                            <button
+                                onClick={handleApplyCustomHistory}
+                                className="btn-primary px-5 py-2.5 whitespace-nowrap disabled:opacity-50"
+                                disabled={!historyFrom || !historyTo || historyLoading || historyRangeInvalid}
+                            >
+                                {historyLoading ? 'Loading...' : 'Apply Range'}
+                            </button>
+                            <button
+                                onClick={handleExportHistoricalCsv}
+                                className="px-5 py-2.5 rounded-xl border border-primary-500/40 text-primary-300 hover:bg-primary-500/10 transition-all whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                                disabled={!historyFrom || !historyTo || historyLoading || historyExporting || historyRangeInvalid}
+                            >
+                                {historyExporting ? 'Exporting...' : 'Export CSV'}
+                            </button>
+                        </div>
+
+                        {historyRangeInvalid && (
+                            <div className="text-xs text-red-400">
+                                Invalid range: `From` must be earlier than `To`.
+                            </div>
+                        )}
+                        {historyBucket === 'raw' && historyWindowMs > (48 * 60 * 60 * 1000) && (
+                            <div className="text-xs text-amber-400">
+                                `Raw` bucket supports up to 48 hours. Use `Auto` or an aggregated bucket for longer ranges.
+                            </div>
+                        )}
+
+                        {historyLoading ? (
+                            <div className="h-44 flex items-center justify-center">
+                                <Loader2 size={24} className="animate-spin text-primary-500" />
+                            </div>
+                        ) : historicalSeries.length === 0 ? (
+                            <div className="h-44 flex items-center justify-center text-sm text-slate-500 border border-white/10 rounded-2xl bg-white/[0.02]">
+                                No archival telemetry found for the selected range.
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                                {enabledModules.includes('system') && (
+                                    <div className="space-y-6">
+                                        <div className="h-72 border border-white/10 rounded-2xl p-4 bg-white/[0.02]">
+                                            <h4 className="text-sm font-bold text-white mb-3">CPU Usage (%)</h4>
+                                            <ResponsiveContainer width="100%" height="90%">
+                                                <LineChart data={historicalSeries}>
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" />
+                                                    <XAxis dataKey="timestamp" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} tickFormatter={historyTickFormatter} />
+                                                    <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                                                    <Tooltip
+                                                        contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
+                                                        labelFormatter={(value) => new Date(String(value)).toLocaleString()}
+                                                        formatter={(value: any) => [value !== null && value !== undefined ? `${Number(value).toFixed(1)}%` : '--', 'CPU']}
+                                                    />
+                                                    <Line type="monotone" dataKey="cpu_usage" stroke="#0ea5e9" strokeWidth={2} dot={false} />
+                                                </LineChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                        <div className="h-72 border border-white/10 rounded-2xl p-4 bg-white/[0.02]">
+                                            <h4 className="text-sm font-bold text-white mb-3">Memory Usage (%)</h4>
+                                            <ResponsiveContainer width="100%" height="90%">
+                                                <LineChart data={historicalSeries}>
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" />
+                                                    <XAxis dataKey="timestamp" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} tickFormatter={historyTickFormatter} />
+                                                    <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                                                    <Tooltip
+                                                        contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
+                                                        labelFormatter={(value) => new Date(String(value)).toLocaleString()}
+                                                        formatter={(value: any) => [value !== null && value !== undefined ? `${Number(value).toFixed(1)}%` : '--', 'Memory']}
+                                                    />
+                                                    <Line type="monotone" dataKey="memory_usage" stroke="#10b981" strokeWidth={2} dot={false} />
+                                                </LineChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {enabledModules.includes('network') && (
+                                    <div className="h-72 border border-white/10 rounded-2xl p-4 bg-white/[0.02]">
+                                        <h4 className="text-sm font-bold text-white mb-3">Bandwidth (Mbps)</h4>
+                                        <ResponsiveContainer width="100%" height="90%">
+                                            <LineChart data={historicalSeries}>
+                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" />
+                                                <XAxis dataKey="timestamp" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} tickFormatter={historyTickFormatter} />
+                                                <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                                                <Tooltip
+                                                    contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
+                                                    labelFormatter={(value) => new Date(String(value)).toLocaleString()}
+                                                    formatter={(value: any) => [value !== null && value !== undefined ? `${Number(value).toFixed(2)} Mbps` : '--', 'Bandwidth']}
+                                                />
+                                                <Line type="monotone" dataKey="bandwidth_mbps" stroke="#3b82f6" strokeWidth={2} dot={false} />
+                                            </LineChart>
+                                        </ResponsiveContainer>
+                                    </div>
+                                )}
+
+                                {enabledModules.includes('asterisk') && (
+                                    <div className="space-y-6">
+                                        <div className="h-72 border border-white/10 rounded-2xl p-4 bg-white/[0.02]">
+                                            <h4 className="text-sm font-bold text-white mb-3">SIP RTT Average (ms)</h4>
+                                            <ResponsiveContainer width="100%" height="90%">
+                                                <LineChart data={historicalSeries}>
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" />
+                                                    <XAxis dataKey="timestamp" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} tickFormatter={historyTickFormatter} />
+                                                    <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                                                    <Tooltip
+                                                        contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
+                                                        labelFormatter={(value) => new Date(String(value)).toLocaleString()}
+                                                        formatter={(value: any) => [value !== null && value !== undefined ? `${Number(value).toFixed(1)} ms` : '--', 'SIP RTT']}
+                                                    />
+                                                    <Line type="monotone" dataKey="sip_rtt_avg_ms" stroke="#f59e0b" strokeWidth={2} dot={false} />
+                                                </LineChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                        <div className="h-72 border border-white/10 rounded-2xl p-4 bg-white/[0.02]">
+                                            <h4 className="text-sm font-bold text-white mb-3">SIP Registration (%)</h4>
+                                            <ResponsiveContainer width="100%" height="90%">
+                                                <LineChart data={historicalSeries}>
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" />
+                                                    <XAxis dataKey="timestamp" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} tickFormatter={historyTickFormatter} />
+                                                    <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} domain={[0, 100]} />
+                                                    <Tooltip
+                                                        contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
+                                                        labelFormatter={(value) => new Date(String(value)).toLocaleString()}
+                                                        formatter={(value: any) => [value !== null && value !== undefined ? `${Number(value).toFixed(1)}%` : '--', 'Registration']}
+                                                    />
+                                                    <Line type="monotone" dataKey="sip_registration_percent" stroke="#22c55e" strokeWidth={2} dot={false} />
+                                                </LineChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 </>
             )}
@@ -1387,27 +1826,29 @@ export const DeviceDetail = () => {
                                 </div>
 
                                 <div className="space-y-5">
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Asterisk Container Name</label>
-                                        <input
-                                            type="text"
-                                            className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-3 text-sm text-slate-300 placeholder:text-slate-700 outline-none focus:border-primary-500/30"
-                                            placeholder="asterisk"
-                                            defaultValue={device.asterisk_container_name || device.config?.asterisk_container || 'asterisk'}
-                                            onBlur={async (e) => {
-                                                const nextValue = e.target.value.trim() || 'asterisk';
-                                                await api.patch(`/devices/${id}`, { asterisk_container_name: nextValue });
-                                                setDevice({ ...device, asterisk_container_name: nextValue, config: { ...(device.config || {}), asterisk_container: nextValue } });
-                                            }}
-                                        />
-                                        <p className="text-[10px] text-slate-500">Used when agent runs `docker exec &lt;container&gt; asterisk -rx ...`.</p>
-                                    </div>
+                                    {enabledModules.includes('asterisk') && (
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Asterisk Container Name</label>
+                                            <input
+                                                type="text"
+                                                className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-3 text-sm text-slate-300 placeholder:text-slate-700 outline-none focus:border-primary-500/30"
+                                                placeholder="asterisk"
+                                                defaultValue={device.asterisk_container_name || device.config?.asterisk_container || 'asterisk'}
+                                                onBlur={async (e) => {
+                                                    const nextValue = e.target.value.trim() || 'asterisk';
+                                                    await api.patch(`/devices/${id}`, { asterisk_container_name: nextValue });
+                                                    setDevice({ ...device, asterisk_container_name: nextValue, config: { ...(device.config || {}), asterisk_container: nextValue } });
+                                                }}
+                                            />
+                                            <p className="text-[10px] text-slate-500">Used when agent runs `docker exec &lt;container&gt; asterisk -rx ...`.</p>
+                                        </div>
+                                    )}
 
                                     <div className="flex flex-wrap gap-2">
-                                        {['system', 'docker', 'asterisk', 'network'].map(mod => (
+                                        {ALL_MODULES.map(mod => (
                                             <div key={mod} className={clsx(
                                                 "px-3 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all",
-                                                device.enabled_modules?.includes(mod) || mod === 'system'
+                                                enabledModules.includes(mod)
                                                     ? "bg-primary-500/10 border-primary-500/30 text-primary-400"
                                                     : "bg-white/[0.02] border-white/5 text-slate-700"
                                             )}>
@@ -1485,11 +1926,11 @@ export const DeviceDetail = () => {
                                         <code className="whitespace-pre">
                                             curl -fsSL {window.location.origin}/install.sh | sudo bash -s -- \{'\n'}
                                             {'  '}--token {device.agent_token.slice(0, 8)}************************ \{'\n'}
-                                            {'  '}--modules {device.enabled_modules?.join(',') || 'system'}
+                                            {'  '}--modules {enabledModules.join(',')}
                                         </code>
                                         <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                             <button
-                                                onClick={() => navigator.clipboard.writeText(`curl -fsSL ${window.location.origin}/install.sh | sudo bash -s -- --token ${device.agent_token} --modules ${device.enabled_modules?.join(',') || 'system'}`)}
+                                                onClick={() => navigator.clipboard.writeText(`curl -fsSL ${window.location.origin}/install.sh | sudo bash -s -- --token ${device.agent_token} --modules ${enabledModules.join(',')}`)}
                                                 className="p-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl text-white transition-all"
                                                 title="Copy Command"
                                             >
@@ -1552,6 +1993,7 @@ export const DeviceDetail = () => {
                 onSave={handleSaveCheck}
                 initialData={editingCheck}
                 latestMetrics={latest}
+                enabledModules={enabledModules}
             />
 
             <ConfirmationModal

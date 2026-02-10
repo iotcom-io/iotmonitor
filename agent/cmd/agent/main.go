@@ -26,6 +26,12 @@ func loadEnabledModules(raw string) map[string]bool {
 	if raw == "" {
 		return enabled
 	}
+	if strings.EqualFold(raw, "none") {
+		for k := range enabled {
+			enabled[k] = false
+		}
+		return enabled
+	}
 
 	// If explicitly set, only listed modules are enabled.
 	for k := range enabled {

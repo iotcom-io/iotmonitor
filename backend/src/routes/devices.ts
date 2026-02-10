@@ -13,6 +13,15 @@ const router = Router();
 type BuildOS = 'linux' | 'windows';
 type BuildArch = 'amd64' | 'arm64';
 const ALL_MODULES = ['system', 'docker', 'asterisk', 'network'] as const;
+const DEVICE_TYPES = ['server', 'pbx', 'media_gateway', 'network_device', 'website'] as const;
+type DeviceType = typeof DEVICE_TYPES[number];
+const MODULE_DEFAULTS_BY_DEVICE_TYPE: Record<DeviceType, readonly (typeof ALL_MODULES[number])[]> = {
+    server: ['system', 'docker', 'network'],
+    pbx: ['system', 'asterisk', 'network'],
+    media_gateway: ['system', 'network'],
+    network_device: ['network'],
+    website: ['system', 'network'],
+};
 
 const buildRequestSchema = z.object({
     os: z.enum(['linux', 'windows']),
@@ -20,6 +29,7 @@ const buildRequestSchema = z.object({
     name: z.string().trim().min(1).max(120).optional(),
     modules: z.record(z.string(), z.boolean()).optional(),
     asterisk_container_name: z.string().trim().min(1).max(120).regex(/^[a-zA-Z0-9_.-]+$/).optional(),
+    device_type: z.enum(DEVICE_TYPES).optional(),
 });
 
 const createAndBuildRequestSchema = buildRequestSchema.extend({
@@ -58,16 +68,52 @@ const normalizeMQTTURL = (rawValue: string | undefined) => {
     return `mqtt://${value.includes(':') ? value : `${value}:1883`}`;
 };
 
-const modulesToCSV = (modules?: Record<string, boolean> | string[]) => {
-    if (!modules) {
-        return ALL_MODULES.join(',');
+const modulesToCSV = (modules: string[]) => {
+    const selected = modules.filter((m) => ALL_MODULES.includes(m as any));
+    // Keep an explicit sentinel so the agent doesn't fall back to "all modules enabled".
+    return selected.length > 0 ? selected.join(',') : 'none';
+};
+
+const modulesArrayToConfig = (modules: string[]) => {
+    return ALL_MODULES.reduce((acc: Record<string, boolean>, module) => {
+        acc[module] = modules.includes(module);
+        return acc;
+    }, {});
+};
+
+const sanitizeModules = (modules?: unknown): string[] => {
+    if (!Array.isArray(modules)) return [];
+    return modules.filter((m) => typeof m === 'string' && ALL_MODULES.includes(m as any));
+};
+
+const getTypeDefaultModules = (deviceType?: string) => {
+    const normalizedType = (DEVICE_TYPES as readonly string[]).includes(deviceType || '')
+        ? (deviceType as DeviceType)
+        : 'server';
+    return [...MODULE_DEFAULTS_BY_DEVICE_TYPE[normalizedType]];
+};
+
+const resolveEffectiveModules = (params: {
+    requestedModules?: Record<string, boolean>;
+    deviceModules?: string[];
+    deviceConfigModules?: Record<string, boolean>;
+    deviceType?: string;
+}) => {
+    const { requestedModules, deviceModules, deviceConfigModules, deviceType } = params;
+
+    if (requestedModules) {
+        return ALL_MODULES.filter((module) => requestedModules[module] === true);
     }
 
-    if (Array.isArray(modules)) {
-        return modules.filter((m) => ALL_MODULES.includes(m as any)).join(',');
+    const fromDevice = sanitizeModules(deviceModules);
+    if (fromDevice.length > 0) return fromDevice;
+
+    if (deviceConfigModules && typeof deviceConfigModules === 'object') {
+        const fromConfig = ALL_MODULES.filter((module) => deviceConfigModules[module] === true);
+        if (fromConfig.length > 0) return fromConfig;
     }
 
-    return ALL_MODULES.filter((module) => modules[module] === true).join(',');
+    return getTypeDefaultModules(deviceType);
 };
 
 const buildAgentBinary = async ({
@@ -161,6 +207,15 @@ router.get('/', authorize(['admin', 'operator', 'viewer']), async (_req: AuthReq
 router.post('/register', authorize(['admin', 'operator']), async (req: AuthRequest, res) => {
     try {
         const { name, type, hostname, enabled_modules, probe_config, asterisk_container_name } = req.body;
+        const normalizedType = (DEVICE_TYPES as readonly string[]).includes(type) ? type : 'server';
+        const effectiveModules = resolveEffectiveModules({
+            deviceModules: sanitizeModules(enabled_modules),
+            deviceType: normalizedType,
+        });
+        const asteriskEnabled = effectiveModules.includes('asterisk');
+        const normalizedAsteriskContainer = asteriskEnabled
+            ? (String(asterisk_container_name || '').trim() || 'asterisk')
+            : undefined;
         const device_id = crypto.randomBytes(8).toString('hex');
         const agent_token = crypto.randomBytes(32).toString('hex');
         const mqtt_topic = `iotmonitor/device/${device_id}`;
@@ -168,14 +223,17 @@ router.post('/register', authorize(['admin', 'operator']), async (req: AuthReque
         const device = new Device({
             device_id,
             name,
-            type,
+            type: normalizedType,
             hostname,
             agent_token,
             mqtt_topic,
-            enabled_modules,
+            enabled_modules: effectiveModules,
             probe_config,
-            config: asterisk_container_name ? { asterisk_container: asterisk_container_name } : {},
-            asterisk_container_name,
+            config: {
+                modules: modulesArrayToConfig(effectiveModules),
+                ...(normalizedAsteriskContainer ? { asterisk_container: normalizedAsteriskContainer } : {}),
+            },
+            asterisk_container_name: normalizedAsteriskContainer,
             status: 'not_monitored',
         });
 
@@ -204,17 +262,58 @@ router.patch('/:id', authorize(['admin', 'operator']), async (req: AuthRequest, 
         if (!previous) return res.status(404).json({ message: 'Device not found' });
 
         const updateBody: any = { ...req.body };
-        if (typeof updateBody.asterisk_container_name === 'string' && updateBody.asterisk_container_name.trim()) {
-            updateBody.config = {
+        const unsetFields: Record<string, ''> = {};
+
+        if (Array.isArray(updateBody.enabled_modules)) {
+            const normalizedModules = sanitizeModules(updateBody.enabled_modules);
+            updateBody.enabled_modules = normalizedModules;
+            const mergedConfig: Record<string, any> = {
                 ...(previous.config || {}),
                 ...(updateBody.config || {}),
-                asterisk_container: updateBody.asterisk_container_name.trim(),
+                modules: modulesArrayToConfig(normalizedModules),
             };
+
+            if (!normalizedModules.includes('asterisk')) {
+                delete mergedConfig.asterisk_container;
+                unsetFields.asterisk_container_name = '';
+            }
+            updateBody.config = mergedConfig;
+        }
+
+        const nextModules = Array.isArray(updateBody.enabled_modules)
+            ? updateBody.enabled_modules
+            : resolveEffectiveModules({
+                deviceModules: sanitizeModules(previous.enabled_modules as any),
+                deviceConfigModules: previous.config?.modules,
+                deviceType: previous.type,
+            });
+
+        if (typeof updateBody.asterisk_container_name === 'string') {
+            const nextContainer = updateBody.asterisk_container_name.trim();
+            if (nextContainer && nextModules.includes('asterisk')) {
+                updateBody.asterisk_container_name = nextContainer;
+                updateBody.config = {
+                    ...(previous.config || {}),
+                    ...(updateBody.config || {}),
+                    asterisk_container: nextContainer,
+                };
+            } else {
+                delete updateBody.asterisk_container_name;
+            }
+        }
+
+        if (typeof updateBody.type === 'string' && !(DEVICE_TYPES as readonly string[]).includes(updateBody.type)) {
+            delete updateBody.type;
+        }
+
+        const updateDoc: any = { $set: updateBody };
+        if (Object.keys(unsetFields).length > 0) {
+            updateDoc.$unset = unsetFields;
         }
 
         const device = await Device.findOneAndUpdate(
             { device_id: req.params.id },
-            { $set: updateBody },
+            updateDoc,
             { new: true }
         );
         if (!device) return res.status(404).json({ message: 'Device not found' });
@@ -294,12 +393,37 @@ router.post('/:id/generate-agent', authorize(['admin', 'operator']), async (req:
             device.name = name;
         }
         if (modules) {
-            device.enabled_modules = Object.keys(modules).filter((k) => modules[k]) as any;
-            device.config = { ...(device.config || {}), modules };
+            const effectiveModules = resolveEffectiveModules({
+                requestedModules: modules,
+                deviceType: device.type,
+            });
+            device.enabled_modules = effectiveModules as any;
+            const nextConfig: Record<string, any> = {
+                ...(device.config || {}),
+                modules: modulesArrayToConfig(effectiveModules),
+            };
+            if (!effectiveModules.includes('asterisk')) {
+                delete nextConfig.asterisk_container;
+            }
+            device.config = nextConfig;
         }
-        if (asterisk_container_name) {
-            device.asterisk_container_name = asterisk_container_name;
-            device.config = { ...(device.config || {}), asterisk_container: asterisk_container_name };
+        const buildModules = resolveEffectiveModules({
+            requestedModules: modules,
+            deviceModules: device.enabled_modules as string[],
+            deviceConfigModules: device.config?.modules,
+            deviceType: device.type,
+        });
+        const asteriskEnabled = buildModules.includes('asterisk');
+
+        if (asterisk_container_name && asteriskEnabled) {
+            const normalizedContainer = asterisk_container_name.trim();
+            if (normalizedContainer) {
+                device.asterisk_container_name = normalizedContainer;
+                device.config = { ...(device.config || {}), asterisk_container: normalizedContainer };
+            }
+        }
+        if (!asteriskEnabled) {
+            device.asterisk_container_name = undefined;
         }
         if (name || modules || asterisk_container_name) {
             await device.save();
@@ -318,12 +442,16 @@ router.post('/:id/generate-agent', authorize(['admin', 'operator']), async (req:
         const mqttUrl = normalizeMQTTURL(settings?.mqtt_public_url || process.env.MQTT_URL);
         const mqttUsername = String(settings?.mqtt_username || '').trim();
         const mqttPassword = String(settings?.mqtt_password || '').trim();
-        const enabledModules = modulesToCSV(modules || (device.enabled_modules as string[]) || device.config?.modules);
-        const asteriskContainer =
-            asterisk_container_name ||
-            device.asterisk_container_name ||
-            device.config?.asterisk_container ||
-            'asterisk';
+        const effectiveModules = buildModules;
+        const enabledModules = modulesToCSV(effectiveModules);
+        const asteriskContainer = asteriskEnabled
+            ? (
+                asterisk_container_name ||
+                device.asterisk_container_name ||
+                device.config?.asterisk_container ||
+                'asterisk'
+            )
+            : '';
 
         const ldflags = `-X github.com/iotmonitor/agent/internal/config.DefaultDeviceID=${device.device_id} ` +
             `-X github.com/iotmonitor/agent/internal/config.DefaultAgentToken=${device.agent_token} ` +
@@ -361,28 +489,45 @@ router.post('/:id/generate-agent', authorize(['admin', 'operator']), async (req:
 // Generate and build agent binary (creates a new device)
 router.post('/generate-agent', authorize(['admin', 'operator']), async (req: AuthRequest, res) => {
     try {
-        const { os, arch, modules, name, asterisk_container_name } = createAndBuildRequestSchema.parse(req.body) as {
+        const { os, arch, modules, name, asterisk_container_name, device_type } = createAndBuildRequestSchema.parse(req.body) as {
             os: BuildOS;
             arch: BuildArch;
             modules?: Record<string, boolean>;
             name?: string;
             asterisk_container_name?: string;
+            device_type?: DeviceType;
         };
+        const normalizedType = (DEVICE_TYPES as readonly string[]).includes(device_type || '')
+            ? (device_type as DeviceType)
+            : 'server';
+        const effectiveModules = resolveEffectiveModules({
+            requestedModules: modules,
+            deviceType: normalizedType,
+        });
+        const asteriskEnabled = effectiveModules.includes('asterisk');
+        const normalizedAsteriskContainer = asteriskEnabled
+            ? (String(asterisk_container_name || '').trim() || 'asterisk')
+            : undefined;
 
         const device_id = crypto.randomBytes(8).toString('hex');
         const agent_token = crypto.randomBytes(32).toString('hex');
         const mqtt_topic = `iotmonitor/device/${device_id}`;
 
+        const config: Record<string, any> = { modules: modulesArrayToConfig(effectiveModules) };
+        if (normalizedAsteriskContainer) {
+            config.asterisk_container = normalizedAsteriskContainer;
+        }
+
         const device = new Device({
             device_id,
             name: name || `Agent-${device_id.slice(0, 4)}`,
-            type: 'server',
+            type: normalizedType,
             agent_token,
             mqtt_topic,
             status: 'offline',
-            enabled_modules: modules ? Object.keys(modules).filter((k) => modules[k]) : undefined,
-            config: { modules, asterisk_container: asterisk_container_name || 'asterisk' },
-            asterisk_container_name: asterisk_container_name || 'asterisk',
+            enabled_modules: effectiveModules,
+            config,
+            asterisk_container_name: normalizedAsteriskContainer,
         });
         await device.save();
 
@@ -414,8 +559,8 @@ router.post('/generate-agent', authorize(['admin', 'operator']), async (req: Aut
         const mqttUrl = normalizeMQTTURL(settings?.mqtt_public_url || process.env.MQTT_URL);
         const mqttUsername = String(settings?.mqtt_username || '').trim();
         const mqttPassword = String(settings?.mqtt_password || '').trim();
-        const enabledModules = modulesToCSV(modules);
-        const asteriskContainer = asterisk_container_name || 'asterisk';
+        const enabledModules = modulesToCSV(effectiveModules);
+        const asteriskContainer = normalizedAsteriskContainer || '';
 
         const ldflags = `-X github.com/iotmonitor/agent/internal/config.DefaultDeviceID=${device_id} ` +
             `-X github.com/iotmonitor/agent/internal/config.DefaultAgentToken=${agent_token} ` +

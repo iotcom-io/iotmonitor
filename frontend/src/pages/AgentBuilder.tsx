@@ -5,6 +5,29 @@ import api from '../lib/axios';
 import { useDeviceStore } from '../store/useDeviceStore';
 import { useEffect } from 'react';
 
+type DeviceType = 'server' | 'pbx' | 'media_gateway' | 'network_device' | 'website';
+const MODULE_DEFAULTS_BY_DEVICE_TYPE: Record<DeviceType, Array<keyof ModuleState>> = {
+    server: ['system', 'docker', 'network'],
+    pbx: ['system', 'asterisk', 'network'],
+    media_gateway: ['system', 'network'],
+    network_device: ['network'],
+    website: ['system', 'network'],
+};
+
+type ModuleState = {
+    system: boolean;
+    docker: boolean;
+    asterisk: boolean;
+    network: boolean;
+};
+
+const toModuleState = (enabledModules: string[]): ModuleState => ({
+    system: enabledModules.includes('system'),
+    docker: enabledModules.includes('docker'),
+    asterisk: enabledModules.includes('asterisk'),
+    network: enabledModules.includes('network'),
+});
+
 const ModuleToggle = ({ icon: Icon, label, description, enabled, onToggle }: { icon: any, label: string, description: string, enabled: boolean, onToggle: () => void }) => (
     <div
         onClick={onToggle}
@@ -33,26 +56,32 @@ export const AgentBuilder = () => {
     const { devices, fetchDevices } = useDeviceStore();
     const [selectedDeviceId, setSelectedDeviceId] = useState<string>('new');
     const [deviceName, setDeviceName] = useState<string>('');
+    const [deviceType, setDeviceType] = useState<DeviceType>('server');
     const [asteriskContainerName, setAsteriskContainerName] = useState<string>('asterisk');
     const [template, setTemplate] = useState<'custom' | 'standard' | 'full'>('custom');
-    const [modules, setModules] = useState({
-        system: true,
-        docker: false,
-        asterisk: false,
-        network: true,
-    });
+    const [modules, setModules] = useState<ModuleState>(toModuleState(MODULE_DEFAULTS_BY_DEVICE_TYPE.server as string[]));
 
     useEffect(() => {
         fetchDevices();
     }, []);
 
     useEffect(() => {
-        if (selectedDeviceId === 'new') {
-            setAsteriskContainerName('asterisk');
-            return;
-        }
+        if (selectedDeviceId !== 'new') return;
+        setModules(toModuleState(MODULE_DEFAULTS_BY_DEVICE_TYPE[deviceType] as string[]));
+        setAsteriskContainerName('asterisk');
+    }, [selectedDeviceId, deviceType]);
+
+    useEffect(() => {
+        if (selectedDeviceId === 'new') return;
 
         const selectedDevice = devices.find((d) => d.device_id === selectedDeviceId);
+        if (selectedDevice) {
+            const selectedModules = Array.isArray(selectedDevice.enabled_modules)
+                ? selectedDevice.enabled_modules
+                : ['system'];
+            setModules(toModuleState(selectedModules as string[]));
+            setDeviceType((selectedDevice.type as DeviceType) || 'server');
+        }
         const configuredContainer =
             selectedDevice?.asterisk_container_name ||
             selectedDevice?.config?.asterisk_container ||
@@ -74,12 +103,31 @@ export const AgentBuilder = () => {
     const [buildResult, setBuildResult] = useState<{ url: string, sha: string } | null>(null);
 
     const toggleModule = (key: keyof typeof modules) => {
-        setModules(prev => ({ ...prev, [key]: !prev[key] }));
+        setModules(prev => {
+            if (prev[key] && Object.values(prev).filter(Boolean).length === 1) {
+                return prev;
+            }
+            return { ...prev, [key]: !prev[key] };
+        });
+    };
+
+    const applyDeviceTypeDefaults = (nextType: DeviceType) => {
+        setDeviceType(nextType);
+        setTemplate('custom');
+        const defaults = MODULE_DEFAULTS_BY_DEVICE_TYPE[nextType];
+        setModules(toModuleState(defaults as string[]));
+        if (!defaults.includes('asterisk')) {
+            setAsteriskContainerName('asterisk');
+        }
     };
 
     const handleBuild = async () => {
         if (selectedDeviceId === 'new' && !deviceName) {
             alert('Please enter a device name for the new agent');
+            return;
+        }
+        if (!Object.values(modules).some(Boolean)) {
+            alert('Select at least one module');
             return;
         }
         setBuilding(true);
@@ -95,6 +143,7 @@ export const AgentBuilder = () => {
                 arch,
                 modules,
                 name: selectedDeviceId === 'new' ? deviceName : undefined,
+                device_type: selectedDeviceId === 'new' ? deviceType : undefined,
                 asterisk_container_name: modules.asterisk ? asteriskContainerName.trim() || 'asterisk' : undefined,
             });
             setBuildResult({
@@ -132,14 +181,30 @@ export const AgentBuilder = () => {
                 </div>
                 {selectedDeviceId === 'new' ? (
                     <div className="space-y-3">
-                        <label className="text-sm font-medium text-slate-400 uppercase tracking-wider">New Device Name</label>
-                        <input
-                            type="text"
-                            value={deviceName}
-                            onChange={e => setDeviceName(e.target.value)}
-                            className="w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-3 text-white outline-none focus:border-primary-500/50"
-                            placeholder="e.g. Production-Web-01"
-                        />
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-slate-400 uppercase tracking-wider">New Device Name</label>
+                            <input
+                                type="text"
+                                value={deviceName}
+                                onChange={e => setDeviceName(e.target.value)}
+                                className="w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-3 text-white outline-none focus:border-primary-500/50"
+                                placeholder="e.g. Production-Web-01"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-slate-400 uppercase tracking-wider">Device Type</label>
+                            <select
+                                value={deviceType}
+                                onChange={e => applyDeviceTypeDefaults(e.target.value as DeviceType)}
+                                className="w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-3 text-white outline-none focus:border-primary-500/50"
+                            >
+                                <option value="server">Server</option>
+                                <option value="pbx">PBX</option>
+                                <option value="media_gateway">Media Gateway</option>
+                                <option value="network_device">Network Device</option>
+                                <option value="website">Website</option>
+                            </select>
+                        </div>
                     </div>
                 ) : (
                     <div className="flex gap-2 p-1 bg-dark-surface border border-dark-border rounded-xl">

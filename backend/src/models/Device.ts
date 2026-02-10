@@ -4,7 +4,7 @@ export interface IDevice extends Document {
     device_id: string; // Unique identifier (e.g., serial or HW ID)
     name: string;
     hostname: string;
-    type: 'server' | 'network_device' | 'website';
+    type: 'server' | 'pbx' | 'media_gateway' | 'network_device' | 'website';
     memory_total?: number;
     disk_total?: number;
     public_ip?: string;
@@ -62,7 +62,7 @@ const DeviceSchema: Schema = new Schema({
     device_id: { type: String, required: true, unique: true },
     name: { type: String, required: true },
     hostname: { type: String },
-    type: { type: String, enum: ['server', 'network_device', 'website'], default: 'server' },
+    type: { type: String, enum: ['server', 'pbx', 'media_gateway', 'network_device', 'website'], default: 'server' },
     memory_total: { type: Number },
     disk_total: { type: Number },
     public_ip: { type: String },

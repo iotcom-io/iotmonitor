@@ -2,11 +2,34 @@ import React, { useState } from 'react';
 import { X, ShieldCheck, Activity, Phone, Wifi, Cpu, MemoryStick as Memory, Bell, HardDrive, Box, LayoutGrid } from 'lucide-react';
 import { clsx } from 'clsx';
 
+type ModuleName = 'system' | 'docker' | 'asterisk' | 'network';
+const CHECK_MODULE_MAP: Record<string, ModuleName | null> = {
+    cpu: 'system',
+    memory: 'system',
+    disk: 'system',
+    bandwidth: 'network',
+    utilization: 'network',
+    sip_rtt: 'asterisk',
+    sip_registration: 'asterisk',
+    container_status: 'docker',
+};
+const BASE_CHECK_TYPES = [
+    { id: 'cpu', label: 'CPU Load', icon: Cpu, unit: '%' },
+    { id: 'memory', label: 'Memory Usage', icon: Memory, unit: '%' },
+    { id: 'disk', label: 'Disk Usage', icon: HardDrive, unit: '%' },
+    { id: 'bandwidth', label: 'Network Bandwidth', icon: Wifi, unit: 'Mbps' },
+    { id: 'utilization', label: 'Network Util', icon: LayoutGrid, unit: '%' },
+    { id: 'sip_rtt', label: 'SIP RTT/Status', icon: Phone, unit: 'ms' },
+    { id: 'sip_registration', label: 'SIP Registrations %', icon: Phone, unit: '%' },
+    { id: 'container_status', label: 'Container Status', icon: Box, unit: 'status' },
+];
+
 interface MonitoringRuleModalProps {
     isOpen: boolean;
     onClose: () => void;
     onSave: (rules: any[]) => void;
     initialData?: any;
+    enabledModules?: ModuleName[];
     latestMetrics?: {
         extra?: {
             registrations?: { name: string; status: string; serverUri: string; expiresS: number }[];
@@ -18,7 +41,7 @@ interface MonitoringRuleModalProps {
     };
 }
 
-export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, latestMetrics }: MonitoringRuleModalProps) => {
+export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, latestMetrics, enabledModules }: MonitoringRuleModalProps) => {
     // Default thresholds for each rule type
     const TYPE_DEFAULTS: Record<string, any> = {
         cpu: { thresholds: { warning: 70, critical: 90 }, target: 'System-wide' },
@@ -81,6 +104,18 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, late
         }));
     }, [latestMetrics]);
 
+    const checkTypes = React.useMemo(() => {
+        if (!enabledModules || enabledModules.length === 0) {
+            return BASE_CHECK_TYPES;
+        }
+
+        const enabled = new Set(enabledModules);
+        return BASE_CHECK_TYPES.filter((checkType) => {
+            const requiredModule = CHECK_MODULE_MAP[checkType.id] ?? null;
+            return !requiredModule || enabled.has(requiredModule);
+        });
+    }, [enabledModules]);
+
     React.useEffect(() => {
         const prepped = prepData(initialData);
         if (isOpen) {
@@ -104,6 +139,21 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, late
             }
         }
     }, [initialData, isOpen]);
+
+    React.useEffect(() => {
+        if (!isOpen || checkTypes.length === 0) return;
+        if (checkTypes.some((type) => type.id === formData.check_type)) return;
+
+        const fallback = checkTypes[0];
+        const config = (sessionConfigs[fallback.id] as any) || TYPE_DEFAULTS[fallback.id];
+        setFormData((prev: any) => ({
+            ...prev,
+            check_type: fallback.id,
+            thresholds: config.thresholds,
+            target: config.target || (config.targets?.[0] || ''),
+            targets: config.targets || (config.target ? [config.target] : []),
+        }));
+    }, [checkTypes, formData.check_type, isOpen, sessionConfigs]);
 
     // Helper to update both formData and sessionConfigs
     const updateField = (updates: any) => {
@@ -173,17 +223,6 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, late
         onSave(rulesToSave);
     };
 
-    const checkTypes = [
-        { id: 'cpu', label: 'CPU Load', icon: Cpu, unit: '%' },
-        { id: 'memory', label: 'Memory Usage', icon: Memory, unit: '%' },
-        { id: 'disk', label: 'Disk Usage', icon: HardDrive, unit: '%' },
-        { id: 'bandwidth', label: 'Network Bandwidth', icon: Wifi, unit: 'Mbps' },
-        { id: 'utilization', label: 'Network Util', icon: LayoutGrid, unit: '%' },
-        { id: 'sip_rtt', label: 'SIP RTT/Status', icon: Phone, unit: 'ms' },
-        { id: 'sip_registration', label: 'SIP Registrations %', icon: Phone, unit: '%' },
-        { id: 'container_status', label: 'Container Status', icon: Box, unit: 'status' },
-    ];
-
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
             <div className="bg-dark-surface border border-dark-border rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200">
@@ -204,34 +243,40 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, late
                     <div className="space-y-3">
                         <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Select Rule Type</label>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                            {checkTypes.map((type) => (
-                                <button
-                                    key={type.id}
-                                    type="button"
-                                    onClick={() => {
-                                        const config = (sessionConfigs[type.id] as any) || TYPE_DEFAULTS[type.id];
-                                        setFormData({
-                                            ...formData,
-                                            check_type: type.id as any,
-                                            thresholds: config.thresholds,
-                                            target: config.target || (config.targets?.[0] || ''),
-                                            targets: config.targets || (config.target ? [config.target] : [])
-                                        });
-                                    }}
-                                    className={clsx(
-                                        "flex flex-col items-center gap-2 p-3 rounded-xl border transition-all text-center group relative",
-                                        formData.check_type === type.id
-                                            ? "bg-primary-500/20 border-primary-500 text-primary-400"
-                                            : "bg-white/5 border-white/10 text-slate-400 hover:border-white/20 hover:bg-white/10"
-                                    )}
-                                >
-                                    {modifiedTypes.has(type.id) && (
-                                        <div className="absolute top-2 right-2 w-2 h-2 bg-primary-500 rounded-full shadow-[0_0_8px_#0ea5e9]" />
-                                    )}
-                                    <type.icon size={22} className={clsx("transition-transform", formData.check_type === type.id && "scale-110")} />
-                                    <span className="text-[10px] uppercase font-black leading-tight">{type.label}</span>
-                                </button>
-                            ))}
+                            {checkTypes.length === 0 ? (
+                                <div className="col-span-2 md:col-span-4 p-4 rounded-xl border border-white/10 bg-white/5 text-xs text-slate-400">
+                                    No rule types available for the selected modules on this device.
+                                </div>
+                            ) : (
+                                checkTypes.map((type) => (
+                                    <button
+                                        key={type.id}
+                                        type="button"
+                                        onClick={() => {
+                                            const config = (sessionConfigs[type.id] as any) || TYPE_DEFAULTS[type.id];
+                                            setFormData({
+                                                ...formData,
+                                                check_type: type.id as any,
+                                                thresholds: config.thresholds,
+                                                target: config.target || (config.targets?.[0] || ''),
+                                                targets: config.targets || (config.target ? [config.target] : [])
+                                            });
+                                        }}
+                                        className={clsx(
+                                            "flex flex-col items-center gap-2 p-3 rounded-xl border transition-all text-center group relative",
+                                            formData.check_type === type.id
+                                                ? "bg-primary-500/20 border-primary-500 text-primary-400"
+                                                : "bg-white/5 border-white/10 text-slate-400 hover:border-white/20 hover:bg-white/10"
+                                        )}
+                                    >
+                                        {modifiedTypes.has(type.id) && (
+                                            <div className="absolute top-2 right-2 w-2 h-2 bg-primary-500 rounded-full shadow-[0_0_8px_#0ea5e9]" />
+                                        )}
+                                        <type.icon size={22} className={clsx("transition-transform", formData.check_type === type.id && "scale-110")} />
+                                        <span className="text-[10px] uppercase font-black leading-tight">{type.label}</span>
+                                    </button>
+                                ))
+                            )}
                         </div>
                     </div>
 
@@ -491,7 +536,11 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, late
                     <button onClick={onClose} className="px-6 py-2 rounded-xl text-slate-400 font-bold hover:text-white transition-all">
                         Cancel
                     </button>
-                    <button onClick={handleSubmit} className="px-8 py-2 bg-primary-500 text-white font-bold rounded-xl shadow-[0_0_20px_rgba(14,165,233,0.3)] hover:bg-primary-400 transition-all border border-primary-400/20">
+                    <button
+                        onClick={handleSubmit}
+                        disabled={checkTypes.length === 0}
+                        className="px-8 py-2 bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl shadow-[0_0_20px_rgba(14,165,233,0.3)] hover:bg-primary-400 transition-all border border-primary-400/20"
+                    >
                         {initialData ? 'Update Rule' : 'Create Rule'}
                     </button>
                 </div>

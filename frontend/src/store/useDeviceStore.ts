@@ -4,7 +4,8 @@ import api from '../lib/axios';
 interface Device {
     device_id: string;
     name: string;
-    status: 'online' | 'offline' | 'warning';
+    type?: 'server' | 'pbx' | 'media_gateway' | 'network_device' | 'website';
+    status: 'online' | 'offline' | 'warning' | 'not_monitored';
     last_seen: string;
     monitoring_enabled?: boolean;
     enabled_modules?: ('system' | 'docker' | 'asterisk' | 'network')[];
@@ -21,7 +22,7 @@ interface DeviceState {
     devices: Device[];
     loading: boolean;
     fetchDevices: () => Promise<void>;
-    updateDeviceStatus: (deviceId: string, status: 'online' | 'offline' | 'warning') => void;
+    updateDeviceStatus: (deviceId: string, status: 'online' | 'offline' | 'warning' | 'not_monitored') => void;
     deleteDevice: (deviceId: string) => Promise<void>;
     toggleMonitoring: (deviceId: string) => Promise<void>;
     initSocket: () => void;

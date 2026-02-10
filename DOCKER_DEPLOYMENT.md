@@ -275,3 +275,40 @@ http://localhost:3000/api/devices/download/{filename}
 ```
 
 The backend container includes Go runtime for on-demand agent compilation.
+
+## Historical Telemetry APIs
+
+The monitoring API supports archival range queries, time-bucket aggregation, and CSV export.
+
+### Range Query (JSON)
+
+```http
+GET /api/monitoring/metrics/{deviceId}?from=2026-02-09T00:00:00.000Z&to=2026-02-10T00:00:00.000Z&bucket=auto&max_points=1200
+```
+
+Query params:
+- `from`, `to`: ISO datetime range
+- `bucket`: `auto`, `raw`, `1m`, `5m`, `15m`, `1h`, `6h`, `1d`
+- `max_points`: max points returned after sampling (default 1200)
+- `limit`: scan limit for raw mode (default 60000)
+
+Notes:
+- `raw` bucket supports up to 48 hours.
+- `auto` chooses a bucket based on range and point limit.
+- If range is omitted, endpoint returns recent real-time points (latest 50 by default).
+
+### CSV Export
+
+```http
+GET /api/monitoring/metrics/{deviceId}/export?from=2026-02-09T00:00:00.000Z&to=2026-02-10T00:00:00.000Z&bucket=1m
+```
+
+CSV columns:
+- `timestamp`
+- `cpu_usage`
+- `memory_usage`
+- `disk_usage`
+- `bandwidth_mbps`
+- `sip_rtt_avg_ms`
+- `sip_registration_percent`
+- `point_count`

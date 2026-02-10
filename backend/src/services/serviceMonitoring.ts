@@ -6,6 +6,18 @@ import { updateServiceMetrics } from './offlineDetection';
 const MODULES = ['system', 'docker', 'asterisk', 'network'] as const;
 type ModuleName = typeof MODULES[number];
 const GLOBAL_SIP_TARGETS = new Set(['', 'all', 'system-wide', '*']);
+const CHECK_MODULE_MAP: Record<string, ModuleName | null> = {
+    cpu: 'system',
+    memory: 'system',
+    disk: 'system',
+    bandwidth: 'network',
+    utilization: 'network',
+    sip_rtt: 'asterisk',
+    sip_registration: 'asterisk',
+    sip: 'asterisk', // legacy
+    container_status: 'docker',
+    custom: null,
+};
 
 const toNumber = (value: any): number | undefined => {
     if (value === null || value === undefined) return undefined;
@@ -162,8 +174,14 @@ export async function applyThresholdRules(device: any, metrics: any) {
 
     const checks = await MonitoringCheck.find({ device_id: device.device_id, enabled: true });
     if (checks.length === 0) return;
+    const enabledModules = new Set(getEnabledModules(device));
 
     for (const check of checks) {
+        const requiredModule = CHECK_MODULE_MAP[String(check.check_type)] ?? null;
+        if (requiredModule && !enabledModules.has(requiredModule)) {
+            continue;
+        }
+
         let value: number | undefined;
         let isProblem = false;
         let message = '';
@@ -329,6 +347,8 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
     try {
         const device = await Device.findOne({ device_id: deviceId });
         if (!device || device.monitoring_paused) return;
+        const enabledModules = getEnabledModules(device);
+        if (!enabledModules.includes('asterisk')) return;
 
         const sipRules = await MonitoringCheck.find({
             device_id: deviceId,
@@ -353,6 +373,20 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
                         specific_service: 'sip_registration',
                         specific_endpoint: name,
                         details: { resolution_reason: 'Endpoint not monitored' },
+                    });
+                    continue;
+                }
+
+                const registrationRule = pickRuleForEndpoint(registrationRules, name);
+                if (registrationRule?.check_type === 'sip_registration') {
+                    // Avoid duplicate alerts: registration threshold checks already emit rule_violation alerts.
+                    await resolveAlert({
+                        device_id: deviceId,
+                        device_name: device.name,
+                        alert_type: 'sip_issue',
+                        specific_service: 'sip_registration',
+                        specific_endpoint: name,
+                        details: { resolution_reason: 'Handled by sip_registration threshold rule' },
                     });
                     continue;
                 }
@@ -413,6 +447,7 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
             const specificRule = pickRuleForEndpoint(rttRules, name);
             const critThresh = specificRule?.thresholds?.critical || rttThresholdDefault;
             const warnThresh = specificRule?.thresholds?.warning || rttThresholdDefault;
+            const useRuleBasedRttAlerting = specificRule?.check_type === 'sip_rtt';
 
             if (status !== 'registered' && status !== 'OK' && status !== 'Avail') {
                 await triggerAlert({
@@ -437,6 +472,19 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
                     specific_service: 'sip_peer',
                     specific_endpoint: name,
                 });
+            }
+
+            if (useRuleBasedRttAlerting) {
+                // Avoid duplicate alerts: sip_rtt threshold checks emit rule_violation alerts.
+                await resolveAlert({
+                    device_id: deviceId,
+                    device_name: device.name,
+                    alert_type: 'high_latency',
+                    specific_service: 'sip_peer',
+                    specific_endpoint: name,
+                    details: { resolution_reason: 'Handled by sip_rtt threshold rule' },
+                });
+                continue;
             }
 
             if (latencyValue) {

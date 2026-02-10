@@ -46,5 +46,6 @@ const TelemetrySchema: Schema = new Schema({
 
 // TTL Index: Keep logs for 30 days
 TelemetrySchema.index({ timestamp: 1 }, { expireAfterSeconds: 2592000 });
+TelemetrySchema.index({ device_id: 1, timestamp: 1 });
 
 export default mongoose.model<ITelemetry>('Telemetry', TelemetrySchema);
