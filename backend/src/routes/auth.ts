@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import User from '../models/User';
 import { z } from 'zod';
-import { authenticate, authorizePermission } from '../middleware/auth';
+import { authenticate, authorizePermission, AuthRequest } from '../middleware/auth';
 import { sanitizePermissionOverrides, toAuthUserContext } from '../lib/rbac';
 
 const router = Router();
@@ -18,7 +18,7 @@ const registerSchema = z.object({
     password: z.string().min(6),
     role: z.enum(['admin', 'operator', 'viewer']).optional(),
     is_active: z.boolean().optional(),
-    permissions: z.record(z.boolean()).optional(),
+    permissions: z.record(z.string(), z.boolean()).optional(),
     assigned_device_ids: z.array(z.string().trim().min(1)).optional(),
     assigned_synthetic_ids: z.array(z.string().trim().min(1)).optional(),
 });
@@ -93,6 +93,7 @@ router.post('/login', async (req, res) => {
             token,
             user: {
                 id: authUser.id,
+                name: user.name,
                 email: authUser.email,
                 role: authUser.role,
                 is_active: authUser.is_active,
@@ -109,7 +110,7 @@ router.post('/login', async (req, res) => {
     }
 });
 
-router.get('/me', authenticate, async (req, res) => {
+router.get('/me', authenticate, async (req: AuthRequest, res) => {
     if (!req.user) {
         return res.status(401).json({ message: 'Unauthorized' });
     }

@@ -3,6 +3,7 @@ import { authenticate, AuthRequest, authorizePermission } from '../middleware/au
 import Incident from '../models/Incident';
 import Device from '../models/Device';
 import SyntheticCheck from '../models/SyntheticCheck';
+import LicenseAsset from '../models/LicenseAsset';
 import { canAccessDevice, canAccessSynthetic } from '../lib/rbac';
 
 const router = Router();
@@ -79,26 +80,45 @@ router.get('/', authorizePermission('incidents.view'), async (req: AuthRequest, 
                     .map((incident: any) => String(incident.target_id || ''))
                     .filter(Boolean)
             ));
+            const licenseTargetIds = Array.from(new Set(
+                incidentsRaw
+                    .filter((incident: any) => incident.target_type === 'license')
+                    .map((incident: any) => String(incident.target_id || ''))
+                    .filter(Boolean)
+            ));
 
-            const [devices, synthetics] = await Promise.all([
+            const [devices, synthetics, licenses] = await Promise.all([
                 deviceTargetIds.length > 0
                     ? Device.find({ device_id: { $in: deviceTargetIds } }).select({ device_id: 1, assigned_user_ids: 1 })
                     : Promise.resolve([] as any[]),
                 syntheticTargetIds.length > 0
                     ? SyntheticCheck.find({ _id: { $in: syntheticTargetIds } }).select({ _id: 1, assigned_user_ids: 1 })
                     : Promise.resolve([] as any[]),
+                licenseTargetIds.length > 0
+                    ? LicenseAsset.find({ _id: { $in: licenseTargetIds } }).select({ _id: 1, assigned_user_ids: 1 })
+                    : Promise.resolve([] as any[]),
             ]);
 
             const deviceMap = new Map<string, any>();
             const syntheticMap = new Map<string, any>();
+            const licenseMap = new Map<string, any>();
             devices.forEach((device: any) => deviceMap.set(String(device.device_id), device));
             synthetics.forEach((synthetic: any) => syntheticMap.set(String(synthetic._id), synthetic));
+            licenses.forEach((license: any) => licenseMap.set(String(license._id), license));
 
             incidents = incidentsRaw.filter((incident: any) => {
                 if (incident.target_type === 'synthetic') {
                     const monitor = syntheticMap.get(String(incident.target_id));
                     if (!monitor) return false;
                     return canAccessSynthetic(req.user, monitor);
+                }
+
+                if (incident.target_type === 'license') {
+                    const license = licenseMap.get(String(incident.target_id));
+                    if (!license) return false;
+                    const assigned = Array.isArray(license.assigned_user_ids) ? license.assigned_user_ids : [];
+                    if (assigned.length === 0) return true;
+                    return assigned.includes(String(req.user?.id || ''));
                 }
 
                 const device = deviceMap.get(String(incident.target_id));
@@ -123,6 +143,16 @@ router.post('/:id/resolve', authorizePermission('incidents.resolve'), async (req
         if (incident.target_type === 'synthetic') {
             const monitor = await SyntheticCheck.findById(incident.target_id).select({ _id: 1, assigned_user_ids: 1 });
             if (!monitor || !canAccessSynthetic(req.user, monitor)) {
+                return res.status(403).json({ message: 'Access denied for this incident' });
+            }
+        } else if (incident.target_type === 'license') {
+            const license = await LicenseAsset.findById(incident.target_id).select({ _id: 1, assigned_user_ids: 1 });
+            if (!license) {
+                return res.status(404).json({ message: 'License target not found' });
+            }
+
+            const assigned = Array.isArray(license.assigned_user_ids) ? license.assigned_user_ids : [];
+            if (assigned.length > 0 && !assigned.includes(String(req.user?.id || ''))) {
                 return res.status(403).json({ message: 'Access denied for this incident' });
             }
         } else {

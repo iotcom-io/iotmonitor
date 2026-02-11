@@ -6,6 +6,7 @@ import { startOfflineDetection } from './services/offlineDetection';
 import { startThrottlingService } from './services/notificationThrottling';
 import { startHourlyReports } from './services/scheduledReports';
 import { startSyntheticRunner } from './services/SyntheticRunner';
+import { startLicenseMonitoring } from './services/licenseMonitoring';
 import { seedMonitoringTemplates, seedDefaultNotificationChannel } from './seedMonitoring';
 
 if (!process.env.JWT_SECRET) {
@@ -39,6 +40,7 @@ mongoose.connect(MONGODB_URI)
         startThrottlingService();
         startHourlyReports();
         startSyntheticRunner();
+        startLicenseMonitoring();
         console.log('All monitoring services started');
     })
     .catch((err) => {

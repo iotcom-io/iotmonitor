@@ -102,6 +102,7 @@ export const ROLE_DEFAULT_PERMISSIONS: Record<UserRole, PermissionMap> = {
 
 export interface AuthUserContext {
     id: string;
+    name?: string;
     email: string;
     role: UserRole;
     is_active: boolean;
@@ -147,6 +148,7 @@ const normalizeList = (value: unknown): string[] => {
 export const toAuthUserContext = (user: IUser): AuthUserContext => {
     return {
         id: String(user._id),
+        name: user.name,
         email: user.email,
         role: user.role,
         is_active: user.is_active !== false,
@@ -200,4 +202,3 @@ export const canAccessSynthetic = (
 
     return userAssigned.length === 0 && monitorAssigned.length === 0;
 };
-

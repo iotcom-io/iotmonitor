@@ -17,6 +17,7 @@ export interface ISystemSettings extends Document {
     default_repeat_interval_minutes?: number;
     default_throttling_duration_minutes?: number;
     ssl_weekly_summary_last_sent_on?: string;
+    license_weekly_summary_last_sent_on?: string;
     updated_at: Date;
 }
 
@@ -43,6 +44,7 @@ const SystemSettingsSchema: Schema = new Schema({
     default_repeat_interval_minutes: { type: Number, default: 5 },
     default_throttling_duration_minutes: { type: Number, default: 60 },
     ssl_weekly_summary_last_sent_on: { type: String },
+    license_weekly_summary_last_sent_on: { type: String },
 }, { timestamps: { updatedAt: 'updated_at' } });
 
 export default mongoose.model<ISystemSettings>('SystemSettings', SystemSettingsSchema);

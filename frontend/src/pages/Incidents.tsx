@@ -178,6 +178,7 @@ export const Incidents = () => {
                         <option value="device">Device</option>
                         <option value="synthetic">Web Monitor</option>
                         <option value="service">Service</option>
+                        <option value="license">License</option>
                     </select>
 
                     <select className="input-field" value={severity} onChange={(e) => setSeverity(e.target.value)}>

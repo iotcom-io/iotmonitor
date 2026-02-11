@@ -4,6 +4,8 @@ import { Plus, Search, Filter, Wifi, WifiOff, AlertCircle, Server, Hammer, Loade
 import { clsx } from 'clsx';
 import { useNavigate } from 'react-router-dom';
 import api from '../lib/axios';
+import { useAuthStore } from '../store/useAuthStore';
+import { hasPermission } from '../lib/permissions';
 
 type DeviceType = 'server' | 'pbx' | 'network_device' | 'website';
 const MODULE_DEFAULTS_BY_DEVICE_TYPE: Record<DeviceType, string[]> = {
@@ -48,6 +50,7 @@ const formatUptime = (seconds?: number) => {
 
 export const DeviceList = () => {
     const { devices, loading, fetchDevices } = useDeviceStore();
+    const user = useAuthStore(state => state.user);
     const navigate = useNavigate();
     const [showModal, setShowModal] = React.useState(false);
     const [isEditMode, setIsEditMode] = React.useState(false);
@@ -62,6 +65,11 @@ export const DeviceList = () => {
     const [searchQuery, setSearchQuery] = React.useState('');
     const [typeFilter, setTypeFilter] = React.useState<'all' | DeviceType>('all');
     const [groupByType, setGroupByType] = React.useState(true);
+    const canCreateDevice = hasPermission('devices.create', user);
+    const canUpdateDevice = hasPermission('devices.update', user);
+    const canDeleteDevice = hasPermission('devices.delete', user);
+    const canBuildAgent = hasPermission('devices.build_agent', user);
+    const canPauseResume = hasPermission('monitoring.pause_resume', user);
 
     const [registering, setRegistering] = React.useState(false);
     const [buildingId, setBuildingId] = React.useState<string | null>(null);
@@ -227,13 +235,15 @@ export const DeviceList = () => {
                     <h2 className="text-2xl font-bold text-white">Device Management</h2>
                     <p className="text-slate-400">View and manage all registered monitoring agents</p>
                 </div>
-                <button
-                    onClick={openCreateModal}
-                    className="btn-primary flex items-center gap-2"
-                >
-                    <Plus size={18} />
-                    Register Device
-                </button>
+                {canCreateDevice && (
+                    <button
+                        onClick={openCreateModal}
+                        className="btn-primary flex items-center gap-2"
+                    >
+                        <Plus size={18} />
+                        Register Device
+                    </button>
+                )}
             </div>
 
             {showModal && (
@@ -473,41 +483,49 @@ export const DeviceList = () => {
                                         </td>
                                         <td className="px-6 py-4 text-right">
                                             <div className="flex justify-end gap-2">
-                                                <button
-                                                    onClick={(e) => openEditModal(e, device)}
-                                                    title="Edit Device"
-                                                    className="p-2 rounded-lg transition-all text-slate-400 hover:text-white hover:bg-white/5"
-                                                >
-                                                    <Pencil size={16} />
-                                                </button>
-                                                <button
-                                                    onClick={(e) => handleToggle(e, device.device_id)}
-                                                    title={device.monitoring_enabled === false ? "Resume Monitoring" : "Pause Monitoring"}
-                                                    className={clsx(
-                                                        "p-2 rounded-lg transition-all",
-                                                        device.monitoring_enabled === false ? "text-amber-400 hover:bg-amber-500/10" : "text-slate-400 hover:bg-white/5"
-                                                    )}
-                                                >
-                                                    {device.monitoring_enabled === false ? <Play size={18} /> : <Pause size={18} />}
-                                                </button>
-                                                <button
-                                                    onClick={(e) => handleBuild(e, device.device_id)}
-                                                    disabled={!!buildingId}
-                                                    title="Build Agent Binary"
-                                                    className={clsx(
-                                                        "p-2 rounded-lg transition-all",
-                                                        buildingId === device.device_id ? "bg-primary-500/20 text-primary-400" : "text-primary-400 hover:text-white hover:bg-primary-500/10"
-                                                    )}
-                                                >
-                                                    {buildingId === device.device_id ? <Loader2 size={18} className="animate-spin" /> : <Hammer size={18} />}
-                                                </button>
-                                                <button
-                                                    onClick={(e) => handleDelete(e, device.device_id)}
-                                                    title="Delete Device"
-                                                    className="p-2 rounded-lg text-red-400 hover:text-red-500 hover:bg-red-500/10 transition-all ml-2"
-                                                >
-                                                    <Trash2 size={18} />
-                                                </button>
+                                                {canUpdateDevice && (
+                                                    <button
+                                                        onClick={(e) => openEditModal(e, device)}
+                                                        title="Edit Device"
+                                                        className="p-2 rounded-lg transition-all text-slate-400 hover:text-white hover:bg-white/5"
+                                                    >
+                                                        <Pencil size={16} />
+                                                    </button>
+                                                )}
+                                                {canPauseResume && (
+                                                    <button
+                                                        onClick={(e) => handleToggle(e, device.device_id)}
+                                                        title={device.monitoring_enabled === false ? "Resume Monitoring" : "Pause Monitoring"}
+                                                        className={clsx(
+                                                            "p-2 rounded-lg transition-all",
+                                                            device.monitoring_enabled === false ? "text-amber-400 hover:bg-amber-500/10" : "text-slate-400 hover:bg-white/5"
+                                                        )}
+                                                    >
+                                                        {device.monitoring_enabled === false ? <Play size={18} /> : <Pause size={18} />}
+                                                    </button>
+                                                )}
+                                                {canBuildAgent && (
+                                                    <button
+                                                        onClick={(e) => handleBuild(e, device.device_id)}
+                                                        disabled={!!buildingId}
+                                                        title="Build Agent Binary"
+                                                        className={clsx(
+                                                            "p-2 rounded-lg transition-all",
+                                                            buildingId === device.device_id ? "bg-primary-500/20 text-primary-400" : "text-primary-400 hover:text-white hover:bg-primary-500/10"
+                                                        )}
+                                                    >
+                                                        {buildingId === device.device_id ? <Loader2 size={18} className="animate-spin" /> : <Hammer size={18} />}
+                                                    </button>
+                                                )}
+                                                {canDeleteDevice && (
+                                                    <button
+                                                        onClick={(e) => handleDelete(e, device.device_id)}
+                                                        title="Delete Device"
+                                                        className="p-2 rounded-lg text-red-400 hover:text-red-500 hover:bg-red-500/10 transition-all ml-2"
+                                                    >
+                                                        <Trash2 size={18} />
+                                                    </button>
+                                                )}
                                             </div>
                                         </td>
                                     </tr>

@@ -430,13 +430,14 @@ router.delete('/:id', authorizePermission('synthetics.delete'), async (req: Auth
 // run now
 router.post('/:id/run', authorizePermission('synthetics.run'), async (req: AuthRequest, res) => {
     try {
-        const existing = await SyntheticCheck.findById(req.params.id);
+        const checkId = String(req.params.id);
+        const existing = await SyntheticCheck.findById(checkId);
         if (!existing) return res.status(404).json({ message: 'Not found' });
         if (!canAccessSynthetic(req.user, existing)) {
             return res.status(403).json({ message: 'Access denied for this web monitor' });
         }
 
-        const updated = await runSyntheticCheckById(req.params.id);
+        const updated = await runSyntheticCheckById(checkId);
         if (!updated) return res.status(404).json({ message: 'Not found' });
         res.json(updated);
     } catch (error: any) {

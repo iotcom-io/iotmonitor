@@ -14,7 +14,7 @@ const createUserSchema = z.object({
     password: z.string().min(6),
     role: z.enum(['admin', 'operator', 'viewer']),
     is_active: z.boolean().optional(),
-    permissions: z.record(z.boolean()).optional(),
+    permissions: z.record(z.string(), z.boolean()).optional(),
     assigned_device_ids: z.array(z.string().trim().min(1)).optional(),
     assigned_synthetic_ids: z.array(z.string().trim().min(1)).optional(),
 });
@@ -25,7 +25,7 @@ const updateUserSchema = z.object({
     password: z.string().min(6).optional(),
     role: z.enum(['admin', 'operator', 'viewer']).optional(),
     is_active: z.boolean().optional(),
-    permissions: z.record(z.boolean()).optional(),
+    permissions: z.record(z.string(), z.boolean()).optional(),
     assigned_device_ids: z.array(z.string().trim().min(1)).optional(),
     assigned_synthetic_ids: z.array(z.string().trim().min(1)).optional(),
 }).refine((payload) => Object.keys(payload).length > 0, { message: 'No update fields provided' });

@@ -3,6 +3,8 @@ import { Activity, Server, AlertTriangle, Cpu, HardDrive, Globe } from 'lucide-r
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useDeviceStore } from '../store/useDeviceStore';
 import api from '../lib/axios';
+import { useAuthStore } from '../store/useAuthStore';
+import { hasPermission } from '../lib/permissions';
 
 const StatCard = ({ icon: Icon, label, value, tone = 'primary', subvalue }: { icon: any; label: string; value: string; tone?: 'primary' | 'red' | 'emerald' | 'amber' | 'cyan'; subvalue?: string }) => {
     const toneMap: Record<string, string> = {
@@ -29,18 +31,23 @@ const StatCard = ({ icon: Icon, label, value, tone = 'primary', subvalue }: { ic
 
 export const Dashboard = () => {
     const { devices, fetchDevices, initSocket } = useDeviceStore();
+    const user = useAuthStore(state => state.user);
     const [history, setHistory] = useState<{ time: string; online: number; downMonitors: number }[]>([]);
     const [activeIncidents, setActiveIncidents] = useState<any[]>([]);
     const [webStats, setWebStats] = useState<any>(null);
 
     const refresh = async () => {
         await fetchDevices();
-        const [incidentsRes, webStatsRes] = await Promise.all([
-            api.get('/incidents', { params: { status: 'open', limit: 20 } }),
-            api.get('/synthetics/stats', { params: { window_hours: 24 } }),
-        ]);
-        setActiveIncidents(incidentsRes.data || []);
-        setWebStats(webStatsRes.data || null);
+        const incidentPromise = hasPermission('incidents.view', user)
+            ? api.get('/incidents', { params: { status: 'open', limit: 20 } })
+            : Promise.resolve({ data: [] } as any);
+        const syntheticPromise = hasPermission('synthetics.view', user)
+            ? api.get('/synthetics/stats', { params: { window_hours: 24 } })
+            : Promise.resolve({ data: null } as any);
+
+        const [incidentsRes, webStatsRes] = await Promise.allSettled([incidentPromise, syntheticPromise]);
+        setActiveIncidents(incidentsRes.status === 'fulfilled' ? (incidentsRes.value.data || []) : []);
+        setWebStats(webStatsRes.status === 'fulfilled' ? (webStatsRes.value.data || null) : null);
     };
 
     useEffect(() => {

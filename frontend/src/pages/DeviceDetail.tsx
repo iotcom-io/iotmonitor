@@ -18,6 +18,7 @@ import { Info, Send, Eraser, SquareTerminal as Terminal } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { ConfirmationModal } from '../components/ConfirmationModal';
 import { useAuthStore } from '../store/useAuthStore';
+import { hasPermission } from '../lib/permissions';
 
 type ModuleName = 'system' | 'docker' | 'asterisk' | 'network';
 const ALL_MODULES: ModuleName[] = ['system', 'docker', 'asterisk', 'network'];
@@ -120,7 +121,13 @@ const formatCheckValue = (checkType: string, value: unknown) => {
 export const DeviceDetail = () => {
     const { id } = useParams();
     const token = useAuthStore(state => state.token);
+    const user = useAuthStore(state => state.user);
     const navigate = useNavigate();
+    const canRunRemoteTerminal = hasPermission('remote_terminal.run', user);
+    const canCreateMonitoring = hasPermission('monitoring.create', user);
+    const canUpdateMonitoring = hasPermission('monitoring.update', user);
+    const canDeleteMonitoring = hasPermission('monitoring.delete', user);
+    const canPauseResumeMonitoring = hasPermission('monitoring.pause_resume', user);
     const [activeTab, setActiveTab] = useState('metrics');
     const [device, setDevice] = useState<any>(null);
     const [metrics, setMetrics] = useState<any[]>([]);
@@ -293,6 +300,7 @@ export const DeviceDetail = () => {
 
     const handleExecuteCommand = (e?: React.FormEvent) => {
         if (e) e.preventDefault();
+        if (!canRunRemoteTerminal) return;
         if (!terminalInput.trim() || !socket) return;
 
         setIsTerminalLoading(true);
@@ -407,13 +415,13 @@ export const DeviceDetail = () => {
         { id: 'network', label: 'Network & IPs', icon: Globe, requiredModule: 'network' as ModuleName | null },
         { id: 'sip', label: 'SIP (Asterisk)', icon: Phone, requiredModule: 'asterisk' as ModuleName | null },
         { id: 'docker', label: 'Docker Containers', icon: Box, requiredModule: 'docker' as ModuleName | null },
-        { id: 'terminal', label: 'Remote Terminal', icon: TerminalIcon, requiredModule: null },
+        { id: 'terminal', label: 'Remote Terminal', icon: TerminalIcon, requiredModule: null, hidden: !canRunRemoteTerminal },
         { id: 'checks', label: 'Monitor Checks', icon: ShieldCheck, requiredModule: null },
         { id: 'settings', label: 'Configuration', icon: Settings, requiredModule: null },
-    ]), []);
+    ]), [canRunRemoteTerminal]);
 
     const visibleTabs = useMemo(
-        () => tabs.filter((tab) => !tab.requiredModule || enabledModules.includes(tab.requiredModule)),
+        () => tabs.filter((tab: any) => !tab.hidden && (!tab.requiredModule || enabledModules.includes(tab.requiredModule))),
         [tabs, enabledModules]
     );
 
@@ -1663,10 +1671,12 @@ export const DeviceDetail = () => {
                                     Compact
                                 </button>
                             </div>
-                            <button onClick={() => { setEditingCheck(null); setIsModalOpen(true); }} className="btn-primary flex items-center gap-2 text-sm px-4 py-2">
-                                <CheckCircle2 size={16} />
-                                Add Rule
-                            </button>
+                            {canCreateMonitoring && (
+                                <button onClick={() => { setEditingCheck(null); setIsModalOpen(true); }} className="btn-primary flex items-center gap-2 text-sm px-4 py-2">
+                                    <CheckCircle2 size={16} />
+                                    Add Rule
+                                </button>
+                            )}
                         </div>
                     </div>
 
@@ -1776,30 +1786,36 @@ export const DeviceDetail = () => {
 
                                                         {/* Inline Actions */}
                                                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pr-2">
-                                                            <button
-                                                                onClick={(e) => { e.stopPropagation(); handleToggleCheck(check); }}
-                                                                className={clsx(
-                                                                    "p-2 rounded-lg transition-all",
-                                                                    check.enabled ? "text-slate-500 hover:text-amber-400 hover:bg-amber-400/10" : "text-emerald-500 hover:bg-emerald-500/10"
-                                                                )}
-                                                                title={check.enabled ? "Pause Rule" : "Resume Rule"}
-                                                            >
-                                                                {check.enabled ? <Pause size={14} /> : <Play size={14} />}
-                                                            </button>
-                                                            <button
-                                                                onClick={(e) => { e.stopPropagation(); setEditingCheck(check); setIsModalOpen(true); }}
-                                                                className="p-2 text-slate-500 hover:text-white hover:bg-white/10 rounded-lg transition-all"
-                                                                title="Edit Rule"
-                                                            >
-                                                                <Edit2 size={14} />
-                                                            </button>
-                                                            <button
-                                                                onClick={(e) => { e.stopPropagation(); handleDeleteCheck(check._id); }}
-                                                                className="p-2 text-slate-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
-                                                                title="Delete Rule"
-                                                            >
-                                                                <Trash2 size={14} />
-                                                            </button>
+                                                            {canPauseResumeMonitoring && (
+                                                                <button
+                                                                    onClick={(e) => { e.stopPropagation(); handleToggleCheck(check); }}
+                                                                    className={clsx(
+                                                                        "p-2 rounded-lg transition-all",
+                                                                        check.enabled ? "text-slate-500 hover:text-amber-400 hover:bg-amber-400/10" : "text-emerald-500 hover:bg-emerald-500/10"
+                                                                    )}
+                                                                    title={check.enabled ? "Pause Rule" : "Resume Rule"}
+                                                                >
+                                                                    {check.enabled ? <Pause size={14} /> : <Play size={14} />}
+                                                                </button>
+                                                            )}
+                                                            {canUpdateMonitoring && (
+                                                                <button
+                                                                    onClick={(e) => { e.stopPropagation(); setEditingCheck(check); setIsModalOpen(true); }}
+                                                                    className="p-2 text-slate-500 hover:text-white hover:bg-white/10 rounded-lg transition-all"
+                                                                    title="Edit Rule"
+                                                                >
+                                                                    <Edit2 size={14} />
+                                                                </button>
+                                                            )}
+                                                            {canDeleteMonitoring && (
+                                                                <button
+                                                                    onClick={(e) => { e.stopPropagation(); handleDeleteCheck(check._id); }}
+                                                                    className="p-2 text-slate-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                                                                    title="Delete Rule"
+                                                                >
+                                                                    <Trash2 size={14} />
+                                                                </button>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 </div>
@@ -1897,37 +1913,43 @@ export const DeviceDetail = () => {
 
                                     <div className="space-y-3 pt-6">
                                         <div className="grid grid-cols-2 gap-3">
-                                            <button
-                                                onClick={() => handleToggleCheck(selectedRule)}
-                                                className={clsx(
-                                                    "py-3 rounded-2xl font-black text-xs uppercase transition-all border",
-                                                    selectedRule.enabled
-                                                        ? "bg-slate-900 text-slate-500 border-white/5 hover:text-white"
-                                                        : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                                                )}
-                                            >
-                                                {selectedRule.enabled ? 'Pause Rule' : 'Resume Rule'}
-                                            </button>
+                                            {canPauseResumeMonitoring && (
+                                                <button
+                                                    onClick={() => handleToggleCheck(selectedRule)}
+                                                    className={clsx(
+                                                        "py-3 rounded-2xl font-black text-xs uppercase transition-all border",
+                                                        selectedRule.enabled
+                                                            ? "bg-slate-900 text-slate-500 border-white/5 hover:text-white"
+                                                            : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                                                    )}
+                                                >
+                                                    {selectedRule.enabled ? 'Pause Rule' : 'Resume Rule'}
+                                                </button>
+                                            )}
+                                            {canUpdateMonitoring && (
+                                                <button
+                                                    onClick={() => {
+                                                        setEditingCheck(selectedRule);
+                                                        setIsModalOpen(true);
+                                                        setSelectedRule(null);
+                                                    }}
+                                                    className="py-3 bg-white text-black font-black text-xs uppercase rounded-2xl hover:bg-slate-200 transition-all shadow-xl shadow-white/5"
+                                                >
+                                                    Edit Rules
+                                                </button>
+                                            )}
+                                        </div>
+                                        {canDeleteMonitoring && (
                                             <button
                                                 onClick={() => {
-                                                    setEditingCheck(selectedRule);
-                                                    setIsModalOpen(true);
+                                                    handleDeleteCheck(selectedRule._id);
                                                     setSelectedRule(null);
                                                 }}
-                                                className="py-3 bg-white text-black font-black text-xs uppercase rounded-2xl hover:bg-slate-200 transition-all shadow-xl shadow-white/5"
+                                                className="w-full py-3 text-red-500/30 hover:text-red-500 font-black text-[10px] uppercase transition-colors tracking-widest"
                                             >
-                                                Edit Rules
+                                                Delete Permanently
                                             </button>
-                                        </div>
-                                        <button
-                                            onClick={() => {
-                                                handleDeleteCheck(selectedRule._id);
-                                                setSelectedRule(null);
-                                            }}
-                                            className="w-full py-3 text-red-500/30 hover:text-red-500 font-black text-[10px] uppercase transition-colors tracking-widest"
-                                        >
-                                            Delete Permanently
-                                        </button>
+                                        )}
                                     </div>
                                 </div>
                             </div>

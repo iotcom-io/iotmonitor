@@ -11,6 +11,7 @@ import syntheticRoutes from './routes/synthetics';
 import incidentRoutes from './routes/incidents';
 import alertRoutes from './routes/alerts';
 import userRoutes from './routes/users';
+import licenseRoutes from './routes/licenses';
 import notificationChannelRoutes from './routes/notificationChannels';
 import templateRoutes from './routes/templates';
 import './services/mqtt'; // Initialize MQTT client
@@ -39,6 +40,7 @@ app.use('/api/web-monitoring', syntheticRoutes);
 app.use('/api/incidents', incidentRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/licenses', licenseRoutes);
 app.use('/api/notification-channels', notificationChannelRoutes);
 app.use('/api/templates', templateRoutes);
 

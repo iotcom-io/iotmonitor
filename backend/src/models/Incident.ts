@@ -6,7 +6,7 @@ export interface IIncidentUpdate {
 }
 
 export interface IIncident extends Document {
-    target_type: 'device' | 'synthetic' | 'service';
+    target_type: 'device' | 'synthetic' | 'service' | 'license';
     target_id: string;
     target_name?: string;
     severity: 'critical' | 'warning';
@@ -20,7 +20,7 @@ export interface IIncident extends Document {
 }
 
 const IncidentSchema: Schema = new Schema({
-    target_type: { type: String, enum: ['device', 'synthetic', 'service'], required: true },
+    target_type: { type: String, enum: ['device', 'synthetic', 'service', 'license'], required: true },
     target_id: { type: String, required: true },
     target_name: { type: String },
     severity: { type: String, enum: ['critical', 'warning'], default: 'critical' },

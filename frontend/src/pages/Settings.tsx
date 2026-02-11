@@ -2,8 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { Save, Shield, Bell, Globe, Loader2, CheckCircle2, Plus, Trash2, Lock } from 'lucide-react';
 import api from '../lib/axios';
 import { ConfirmationModal } from '../components/ConfirmationModal';
+import { useAuthStore } from '../store/useAuthStore';
+import { hasPermission } from '../lib/permissions';
 
 export const Settings = () => {
+    const user = useAuthStore(state => state.user);
+    const canEditSettings = hasPermission('settings.update', user);
     const [settings, setSettings] = useState<any>({
         mqtt_public_url: '',
         mqtt_username: '',
@@ -73,6 +77,7 @@ export const Settings = () => {
 
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (!canEditSettings) return;
         setSaving(true);
         setSaved(false);
         try {
@@ -321,11 +326,11 @@ export const Settings = () => {
                     )}
                     <button
                         type="submit"
-                        disabled={saving}
+                        disabled={saving || !canEditSettings}
                         className="btn-primary px-8 flex items-center justify-center gap-2 min-w-[160px]"
                     >
                         {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-                        {saving ? 'Saving...' : 'Save Settings'}
+                        {!canEditSettings ? 'Read Only' : (saving ? 'Saving...' : 'Save Settings')}
                     </button>
                 </div>
             </form>

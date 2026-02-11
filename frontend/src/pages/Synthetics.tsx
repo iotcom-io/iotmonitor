@@ -3,6 +3,8 @@ import api from '../lib/axios';
 import { Globe, Plus, RefreshCw, X, Pause, Play, Trash2, Edit3, PlayCircle, ExternalLink } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
+import { useAuthStore } from '../store/useAuthStore';
+import { hasPermission } from '../lib/permissions';
 
 const typeLabels: Record<string, string> = {
     http: 'Website/API',
@@ -432,6 +434,7 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
 
 export const Synthetics = () => {
     const navigate = useNavigate();
+    const user = useAuthStore(state => state.user);
     const [checks, setChecks] = useState<any[]>([]);
     const [stats, setStats] = useState<Record<string, any>>({});
     const [summary, setSummary] = useState<any>(null);
@@ -467,6 +470,11 @@ export const Synthetics = () => {
         await fetchChecks();
     };
 
+    const canCreate = hasPermission('synthetics.create', user);
+    const canUpdate = hasPermission('synthetics.update', user);
+    const canDelete = hasPermission('synthetics.delete', user);
+    const canRun = hasPermission('synthetics.run', user);
+
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -488,9 +496,11 @@ export const Synthetics = () => {
                         <option value={168}>Last 7d</option>
                     </select>
                     <button className="icon-btn" onClick={fetchChecks}><RefreshCw size={18} /></button>
-                    <button className="btn-primary flex items-center gap-2" onClick={() => { setEditing(null); setModalOpen(true); }}>
-                        <Plus size={16} /> New Monitor
-                    </button>
+                    {canCreate && (
+                        <button className="btn-primary flex items-center gap-2" onClick={() => { setEditing(null); setModalOpen(true); }}>
+                            <Plus size={16} /> New Monitor
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -570,11 +580,11 @@ export const Synthetics = () => {
                                         </td>
                                         <td className="py-3 pr-3">
                                             <div className="flex flex-wrap gap-2">
-                                                <button className="icon-btn" title="Run now" onClick={() => runNow(c._id)}><PlayCircle size={14} /></button>
-                                                <button className="icon-btn" title={c.enabled ? 'Pause' : 'Resume'} onClick={async () => { await api.put(`/synthetics/${c._id}`, { enabled: !c.enabled }); fetchChecks(); }}>{c.enabled ? <Pause size={14} /> : <Play size={14} />}</button>
-                                                <button className="icon-btn" title="Edit" onClick={() => { setEditing(c); setModalOpen(true); }}><Edit3 size={14} /></button>
+                                                {canRun && <button className="icon-btn" title="Run now" onClick={() => runNow(c._id)}><PlayCircle size={14} /></button>}
+                                                {canUpdate && <button className="icon-btn" title={c.enabled ? 'Pause' : 'Resume'} onClick={async () => { await api.put(`/synthetics/${c._id}`, { enabled: !c.enabled }); fetchChecks(); }}>{c.enabled ? <Pause size={14} /> : <Play size={14} />}</button>}
+                                                {canUpdate && <button className="icon-btn" title="Edit" onClick={() => { setEditing(c); setModalOpen(true); }}><Edit3 size={14} /></button>}
                                                 <button className="icon-btn" title="View incidents" onClick={() => navigate(`/incidents?target_id=${encodeURIComponent(c._id)}&target_type=synthetic`)}><ExternalLink size={14} /></button>
-                                                <button className="icon-btn text-red-400" title="Delete" onClick={async () => { await api.delete(`/synthetics/${c._id}`); fetchChecks(); }}><Trash2 size={14} /></button>
+                                                {canDelete && <button className="icon-btn text-red-400" title="Delete" onClick={async () => { await api.delete(`/synthetics/${c._id}`); fetchChecks(); }}><Trash2 size={14} /></button>}
                                             </div>
                                         </td>
                                     </tr>
