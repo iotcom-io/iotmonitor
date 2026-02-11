@@ -56,6 +56,7 @@ export interface IDevice extends Document {
     monitored_sip_endpoints?: string[]; // Specific SIP endpoints to monitor
     sip_rtt_threshold_ms?: number; // Custom RTT threshold for SIP
     asterisk_container_name?: string;
+    assigned_user_ids?: string[];
     created_at: Date;
     updated_at: Date;
 }
@@ -114,6 +115,7 @@ const DeviceSchema: Schema = new Schema({
     monitored_sip_endpoints: [{ type: String }],
     sip_rtt_threshold_ms: { type: Number, default: 200 },
     asterisk_container_name: { type: String },
+    assigned_user_ids: [{ type: String }],
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 export default mongoose.model<IDevice>('Device', DeviceSchema);

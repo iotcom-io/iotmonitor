@@ -1,6 +1,9 @@
 import { Router } from 'express';
-import { authenticate } from '../middleware/auth';
+import { authenticate, AuthRequest, authorizePermission } from '../middleware/auth';
 import Incident from '../models/Incident';
+import Device from '../models/Device';
+import SyntheticCheck from '../models/SyntheticCheck';
+import { canAccessDevice, canAccessSynthetic } from '../lib/rbac';
 
 const router = Router();
 router.use(authenticate);
@@ -12,7 +15,7 @@ const parseDate = (value: any): Date | null => {
 };
 
 // list by target
-router.get('/', async (req, res) => {
+router.get('/', authorizePermission('incidents.view'), async (req: AuthRequest, res) => {
     try {
         const {
             target_id,
@@ -54,7 +57,7 @@ router.get('/', async (req, res) => {
         const parsedLimit = Math.max(1, Math.min(500, Number(limit) || 100));
         const parsedSkip = Math.max(0, Number(skip) || 0);
 
-        const [total, incidents] = await Promise.all([
+        const [total, incidentsRaw] = await Promise.all([
             Incident.countDocuments(query),
             Incident.find(query)
                 .sort({ created_at: -1 })
@@ -62,7 +65,49 @@ router.get('/', async (req, res) => {
                 .limit(parsedLimit),
         ]);
 
-        res.setHeader('X-Total-Count', String(total));
+        let incidents = incidentsRaw;
+        if (req.user?.role !== 'admin') {
+            const deviceTargetIds = Array.from(new Set(
+                incidentsRaw
+                    .filter((incident: any) => incident.target_type !== 'synthetic')
+                    .map((incident: any) => String(incident.target_id || ''))
+                    .filter(Boolean)
+            ));
+            const syntheticTargetIds = Array.from(new Set(
+                incidentsRaw
+                    .filter((incident: any) => incident.target_type === 'synthetic')
+                    .map((incident: any) => String(incident.target_id || ''))
+                    .filter(Boolean)
+            ));
+
+            const [devices, synthetics] = await Promise.all([
+                deviceTargetIds.length > 0
+                    ? Device.find({ device_id: { $in: deviceTargetIds } }).select({ device_id: 1, assigned_user_ids: 1 })
+                    : Promise.resolve([] as any[]),
+                syntheticTargetIds.length > 0
+                    ? SyntheticCheck.find({ _id: { $in: syntheticTargetIds } }).select({ _id: 1, assigned_user_ids: 1 })
+                    : Promise.resolve([] as any[]),
+            ]);
+
+            const deviceMap = new Map<string, any>();
+            const syntheticMap = new Map<string, any>();
+            devices.forEach((device: any) => deviceMap.set(String(device.device_id), device));
+            synthetics.forEach((synthetic: any) => syntheticMap.set(String(synthetic._id), synthetic));
+
+            incidents = incidentsRaw.filter((incident: any) => {
+                if (incident.target_type === 'synthetic') {
+                    const monitor = syntheticMap.get(String(incident.target_id));
+                    if (!monitor) return false;
+                    return canAccessSynthetic(req.user, monitor);
+                }
+
+                const device = deviceMap.get(String(incident.target_id));
+                if (!device) return false;
+                return canAccessDevice(req.user, device);
+            }) as any;
+        }
+
+        res.setHeader('X-Total-Count', String(req.user?.role === 'admin' ? total : incidents.length));
         res.json(incidents);
     } catch (error: any) {
         res.status(500).json({ message: error.message || 'Failed to fetch incidents' });
@@ -70,9 +115,24 @@ router.get('/', async (req, res) => {
 });
 
 // resolve
-router.post('/:id/resolve', async (req, res) => {
+router.post('/:id/resolve', authorizePermission('incidents.resolve'), async (req: AuthRequest, res) => {
     const incident = await Incident.findById(req.params.id);
     if (!incident) return res.status(404).json({ message: 'Not found' });
+
+    if (req.user?.role !== 'admin') {
+        if (incident.target_type === 'synthetic') {
+            const monitor = await SyntheticCheck.findById(incident.target_id).select({ _id: 1, assigned_user_ids: 1 });
+            if (!monitor || !canAccessSynthetic(req.user, monitor)) {
+                return res.status(403).json({ message: 'Access denied for this incident' });
+            }
+        } else {
+            const device = await Device.findOne({ device_id: incident.target_id }).select({ device_id: 1, assigned_user_ids: 1 });
+            if (!device || !canAccessDevice(req.user, device)) {
+                return res.status(403).json({ message: 'Access denied for this incident' });
+            }
+        }
+    }
+
     incident.status = 'resolved';
     incident.resolved_at = new Date();
     const note = (req.body && req.body.message) ? req.body.message : 'Resolved manually';

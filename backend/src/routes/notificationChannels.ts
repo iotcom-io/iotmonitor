@@ -1,11 +1,11 @@
 import express from 'express';
 import NotificationChannel from '../models/NotificationChannel';
-import { authenticate } from '../middleware/auth';
+import { authenticate, authorizePermission } from '../middleware/auth';
 
 const router = express.Router();
 
 // Get all notification channels
-router.get('/', authenticate, async (req, res) => {
+router.get('/', authenticate, authorizePermission('settings.view'), async (req, res) => {
     try {
         const channels = await NotificationChannel.find().sort({ created_at: -1 });
         res.json(channels);
@@ -15,7 +15,7 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // Get a specific channel
-router.get('/:id', authenticate, async (req, res) => {
+router.get('/:id', authenticate, authorizePermission('settings.view'), async (req, res) => {
     try {
         const channel = await NotificationChannel.findById(req.params.id);
         if (!channel) {
@@ -28,7 +28,7 @@ router.get('/:id', authenticate, async (req, res) => {
 });
 
 // Create a new notification channel
-router.post('/', authenticate, async (req, res) => {
+router.post('/', authenticate, authorizePermission('settings.update'), async (req, res) => {
     try {
         const channel = new NotificationChannel(req.body);
         await channel.save();
@@ -39,7 +39,7 @@ router.post('/', authenticate, async (req, res) => {
 });
 
 // Update a notification channel
-router.patch('/:id', authenticate, async (req, res) => {
+router.patch('/:id', authenticate, authorizePermission('settings.update'), async (req, res) => {
     try {
         const channel = await NotificationChannel.findByIdAndUpdate(
             req.params.id,
@@ -56,7 +56,7 @@ router.patch('/:id', authenticate, async (req, res) => {
 });
 
 // Enable/disable a channel
-router.patch('/:id/toggle', authenticate, async (req, res) => {
+router.patch('/:id/toggle', authenticate, authorizePermission('settings.update'), async (req, res) => {
     try {
         const channel = await NotificationChannel.findById(req.params.id);
         if (!channel) {
@@ -71,7 +71,7 @@ router.patch('/:id/toggle', authenticate, async (req, res) => {
 });
 
 // Delete a notification channel
-router.delete('/:id', authenticate, async (req, res) => {
+router.delete('/:id', authenticate, authorizePermission('settings.update'), async (req, res) => {
     try {
         const channel = await NotificationChannel.findByIdAndDelete(req.params.id);
         if (!channel) {
@@ -84,7 +84,7 @@ router.delete('/:id', authenticate, async (req, res) => {
 });
 
 // Test a notification channel
-router.post('/:id/test', authenticate, async (req, res) => {
+router.post('/:id/test', authenticate, authorizePermission('settings.update'), async (req, res) => {
     try {
         const channel = await NotificationChannel.findById(req.params.id);
         if (!channel) {

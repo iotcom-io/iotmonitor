@@ -1,8 +1,9 @@
 import { Router } from 'express';
-import { authenticate, AuthRequest } from '../middleware/auth';
+import { authenticate, authorizePermission, AuthRequest } from '../middleware/auth';
 import MonitoringCheck from '../models/MonitoringCheck';
 import Device from '../models/Device';
 import { resolveAlert } from '../services/notificationThrottling';
+import { canAccessDevice, hasPermission } from '../lib/rbac';
 
 const router = Router();
 const MODULES = ['system', 'docker', 'asterisk', 'network'] as const;
@@ -590,14 +591,35 @@ const buildRawHistoryRows = (metrics: any[]) => {
     });
 };
 
+const normalizeAssignedUserIds = (value: unknown): string[] => {
+    if (!Array.isArray(value)) return [];
+    return Array.from(new Set(
+        value
+            .map((entry) => String(entry || '').trim())
+            .filter(Boolean)
+    ));
+};
+
+const canAccessMonitoringCheck = (user: AuthRequest['user'], check: any) => {
+    if (!user) return false;
+    if (user.role === 'admin') return true;
+
+    const assigned = normalizeAssignedUserIds(check?.assigned_user_ids);
+    if (assigned.length === 0) return true;
+    return assigned.includes(user.id);
+};
+
 router.use(authenticate);
 
 // Get metrics (telemetry history) for a device
-router.get('/metrics/:deviceId', async (req: AuthRequest, res) => {
+router.get('/metrics/:deviceId', authorizePermission('monitoring.view'), async (req: AuthRequest, res) => {
     try {
         const deviceId = String(req.params.deviceId);
         const device = await Device.findOne({ device_id: deviceId });
         if (!device) return res.status(404).json({ message: 'Device not found' });
+        if (!canAccessDevice(req.user, device)) {
+            return res.status(403).json({ message: 'Access denied for this device' });
+        }
         const hasRangeQuery = Boolean(req.query.from || req.query.to || req.query.bucket);
         const enabledModules = new Set(getEnabledModules(device));
 
@@ -705,11 +727,14 @@ router.get('/metrics/:deviceId', async (req: AuthRequest, res) => {
 });
 
 // Export telemetry history as CSV
-router.get('/metrics/:deviceId/export', async (req: AuthRequest, res) => {
+router.get('/metrics/:deviceId/export', authorizePermission('monitoring.view'), async (req: AuthRequest, res) => {
     try {
         const deviceId = String(req.params.deviceId);
         const device = await Device.findOne({ device_id: deviceId });
         if (!device) return res.status(404).json({ message: 'Device not found' });
+        if (!canAccessDevice(req.user, device)) {
+            return res.status(403).json({ message: 'Access denied for this device' });
+        }
 
         let options: HistoryQueryOptions;
         try {
@@ -806,21 +831,30 @@ router.get('/metrics/:deviceId/export', async (req: AuthRequest, res) => {
 });
 
 // List checks for a device
-router.get('/checks/:deviceId', async (req: AuthRequest, res) => {
+router.get('/checks/:deviceId', authorizePermission('monitoring.view'), async (req: AuthRequest, res) => {
     try {
+        const device = await Device.findOne({ device_id: req.params.deviceId });
+        if (!device) return res.status(404).json({ message: 'Device not found' });
+        if (!canAccessDevice(req.user, device)) {
+            return res.status(403).json({ message: 'Access denied for this device' });
+        }
+
         const checks = await MonitoringCheck.find({ device_id: req.params.deviceId });
-        res.json(checks);
+        res.json(checks.filter((check) => canAccessMonitoringCheck(req.user, check)));
     } catch (err: any) {
         res.status(500).json({ message: err.message });
     }
 });
 
 // Add a check to a device
-router.post('/', async (req: AuthRequest, res) => {
+router.post('/', authorizePermission('monitoring.create'), async (req: AuthRequest, res) => {
     try {
-        const { device_id, check_type, target, config, interval, thresholds, notification_frequency, notification_recipients, notify } = req.body;
+        const { device_id, check_type, target, config, interval, thresholds, notification_frequency, notification_recipients, notify, assigned_user_ids } = req.body;
         const device = await Device.findOne({ device_id });
         if (!device) return res.status(404).json({ message: 'Device not found' });
+        if (!canAccessDevice(req.user, device)) {
+            return res.status(403).json({ message: 'Access denied for this device' });
+        }
         if (!isCheckAllowedForDevice(device, check_type)) {
             return res.status(400).json({ message: `Check type '${check_type}' is not allowed for this device's selected modules` });
         }
@@ -833,7 +867,10 @@ router.post('/', async (req: AuthRequest, res) => {
             interval,
             thresholds,
             notification_frequency,
-            notify: notify || notification_recipients
+            notify: notify || notification_recipients,
+            assigned_user_ids: hasPermission(req.user, 'devices.assign')
+                ? normalizeAssignedUserIds(assigned_user_ids)
+                : [],
         });
         await check.save();
         res.status(201).json(check);
@@ -843,19 +880,40 @@ router.post('/', async (req: AuthRequest, res) => {
 });
 
 // Update a check
-router.put('/:id', async (req: AuthRequest, res) => {
+router.put('/:id', authorizePermission('monitoring.update'), async (req: AuthRequest, res) => {
     try {
         const previous = await MonitoringCheck.findById(req.params.id);
         if (!previous) return res.status(404).json({ message: 'Check not found' });
+        if (!canAccessMonitoringCheck(req.user, previous)) {
+            return res.status(403).json({ message: 'Access denied for this monitoring rule' });
+        }
 
         const nextCheckType = req.body?.check_type || previous.check_type;
         const device = await Device.findOne({ device_id: previous.device_id });
         if (!device) return res.status(404).json({ message: 'Device not found' });
+        if (!canAccessDevice(req.user, device)) {
+            return res.status(403).json({ message: 'Access denied for this device' });
+        }
         if (!isCheckAllowedForDevice(device, nextCheckType)) {
             return res.status(400).json({ message: `Check type '${nextCheckType}' is not allowed for this device's selected modules` });
         }
 
-        const check = await MonitoringCheck.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        const updateDoc: any = { ...req.body };
+        if (updateDoc.assigned_user_ids !== undefined) {
+            if (!hasPermission(req.user, 'devices.assign')) {
+                delete updateDoc.assigned_user_ids;
+            } else {
+                updateDoc.assigned_user_ids = normalizeAssignedUserIds(updateDoc.assigned_user_ids);
+            }
+        }
+
+        if (req.body.enabled !== undefined && req.body.enabled !== previous.enabled) {
+            if (!hasPermission(req.user, 'monitoring.pause_resume')) {
+                return res.status(403).json({ message: 'Insufficient permissions to pause/resume monitoring rules' });
+            }
+        }
+
+        const check = await MonitoringCheck.findByIdAndUpdate(req.params.id, updateDoc, { new: true });
         if (!check) return res.status(404).json({ message: 'Check not found' });
 
         if (previous.enabled !== check.enabled) {
@@ -891,8 +949,20 @@ router.put('/:id', async (req: AuthRequest, res) => {
 });
 
 // Delete a check
-router.delete('/:id', async (req: AuthRequest, res) => {
+router.delete('/:id', authorizePermission('monitoring.delete'), async (req: AuthRequest, res) => {
     try {
+        const existing = await MonitoringCheck.findById(req.params.id);
+        if (!existing) return res.status(404).json({ message: 'Check not found' });
+        if (!canAccessMonitoringCheck(req.user, existing)) {
+            return res.status(403).json({ message: 'Access denied for this monitoring rule' });
+        }
+
+        const device = await Device.findOne({ device_id: existing.device_id });
+        if (!device) return res.status(404).json({ message: 'Device not found' });
+        if (!canAccessDevice(req.user, device)) {
+            return res.status(403).json({ message: 'Access denied for this device' });
+        }
+
         const check = await MonitoringCheck.findByIdAndDelete(req.params.id);
         if (!check) return res.status(404).json({ message: 'Check not found' });
         res.json({ message: 'Check deleted' });

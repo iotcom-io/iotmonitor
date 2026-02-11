@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate, AuthRequest } from '../middleware/auth';
+import { authenticate, authorizePermission, AuthRequest } from '../middleware/auth';
 import SystemSettings from '../models/SystemSettings';
 
 const router = Router();
@@ -7,7 +7,7 @@ const router = Router();
 router.use(authenticate);
 
 // Get current settings
-router.get('/', async (req: AuthRequest, res) => {
+router.get('/', authorizePermission('settings.view'), async (req: AuthRequest, res) => {
     try {
         let settings = await SystemSettings.findOne();
         if (!settings) {
@@ -29,7 +29,7 @@ router.get('/', async (req: AuthRequest, res) => {
 });
 
 // Update settings
-router.post('/', async (req: AuthRequest, res) => {
+router.post('/', authorizePermission('settings.update'), async (req: AuthRequest, res) => {
     try {
         let settings = await SystemSettings.findOne();
         if (!settings) {

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate, authorize, AuthRequest } from '../middleware/auth';
+import { authenticate, authorizePermission, AuthRequest } from '../middleware/auth';
 import Device from '../models/Device';
 import crypto from 'crypto';
 import { spawn } from 'child_process';
@@ -7,6 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import { z } from 'zod';
 import { resolveAllActiveAlertsForDevice } from '../services/notificationThrottling';
+import { canAccessDevice, hasPermission } from '../lib/rbac';
 
 const router = Router();
 
@@ -112,6 +113,36 @@ const sanitizeProbeConfig = (probeConfig?: any) => {
     const pingHost = sanitizePingHost(probeConfig?.ping_host);
     if (!pingHost) return undefined;
     return { ping_host: pingHost };
+};
+
+const normalizeAssignedUserIds = (value: unknown): string[] => {
+    if (!Array.isArray(value)) return [];
+    return Array.from(new Set(
+        value
+            .map((entry) => String(entry || '').trim())
+            .filter(Boolean)
+    ));
+};
+
+const getDeviceAccessQuery = (user: AuthRequest['user']) => {
+    if (!user || user.role === 'admin') return {};
+
+    if (user.assigned_device_ids.length > 0) {
+        return {
+            $or: [
+                { device_id: { $in: user.assigned_device_ids } },
+                { assigned_user_ids: user.id },
+            ],
+        };
+    }
+
+    return {
+        $or: [
+            { assigned_user_ids: user.id },
+            { assigned_user_ids: { $exists: false } },
+            { assigned_user_ids: { $size: 0 } },
+        ],
+    };
 };
 
 const getTypeDefaultModules = (deviceType?: string) => {
@@ -220,9 +251,9 @@ router.get('/download/:id', async (req, res) => {
 router.use(authenticate);
 
 // Get all devices
-router.get('/', authorize(['admin', 'operator', 'viewer']), async (_req: AuthRequest, res) => {
+router.get('/', authorizePermission('devices.view'), async (req: AuthRequest, res) => {
     try {
-        const devices = await Device.find();
+        const devices = await Device.find(getDeviceAccessQuery(req.user));
         res.json(devices);
     } catch (err: any) {
         res.status(500).json({ message: err.message });
@@ -230,9 +261,9 @@ router.get('/', authorize(['admin', 'operator', 'viewer']), async (_req: AuthReq
 });
 
 // Register a new device
-router.post('/register', authorize(['admin', 'operator']), async (req: AuthRequest, res) => {
+router.post('/register', authorizePermission('devices.create'), async (req: AuthRequest, res) => {
     try {
-        const { name, owner, type, hostname, enabled_modules, probe_config, asterisk_container_name } = req.body;
+        const { name, owner, type, hostname, enabled_modules, probe_config, asterisk_container_name, assigned_user_ids } = req.body;
         const normalizedType = normalizeDeviceType(type);
         const effectiveModules = resolveEffectiveModules({
             deviceModules: sanitizeModules(enabled_modules),
@@ -262,6 +293,9 @@ router.post('/register', authorize(['admin', 'operator']), async (req: AuthReque
                 ...(normalizedAsteriskContainer ? { asterisk_container: normalizedAsteriskContainer } : {}),
             },
             asterisk_container_name: normalizedAsteriskContainer,
+            assigned_user_ids: hasPermission(req.user, 'devices.assign')
+                ? normalizeAssignedUserIds(assigned_user_ids)
+                : [],
             status: 'not_monitored',
         });
 
@@ -273,10 +307,13 @@ router.post('/register', authorize(['admin', 'operator']), async (req: AuthReque
 });
 
 // Get device by ID
-router.get('/:id', authorize(['admin', 'operator', 'viewer']), async (req: AuthRequest, res) => {
+router.get('/:id', authorizePermission('devices.view'), async (req: AuthRequest, res) => {
     try {
         const device = await Device.findOne({ device_id: req.params.id });
         if (!device) return res.status(404).json({ message: 'Device not found' });
+        if (!canAccessDevice(req.user, device)) {
+            return res.status(403).json({ message: 'Access denied for this device' });
+        }
         res.json(device);
     } catch (err: any) {
         res.status(500).json({ message: err.message });
@@ -284,13 +321,24 @@ router.get('/:id', authorize(['admin', 'operator', 'viewer']), async (req: AuthR
 });
 
 // Update device
-router.patch('/:id', authorize(['admin', 'operator']), async (req: AuthRequest, res) => {
+router.patch('/:id', authorizePermission('devices.update'), async (req: AuthRequest, res) => {
     try {
         const previous = await Device.findOne({ device_id: req.params.id });
         if (!previous) return res.status(404).json({ message: 'Device not found' });
+        if (!canAccessDevice(req.user, previous)) {
+            return res.status(403).json({ message: 'Access denied for this device' });
+        }
 
         const updateBody: any = { ...req.body };
         const unsetFields: Record<string, ''> = {};
+
+        if (updateBody.assigned_user_ids !== undefined) {
+            if (!hasPermission(req.user, 'devices.assign')) {
+                delete updateBody.assigned_user_ids;
+            } else {
+                updateBody.assigned_user_ids = normalizeAssignedUserIds(updateBody.assigned_user_ids);
+            }
+        }
 
         if (Array.isArray(updateBody.enabled_modules)) {
             const normalizedModules = sanitizeModules(updateBody.enabled_modules);
@@ -447,8 +495,14 @@ router.patch('/:id', authorize(['admin', 'operator']), async (req: AuthRequest, 
 });
 
 // Delete device
-router.delete('/:id', authorize(['admin']), async (req: AuthRequest, res) => {
+router.delete('/:id', authorizePermission('devices.delete'), async (req: AuthRequest, res) => {
     try {
+        const existing = await Device.findOne({ device_id: req.params.id });
+        if (!existing) return res.status(404).json({ message: 'Device not found' });
+        if (!canAccessDevice(req.user, existing)) {
+            return res.status(403).json({ message: 'Access denied for this device' });
+        }
+
         const result = await Device.deleteOne({ device_id: req.params.id });
         if (result.deletedCount === 0) return res.status(404).json({ message: 'Device not found' });
         res.json({ message: 'Device deleted successfully' });
@@ -458,8 +512,14 @@ router.delete('/:id', authorize(['admin']), async (req: AuthRequest, res) => {
 });
 
 // Regenerate agent token
-router.post('/:id/regenerate-token', authorize(['admin']), async (req: AuthRequest, res) => {
+router.post('/:id/regenerate-token', authorizePermission('devices.update'), async (req: AuthRequest, res) => {
     try {
+        const existing = await Device.findOne({ device_id: req.params.id });
+        if (!existing) return res.status(404).json({ message: 'Device not found' });
+        if (!canAccessDevice(req.user, existing)) {
+            return res.status(403).json({ message: 'Access denied for this device' });
+        }
+
         const new_token = crypto.randomBytes(32).toString('hex');
         const device = await Device.findOneAndUpdate(
             { device_id: req.params.id },
@@ -474,7 +534,7 @@ router.post('/:id/regenerate-token', authorize(['admin']), async (req: AuthReque
 });
 
 // Build agent for an existing device
-router.post('/:id/generate-agent', authorize(['admin', 'operator']), async (req: AuthRequest, res) => {
+router.post('/:id/generate-agent', authorizePermission('devices.build_agent'), async (req: AuthRequest, res) => {
     try {
         const { os, arch, name, modules, asterisk_container_name, ping_host } = buildRequestSchema.parse(req.body) as {
             os: BuildOS;
@@ -487,6 +547,9 @@ router.post('/:id/generate-agent', authorize(['admin', 'operator']), async (req:
 
         const device = await Device.findOne({ device_id: req.params.id });
         if (!device) return res.status(404).json({ message: 'Device not found' });
+        if (!canAccessDevice(req.user, device)) {
+            return res.status(403).json({ message: 'Access denied for this device' });
+        }
 
         if (name) {
             device.name = name;
@@ -601,7 +664,7 @@ router.post('/:id/generate-agent', authorize(['admin', 'operator']), async (req:
 });
 
 // Generate and build agent binary (creates a new device)
-router.post('/generate-agent', authorize(['admin', 'operator']), async (req: AuthRequest, res) => {
+router.post('/generate-agent', authorizePermission('devices.build_agent'), async (req: AuthRequest, res) => {
     try {
         const { os, arch, modules, name, asterisk_container_name, device_type, ping_host } = createAndBuildRequestSchema.parse(req.body) as {
             os: BuildOS;
@@ -713,10 +776,13 @@ router.post('/generate-agent', authorize(['admin', 'operator']), async (req: Aut
 });
 
 // Trigger test notification
-router.post('/:id/test-notification', authorize(['admin', 'operator']), async (req: AuthRequest, res) => {
+router.post('/:id/test-notification', authorizePermission('devices.update'), async (req: AuthRequest, res) => {
     try {
         const device = await Device.findOne({ device_id: req.params.id });
         if (!device) return res.status(404).json({ message: 'Device not found' });
+        if (!canAccessDevice(req.user, device)) {
+            return res.status(403).json({ message: 'Access denied for this device' });
+        }
 
         const { NotificationService } = await import('../services/NotificationService');
         const SystemSettings = (await import('../models/SystemSettings')).default;

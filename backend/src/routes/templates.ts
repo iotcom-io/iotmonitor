@@ -1,12 +1,12 @@
 import express from 'express';
 import MonitoringTemplate from '../models/MonitoringTemplate';
 import Device from '../models/Device';
-import { authenticate } from '../middleware/auth';
+import { authenticate, authorizePermission } from '../middleware/auth';
 
 const router = express.Router();
 
 // Get all templates
-router.get('/', authenticate, async (req, res) => {
+router.get('/', authenticate, authorizePermission('monitoring.view'), async (req, res) => {
     try {
         const templates = await MonitoringTemplate.find().sort({ is_system: -1, name: 1 });
         res.json(templates);
@@ -16,7 +16,7 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // Get a specific template
-router.get('/:id', authenticate, async (req, res) => {
+router.get('/:id', authenticate, authorizePermission('monitoring.view'), async (req, res) => {
     try {
         const template = await MonitoringTemplate.findById(req.params.id);
         if (!template) {
@@ -29,7 +29,7 @@ router.get('/:id', authenticate, async (req, res) => {
 });
 
 // Create a new template
-router.post('/', authenticate, async (req, res) => {
+router.post('/', authenticate, authorizePermission('monitoring.create'), async (req, res) => {
     try {
         const template = new MonitoringTemplate({
             ...req.body,
@@ -43,7 +43,7 @@ router.post('/', authenticate, async (req, res) => {
 });
 
 // Update a template
-router.patch('/:id', authenticate, async (req, res) => {
+router.patch('/:id', authenticate, authorizePermission('monitoring.update'), async (req, res) => {
     try {
         const template = await MonitoringTemplate.findById(req.params.id);
         if (!template) {
@@ -68,7 +68,7 @@ router.patch('/:id', authenticate, async (req, res) => {
 });
 
 // Delete a template
-router.delete('/:id', authenticate, async (req, res) => {
+router.delete('/:id', authenticate, authorizePermission('monitoring.delete'), async (req, res) => {
     try {
         const template = await MonitoringTemplate.findById(req.params.id);
         if (!template) {
@@ -88,7 +88,7 @@ router.delete('/:id', authenticate, async (req, res) => {
 });
 
 // Apply template to a device
-router.post('/:templateId/apply/:deviceId', authenticate, async (req, res) => {
+router.post('/:templateId/apply/:deviceId', authenticate, authorizePermission('monitoring.create'), async (req, res) => {
     try {
         const template = await MonitoringTemplate.findById(req.params.templateId);
         if (!template) {

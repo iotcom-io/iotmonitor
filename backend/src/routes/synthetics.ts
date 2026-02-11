@@ -1,8 +1,9 @@
 import { Router } from 'express';
-import { authenticate, AuthRequest } from '../middleware/auth';
+import { authenticate, authorizePermission, AuthRequest } from '../middleware/auth';
 import SyntheticCheck from '../models/SyntheticCheck';
 import Incident from '../models/Incident';
 import { runSyntheticCheckById } from '../services/SyntheticRunner';
+import { canAccessSynthetic, hasPermission } from '../lib/rbac';
 
 const router = Router();
 router.use(authenticate);
@@ -70,6 +71,36 @@ const normalizePayload = (payload: any) => {
     delete next.enable_ssl_monitor;
 
     return next;
+};
+
+const normalizeAssignedUserIds = (value: unknown): string[] => {
+    if (!Array.isArray(value)) return [];
+    return Array.from(new Set(
+        value
+            .map((entry) => String(entry || '').trim())
+            .filter(Boolean)
+    ));
+};
+
+const getSyntheticAccessQuery = (user: AuthRequest['user']) => {
+    if (!user || user.role === 'admin') return {};
+
+    if (user.assigned_synthetic_ids.length > 0) {
+        return {
+            $or: [
+                { _id: { $in: user.assigned_synthetic_ids } },
+                { assigned_user_ids: user.id },
+            ],
+        };
+    }
+
+    return {
+        $or: [
+            { assigned_user_ids: user.id },
+            { assigned_user_ids: { $exists: false } },
+            { assigned_user_ids: { $size: 0 } },
+        ],
+    };
 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -167,6 +198,14 @@ const consolidateLegacySslCompanions = async () => {
                 httpCheck.ssl_last_state = check.ssl_last_state;
                 changed = true;
             }
+            if (Array.isArray(check.assigned_user_ids) && check.assigned_user_ids.length > 0) {
+                const mergedAssigned = Array.from(new Set([
+                    ...(Array.isArray(httpCheck.assigned_user_ids) ? httpCheck.assigned_user_ids : []),
+                    ...check.assigned_user_ids,
+                ]));
+                httpCheck.assigned_user_ids = mergedAssigned;
+                changed = true;
+            }
             if (changed) {
                 await httpCheck.save();
             }
@@ -192,14 +231,14 @@ const consolidateLegacySslCompanions = async () => {
 };
 
 // list
-router.get('/', async (_req, res) => {
+router.get('/', authorizePermission('synthetics.view'), async (req: AuthRequest, res) => {
     await consolidateLegacySslCompanions();
-    const checks = await SyntheticCheck.find().sort({ updated_at: -1 });
+    const checks = await SyntheticCheck.find(getSyntheticAccessQuery(req.user)).sort({ updated_at: -1 });
     res.json(checks);
 });
 
 // aggregate stats for list/dashboard
-router.get('/stats', async (req, res) => {
+router.get('/stats', authorizePermission('synthetics.view'), async (req: AuthRequest, res) => {
     try {
         await consolidateLegacySslCompanions();
         const windowHours = clamp(Number(req.query.window_hours || 24), 1, 24 * 30);
@@ -207,7 +246,7 @@ router.get('/stats', async (req, res) => {
         const from = new Date(now.getTime() - windowHours * 60 * 60 * 1000);
         const windowMs = now.getTime() - from.getTime();
 
-        const checks = await SyntheticCheck.find().sort({ updated_at: -1 });
+        const checks = await SyntheticCheck.find(getSyntheticAccessQuery(req.user)).sort({ updated_at: -1 });
         if (checks.length === 0) {
             return res.json({
                 window_hours: windowHours,
@@ -328,9 +367,16 @@ router.get('/stats', async (req, res) => {
 });
 
 // create
-router.post('/', async (req: AuthRequest, res) => {
+router.post('/', authorizePermission('synthetics.create'), async (req: AuthRequest, res) => {
     try {
         const payload = normalizePayload(req.body);
+        if (payload.assigned_user_ids !== undefined) {
+            if (!hasPermission(req.user, 'devices.assign')) {
+                delete payload.assigned_user_ids;
+            } else {
+                payload.assigned_user_ids = normalizeAssignedUserIds(payload.assigned_user_ids);
+            }
+        }
         const check = new SyntheticCheck(payload);
         await check.save();
         res.status(201).json(check);
@@ -340,9 +386,24 @@ router.post('/', async (req: AuthRequest, res) => {
 });
 
 // update
-router.put('/:id', async (req, res) => {
+router.put('/:id', authorizePermission('synthetics.update'), async (req: AuthRequest, res) => {
     try {
-        const check = await SyntheticCheck.findByIdAndUpdate(req.params.id, normalizePayload(req.body), { new: true });
+        const existing = await SyntheticCheck.findById(req.params.id);
+        if (!existing) return res.status(404).json({ message: 'Not found' });
+        if (!canAccessSynthetic(req.user, existing)) {
+            return res.status(403).json({ message: 'Access denied for this web monitor' });
+        }
+
+        const updateDoc = normalizePayload(req.body);
+        if (updateDoc.assigned_user_ids !== undefined) {
+            if (!hasPermission(req.user, 'devices.assign')) {
+                delete updateDoc.assigned_user_ids;
+            } else {
+                updateDoc.assigned_user_ids = normalizeAssignedUserIds(updateDoc.assigned_user_ids);
+            }
+        }
+
+        const check = await SyntheticCheck.findByIdAndUpdate(req.params.id, updateDoc, { new: true });
         if (!check) return res.status(404).json({ message: 'Not found' });
         res.json(check);
     } catch (err: any) {
@@ -351,8 +412,14 @@ router.put('/:id', async (req, res) => {
 });
 
 // delete
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', authorizePermission('synthetics.delete'), async (req: AuthRequest, res) => {
     try {
+        const existing = await SyntheticCheck.findById(req.params.id);
+        if (!existing) return res.status(404).json({ message: 'Not found' });
+        if (!canAccessSynthetic(req.user, existing)) {
+            return res.status(403).json({ message: 'Access denied for this web monitor' });
+        }
+
         await SyntheticCheck.findByIdAndDelete(req.params.id);
         res.json({ ok: true });
     } catch (err: any) {
@@ -361,8 +428,14 @@ router.delete('/:id', async (req, res) => {
 });
 
 // run now
-router.post('/:id/run', async (req, res) => {
+router.post('/:id/run', authorizePermission('synthetics.run'), async (req: AuthRequest, res) => {
     try {
+        const existing = await SyntheticCheck.findById(req.params.id);
+        if (!existing) return res.status(404).json({ message: 'Not found' });
+        if (!canAccessSynthetic(req.user, existing)) {
+            return res.status(403).json({ message: 'Access denied for this web monitor' });
+        }
+
         const updated = await runSyntheticCheckById(req.params.id);
         if (!updated) return res.status(404).json({ message: 'Not found' });
         res.json(updated);

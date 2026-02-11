@@ -20,6 +20,7 @@ export interface IMonitoringCheck extends Document {
     last_state?: 'ok' | 'warning' | 'critical' | 'unknown';
     last_value?: number;
     last_message?: string;
+    assigned_user_ids?: string[];
     created_at: Date;
     updated_at: Date;
 }
@@ -47,7 +48,8 @@ const MonitoringCheckSchema: Schema = new Schema({
     last_evaluated_at: { type: Date },
     last_state: { type: String, enum: ['ok', 'warning', 'critical', 'unknown'], default: 'unknown' },
     last_value: { type: Number },
-    last_message: { type: String }
+    last_message: { type: String },
+    assigned_user_ids: [{ type: String }],
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 export default mongoose.model<IMonitoringCheck>('MonitoringCheck', MonitoringCheckSchema);

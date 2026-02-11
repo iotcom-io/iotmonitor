@@ -1,7 +1,8 @@
 import { Router } from 'express';
-import { authenticate } from '../middleware/auth';
+import { authenticate, AuthRequest, authorizePermission } from '../middleware/auth';
 import AlertTracking from '../models/AlertTracking';
 import Device from '../models/Device';
+import { canAccessDevice } from '../lib/rbac';
 
 const router = Router();
 router.use(authenticate);
@@ -18,7 +19,7 @@ const toDateMs = (value: unknown) => {
 };
 
 // Active (unresolved) alert tracking entries
-router.get('/active', async (req, res) => {
+router.get('/active', authorizePermission('alerts.view'), async (req: AuthRequest, res) => {
     try {
         const {
             device_id,
@@ -46,15 +47,24 @@ router.get('/active', async (req, res) => {
 
         const deviceIds = Array.from(new Set(alerts.map((alert: any) => String(alert.device_id || '')))).filter(Boolean);
         const devices = await Device.find({ device_id: { $in: deviceIds } })
-            .select({ device_id: 1, name: 1 })
+            .select({ device_id: 1, name: 1, assigned_user_ids: 1 })
             .lean();
 
         const deviceMap = new Map<string, string>();
+        const deviceMeta = new Map<string, any>();
         devices.forEach((device: any) => {
-            if (device?.device_id) deviceMap.set(String(device.device_id), String(device.name || device.device_id));
+            if (!device?.device_id) return;
+            const key = String(device.device_id);
+            deviceMap.set(key, String(device.name || device.device_id));
+            deviceMeta.set(key, device);
         });
 
         const rows = alerts
+            .filter((alert: any) => {
+                const device = deviceMeta.get(String(alert.device_id));
+                if (!device) return req.user?.role === 'admin';
+                return canAccessDevice(req.user, device);
+            })
             .map((alert: any) => {
                 const repeatMinutes = alert?.state === 'hourly_only'
                     ? 60

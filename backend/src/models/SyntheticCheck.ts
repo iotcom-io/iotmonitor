@@ -24,6 +24,7 @@ export interface ISyntheticCheck extends Document {
     channels?: string[];
     slack_webhook_name?: string;
     custom_webhook_name?: string;
+    assigned_user_ids?: string[];
     enabled: boolean;
     last_run?: Date;
     last_status?: 'ok' | 'fail';
@@ -59,6 +60,7 @@ const SyntheticCheckSchema: Schema = new Schema({
     channels: [{ type: String }],
     slack_webhook_name: { type: String },
     custom_webhook_name: { type: String },
+    assigned_user_ids: [{ type: String }],
     enabled: { type: Boolean, default: true },
     last_run: { type: Date },
     last_status: { type: String, enum: ['ok', 'fail'] },
