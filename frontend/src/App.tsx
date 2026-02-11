@@ -31,6 +31,10 @@ function App() {
     const token = useAuthStore(state => state.token);
     const user = useAuthStore(state => state.user);
     const setAuth = useAuthStore(state => state.setAuth);
+    const [sidebarCollapsed, setSidebarCollapsed] = React.useState<boolean>(() => {
+        if (typeof window === 'undefined') return false;
+        return window.localStorage.getItem('iotmonitor.sidebar.collapsed') === '1';
+    });
     const version = import.meta.env.VITE_APP_VERSION || 'dev';
     const build = import.meta.env.VITE_APP_BUILD || 'local';
 
@@ -48,11 +52,19 @@ function App() {
             .catch(() => { });
     }, [token, user, setAuth]);
 
+    React.useEffect(() => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.setItem('iotmonitor.sidebar.collapsed', sidebarCollapsed ? '1' : '0');
+    }, [sidebarCollapsed]);
+
     return (
         <Router>
             <div className="flex bg-dark-bg min-h-screen text-slate-200">
-                {token && <Sidebar />}
-                <main className={token ? "flex-1 ml-64 p-8 transition-all duration-300 flex flex-col min-h-screen" : "flex-1 flex flex-col min-h-screen"}>
+                {token && <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed((prev) => !prev)} />}
+                <main className={token
+                    ? `flex-1 ${sidebarCollapsed ? 'ml-20' : 'ml-64'} p-8 transition-all duration-300 flex flex-col min-h-screen`
+                    : "flex-1 flex flex-col min-h-screen"}
+                >
                     <div className="flex-1">
                         <Routes>
                             <Route path="/login" element={!token ? <Login /> : <Navigate to="/" />} />
@@ -79,8 +91,8 @@ function App() {
                         </Routes>
                     </div>
                     <footer className="mt-8 text-xs text-slate-500 flex items-center justify-between border-t border-white/5 pt-4">
-                        <span>© 2026 iotcom.io</span>
-                        <span>Version {version} · Build {build}</span>
+                        <span>(c) 2026 iotcom.io</span>
+                        <span>Version {version} | Build {build}</span>
                     </footer>
                 </main>
             </div>
@@ -89,3 +101,4 @@ function App() {
 }
 
 export default App;
+
