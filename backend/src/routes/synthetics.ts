@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import SyntheticCheck from '../models/SyntheticCheck';
+import Incident from '../models/Incident';
+import { runSyntheticCheckById } from '../services/SyntheticRunner';
 
 const router = Router();
 router.use(authenticate);
@@ -62,18 +64,185 @@ const normalizePayload = (payload: any) => {
     return next;
 };
 
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+const formatDuration = (durationMs: number) => {
+    const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
+    if (totalSeconds < 60) return `${totalSeconds}s`;
+    if (totalSeconds < 3600) {
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        return `${minutes}m ${seconds}s`;
+    }
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    return `${hours}h ${minutes}m`;
+};
+
 // list
 router.get('/', async (_req, res) => {
     const checks = await SyntheticCheck.find().sort({ updated_at: -1 });
     res.json(checks);
 });
 
+// aggregate stats for list/dashboard
+router.get('/stats', async (req, res) => {
+    try {
+        const windowHours = clamp(Number(req.query.window_hours || 24), 1, 24 * 30);
+        const now = new Date();
+        const from = new Date(now.getTime() - windowHours * 60 * 60 * 1000);
+        const windowMs = now.getTime() - from.getTime();
+
+        const checks = await SyntheticCheck.find().sort({ updated_at: -1 });
+        if (checks.length === 0) {
+            return res.json({
+                window_hours: windowHours,
+                generated_at: now.toISOString(),
+                summary: {
+                    total_monitors: 0,
+                    healthy: 0,
+                    degraded: 0,
+                    down: 0,
+                    avg_uptime_pct: 100,
+                    total_outage_minutes: 0,
+                },
+                monitors: [],
+            });
+        }
+
+        const checkIds = checks.map((check) => String(check._id));
+        const incidents = await Incident.find({
+            target_type: 'synthetic',
+            target_id: { $in: checkIds },
+            started_at: { $lt: now },
+            $or: [
+                { resolved_at: { $exists: false } },
+                { resolved_at: null },
+                { resolved_at: { $gt: from } },
+            ],
+        }).sort({ started_at: -1 });
+
+        const byTarget = incidents.reduce((acc: Record<string, any[]>, incident: any) => {
+            const target = String(incident.target_id);
+            if (!acc[target]) acc[target] = [];
+            acc[target].push(incident);
+            return acc;
+        }, {});
+
+        let totalUptimePct = 0;
+        let totalOutageMs = 0;
+        let healthy = 0;
+        let degraded = 0;
+        let down = 0;
+
+        const monitors = checks.map((check: any) => {
+            const list = byTarget[String(check._id)] || [];
+            let outageMs = 0;
+            const outages: Array<{ started_at: string; ended_at: string | null; duration_ms: number; duration_text: string; ongoing: boolean }> = [];
+
+            list.forEach((incident: any) => {
+                const rawStart = new Date(incident.started_at);
+                const rawEnd = incident.resolved_at ? new Date(incident.resolved_at) : now;
+                const start = rawStart.getTime() < from.getTime() ? from : rawStart;
+                const end = rawEnd.getTime() > now.getTime() ? now : rawEnd;
+                if (end.getTime() <= start.getTime()) return;
+
+                const duration = end.getTime() - start.getTime();
+                outageMs += duration;
+                outages.push({
+                    started_at: start.toISOString(),
+                    ended_at: incident.resolved_at ? end.toISOString() : null,
+                    duration_ms: duration,
+                    duration_text: formatDuration(duration),
+                    ongoing: !incident.resolved_at,
+                });
+            });
+
+            const boundedOutageMs = clamp(outageMs, 0, windowMs);
+            const uptimePct = windowMs > 0 ? Number((((windowMs - boundedOutageMs) / windowMs) * 100).toFixed(2)) : 100;
+            const latestOutage = outages[0];
+
+            const state = check.last_status === 'fail'
+                ? 'down'
+                : uptimePct < 99
+                    ? 'degraded'
+                    : 'healthy';
+
+            if (state === 'down') down += 1;
+            else if (state === 'degraded') degraded += 1;
+            else healthy += 1;
+
+            totalUptimePct += uptimePct;
+            totalOutageMs += boundedOutageMs;
+
+            return {
+                check_id: String(check._id),
+                name: check.name,
+                type: check.type,
+                target_kind: check.target_kind || 'website',
+                url: check.url,
+                enabled: check.enabled,
+                state,
+                uptime_pct: uptimePct,
+                outage_pct: Number((100 - uptimePct).toFixed(2)),
+                outage_duration_ms: boundedOutageMs,
+                outage_duration_text: formatDuration(boundedOutageMs),
+                outage_count: outages.length,
+                latest_outage: latestOutage || null,
+            };
+        });
+
+        const avgUptime = monitors.length > 0 ? Number((totalUptimePct / monitors.length).toFixed(2)) : 100;
+
+        return res.json({
+            window_hours: windowHours,
+            generated_at: now.toISOString(),
+            summary: {
+                total_monitors: monitors.length,
+                healthy,
+                degraded,
+                down,
+                avg_uptime_pct: avgUptime,
+                total_outage_minutes: Math.floor(totalOutageMs / 60000),
+            },
+            monitors,
+        });
+    } catch (error: any) {
+        res.status(500).json({ message: error.message || 'Failed to calculate monitor stats' });
+    }
+});
+
 // create
 router.post('/', async (req: AuthRequest, res) => {
     try {
-        const check = new SyntheticCheck(normalizePayload(req.body));
+        const payload = normalizePayload(req.body);
+        const check = new SyntheticCheck(payload);
         await check.save();
-        res.status(201).json(check);
+
+        const enableSslMonitor = Boolean(req.body?.enable_ssl_monitor) && String(payload.type || '').toLowerCase() === 'http';
+        let sslCompanion: any = null;
+
+        if (enableSslMonitor) {
+            sslCompanion = new SyntheticCheck({
+                name: `${payload.name} SSL`,
+                target_kind: payload.target_kind || 'website',
+                type: 'ssl',
+                url: payload.url,
+                interval: payload.interval || 300,
+                timeout: payload.timeout || 8000,
+                ssl_expiry_days: Number(req.body?.ssl_expiry_days || payload.ssl_expiry_days || 7),
+                channels: payload.channels || ['slack'],
+                slack_webhook_name: payload.slack_webhook_name,
+                custom_webhook_name: payload.custom_webhook_name,
+                enabled: payload.enabled !== false,
+            });
+            await sslCompanion.save();
+        }
+
+        const responsePayload = check.toObject();
+        if (sslCompanion) {
+            (responsePayload as any).ssl_companion = sslCompanion;
+        }
+        res.status(201).json(responsePayload);
     } catch (err: any) {
         res.status(400).json({ message: err.message });
     }
@@ -97,6 +266,17 @@ router.delete('/:id', async (req, res) => {
         res.json({ ok: true });
     } catch (err: any) {
         res.status(500).json({ message: err.message });
+    }
+});
+
+// run now
+router.post('/:id/run', async (req, res) => {
+    try {
+        const updated = await runSyntheticCheckById(req.params.id);
+        if (!updated) return res.status(404).json({ message: 'Not found' });
+        res.json(updated);
+    } catch (error: any) {
+        res.status(500).json({ message: error.message || 'Failed to execute check' });
     }
 });
 

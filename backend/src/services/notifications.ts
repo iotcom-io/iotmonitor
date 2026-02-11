@@ -1,4 +1,4 @@
-import axios from 'axios';
+﻿import axios from 'axios';
 import { IAlertTracking } from '../models/AlertTracking';
 import NotificationChannel from '../models/NotificationChannel';
 
@@ -419,3 +419,4 @@ function buildRecoveryMessage(alert: IAlertTracking, deviceName: string): any {
         severity: 'info'
     };
 }
+

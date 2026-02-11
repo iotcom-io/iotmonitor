@@ -1,10 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import api from '../lib/axios';
-import { Globe, Plus, RefreshCw, X, Pause, Play, Trash2, Edit3 } from 'lucide-react';
+import { Globe, Plus, RefreshCw, X, Pause, Play, Trash2, Edit3, PlayCircle, ExternalLink } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { clsx } from 'clsx';
 
 const typeLabels: Record<string, string> = {
-    http: 'Website/API Uptime',
-    ssl: 'SSL Certificate',
+    http: 'Website/API',
+    ssl: 'SSL',
 };
 
 const kindLabels: Record<string, string> = {
@@ -18,6 +20,12 @@ const normalizeStatusCodes = (raw: string) => {
         .map((part) => Number(part.trim()))
         .filter((num) => Number.isFinite(num) && num > 0);
     return Array.from(new Set(values));
+};
+
+const progressClass = (pct: number) => {
+    if (pct >= 99) return 'bg-emerald-500';
+    if (pct >= 95) return 'bg-amber-500';
+    return 'bg-red-500';
 };
 
 const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
@@ -34,6 +42,7 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
         response_match_value: '',
         max_response_time_ms: '',
         ssl_expiry_days: 7,
+        enable_ssl_monitor: false,
         channels: ['slack'],
         slack_webhook_name: '',
         custom_webhook_name: '',
@@ -53,6 +62,7 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
             target_kind: source.target_kind || 'website',
             max_response_time_ms: source.max_response_time_ms ?? '',
             ssl_expiry_days: source.ssl_expiry_days ?? 7,
+            enable_ssl_monitor: false,
         });
     }, [initial, isOpen]);
 
@@ -92,6 +102,7 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
             }
 
             if (form._id) {
+                delete payload.enable_ssl_monitor;
                 await api.put(`/synthetics/${form._id}`, payload);
             } else {
                 await api.post('/synthetics', payload);
@@ -135,10 +146,10 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
                             </select>
                         </div>
                         <div className="space-y-2">
-                            <label className="text-sm text-slate-400">Check Type</label>
+                            <label className="text-sm text-slate-400">Primary Check Type</label>
                             <select className="input-field" value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}>
                                 <option value="http">Website/API Uptime</option>
-                                <option value="ssl">SSL Expiry</option>
+                                <option value="ssl">SSL Expiry Only</option>
                             </select>
                         </div>
                         {form.type === 'http' && (
@@ -154,6 +165,17 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
                             </div>
                         )}
                     </div>
+
+                    {form.type === 'http' && !form._id && (
+                        <label className="flex items-center gap-3 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100">
+                            <input
+                                type="checkbox"
+                                checked={Boolean(form.enable_ssl_monitor)}
+                                onChange={(e) => setForm({ ...form, enable_ssl_monitor: e.target.checked })}
+                            />
+                            Enable SSL monitoring for this same URL (creates companion SSL monitor)
+                        </label>
+                    )}
 
                     {form.type === 'http' ? (
                         <>
@@ -203,7 +225,9 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
                                 </div>
                             </div>
                         </>
-                    ) : (
+                    ) : null}
+
+                    {(form.type === 'ssl' || Boolean(form.enable_ssl_monitor)) && (
                         <div className="grid md:grid-cols-2 gap-3">
                             <div className="space-y-2">
                                 <label className="text-sm text-slate-400">SSL Warning Threshold (days)</label>
@@ -254,17 +278,6 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
                             ))}
                         </div>
                     </div>
-
-                    <div className="grid md:grid-cols-2 gap-3">
-                        <div className="space-y-2">
-                            <label className="text-sm text-slate-400">Slack Webhook Group (optional)</label>
-                            <input className="input-field" value={form.slack_webhook_name || ''} onChange={e => setForm({ ...form, slack_webhook_name: e.target.value })} placeholder="matches Settings group name" />
-                        </div>
-                        <div className="space-y-2">
-                            <label className="text-sm text-slate-400">Custom Webhook Name (optional)</label>
-                            <input className="input-field" value={form.custom_webhook_name || ''} onChange={e => setForm({ ...form, custom_webhook_name: e.target.value })} placeholder="matches Settings custom webhook name" />
-                        </div>
-                    </div>
                 </div>
 
                 <div className="flex justify-end gap-3">
@@ -277,22 +290,41 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
 };
 
 export const Synthetics = () => {
+    const navigate = useNavigate();
     const [checks, setChecks] = useState<any[]>([]);
+    const [stats, setStats] = useState<Record<string, any>>({});
+    const [summary, setSummary] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState<any>(null);
+    const [windowHours, setWindowHours] = useState<number>(24);
 
     const fetchChecks = async () => {
         setLoading(true);
         try {
-            const res = await api.get('/synthetics');
-            setChecks(res.data);
+            const [checksRes, statsRes] = await Promise.all([
+                api.get('/synthetics'),
+                api.get('/synthetics/stats', { params: { window_hours: windowHours } }),
+            ]);
+            setChecks(checksRes.data || []);
+
+            const statMap: Record<string, any> = {};
+            (statsRes.data?.monitors || []).forEach((item: any) => {
+                statMap[item.check_id] = item;
+            });
+            setStats(statMap);
+            setSummary(statsRes.data?.summary || null);
         } finally {
             setLoading(false);
         }
     };
 
-    useEffect(() => { fetchChecks(); }, []);
+    useEffect(() => { fetchChecks(); }, [windowHours]);
+
+    const runNow = async (id: string) => {
+        await api.post(`/synthetics/${id}/run`);
+        await fetchChecks();
+    };
 
     return (
         <div className="space-y-6">
@@ -301,10 +333,19 @@ export const Synthetics = () => {
                     <Globe className="text-primary-400" />
                     <div>
                         <h2 className="text-2xl font-bold text-white">Web Monitoring</h2>
-                        <p className="text-slate-500 text-sm">Website/API uptime, response validation, and SSL expiry monitoring</p>
+                        <p className="text-slate-500 text-sm">Website/API uptime, response validation, SSL monitoring, and incident tracking</p>
                     </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-center">
+                    <select
+                        className="input-field w-36"
+                        value={windowHours}
+                        onChange={(e) => setWindowHours(parseInt(e.target.value, 10))}
+                    >
+                        <option value={24}>Last 24h</option>
+                        <option value={72}>Last 72h</option>
+                        <option value={168}>Last 7d</option>
+                    </select>
                     <button className="icon-btn" onClick={fetchChecks}><RefreshCw size={18} /></button>
                     <button className="btn-primary flex items-center gap-2" onClick={() => { setEditing(null); setModalOpen(true); }}>
                         <Plus size={16} /> New Monitor
@@ -312,72 +353,92 @@ export const Synthetics = () => {
                 </div>
             </div>
 
+            {summary && (
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                    <div className="card"><div className="text-xs text-slate-400">Total</div><div className="text-xl font-bold text-white">{summary.total_monitors || 0}</div></div>
+                    <div className="card"><div className="text-xs text-slate-400">Healthy</div><div className="text-xl font-bold text-emerald-400">{summary.healthy || 0}</div></div>
+                    <div className="card"><div className="text-xs text-slate-400">Degraded</div><div className="text-xl font-bold text-amber-400">{summary.degraded || 0}</div></div>
+                    <div className="card"><div className="text-xs text-slate-400">Down</div><div className="text-xl font-bold text-red-400">{summary.down || 0}</div></div>
+                    <div className="card"><div className="text-xs text-slate-400">Avg Uptime</div><div className="text-xl font-bold text-cyan-400">{summary.avg_uptime_pct?.toFixed ? summary.avg_uptime_pct.toFixed(2) : summary.avg_uptime_pct}%</div></div>
+                </div>
+            )}
+
             {loading ? (
                 <div className="card">Loading...</div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {checks.map((c) => {
-                        const statusClass = c.last_status === 'ok'
-                            ? 'bg-emerald-500/20 text-emerald-300'
-                            : c.last_status === 'fail'
-                                ? 'bg-red-500/20 text-red-300'
-                                : 'bg-slate-500/20 text-slate-300';
+                <div className="card overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                        <thead>
+                            <tr className="text-left text-slate-400 border-b border-white/10">
+                                <th className="py-3 pr-3">Monitor</th>
+                                <th className="py-3 pr-3">Type</th>
+                                <th className="py-3 pr-3">Current</th>
+                                <th className="py-3 pr-3">Uptime / Outage</th>
+                                <th className="py-3 pr-3">Last Check</th>
+                                <th className="py-3 pr-3">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {checks.map((c) => {
+                                const st = stats[c._id] || {};
+                                const uptimePct = Number(st.uptime_pct ?? 100);
+                                const state = st.state || (c.last_status === 'fail' ? 'down' : 'healthy');
 
-                        return (
-                            <div key={c._id} className="card border border-white/10 space-y-2">
-                                <div className="flex justify-between items-center mb-2">
-                                    <h3 className="text-lg font-bold text-white">{c.name}</h3>
-                                    <span className={`px-2 py-0.5 rounded text-xs font-bold ${statusClass}`}>
-                                        {c.last_status || 'new'}
-                                    </span>
-                                </div>
-                                <p className="text-slate-400 text-sm break-words">{c.url}</p>
-                                <div className="flex items-center gap-2 text-xs text-slate-400">
-                                    <span className="px-2 py-0.5 rounded bg-white/5">{kindLabels[c.target_kind] || 'Website'}</span>
-                                    <span className="px-2 py-0.5 rounded bg-white/5">{typeLabels[c.type] || c.type}</span>
-                                    {!c.enabled && <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300">Paused</span>}
-                                </div>
-
-                                {c.type === 'http' ? (
-                                    <div className="text-xs text-slate-500">
-                                        <div>Expected Status: {(c.expected_status_codes || [c.expected_status || 200]).join(', ')}</div>
-                                        {c.response_match_value && (
-                                            <div>Response Rule: {c.response_match_type || 'contains'} "{c.response_match_value}"</div>
-                                        )}
-                                        {c.max_response_time_ms && <div>Max Latency: {c.max_response_time_ms}ms</div>}
-                                        {c.last_response_status !== undefined && <div>Last HTTP Status: {c.last_response_status}</div>}
-                                        {c.last_response_time_ms !== undefined && <div>Last Response Time: {c.last_response_time_ms}ms</div>}
-                                    </div>
-                                ) : (
-                                    <div className="text-xs text-slate-500">
-                                        <div>Warning Threshold: {c.ssl_expiry_days || 7} day(s)</div>
-                                        {c.ssl_expiry_at && <div>Certificate Expiry: {new Date(c.ssl_expiry_at).toLocaleString()}</div>}
-                                        {c.ssl_last_state && <div>Current SSL State: {c.ssl_last_state}</div>}
-                                    </div>
-                                )}
-
-                                <p className="text-slate-500 text-xs">Interval: {c.interval || 300}s | Timeout: {c.timeout || 8000}ms</p>
-                                <p className="text-slate-500 text-xs">Last: {c.last_run ? new Date(c.last_run).toLocaleTimeString() : 'never'} | {c.last_message || ''}</p>
-
-                                <div className="flex gap-2 pt-2">
-                                    <button className="icon-btn" onClick={async () => {
-                                        await api.put(`/synthetics/${c._id}`, { enabled: !c.enabled });
-                                        fetchChecks();
-                                    }}>{c.enabled ? <Pause size={14} /> : <Play size={14} />}</button>
-                                    <button className="icon-btn" onClick={() => { setEditing(c); setModalOpen(true); }}><Edit3 size={14} /></button>
-                                    <button className="icon-btn text-red-400" onClick={async () => {
-                                        await api.delete(`/synthetics/${c._id}`);
-                                        fetchChecks();
-                                    }}><Trash2 size={14} /></button>
-                                </div>
-                            </div>
-                        );
-                    })}
-                    {checks.length === 0 && (
-                        <div className="card text-slate-400">
-                            No monitors found. Create a website/API or SSL monitor.
-                        </div>
-                    )}
+                                return (
+                                    <tr key={c._id} className="border-b border-white/5 align-top">
+                                        <td className="py-3 pr-3 min-w-[260px]">
+                                            <div className="font-semibold text-white">{c.name}</div>
+                                            <div className="text-xs text-slate-400 break-all">{c.url}</div>
+                                            {!c.enabled && <div className="text-xs text-amber-300 mt-1">Paused</div>}
+                                        </td>
+                                        <td className="py-3 pr-3">
+                                            <div className="flex flex-col gap-1 text-xs">
+                                                <span className="px-2 py-0.5 rounded bg-white/5 inline-block w-fit">{kindLabels[c.target_kind] || 'Website'}</span>
+                                                <span className="px-2 py-0.5 rounded bg-white/5 inline-block w-fit">{typeLabels[c.type] || c.type}</span>
+                                            </div>
+                                        </td>
+                                        <td className="py-3 pr-3">
+                                            <span className={clsx(
+                                                'px-2 py-0.5 rounded text-xs font-bold',
+                                                state === 'healthy' ? 'bg-emerald-500/20 text-emerald-300' : state === 'degraded' ? 'bg-amber-500/20 text-amber-300' : 'bg-red-500/20 text-red-300'
+                                            )}>{state.toUpperCase()}</span>
+                                            <div className="text-xs text-slate-400 mt-1">{c.last_message || '—'}</div>
+                                        </td>
+                                        <td className="py-3 pr-3 min-w-[280px]">
+                                            <div className="text-xs text-slate-300 mb-1">Uptime {uptimePct.toFixed(2)}%</div>
+                                            <div className="w-full h-2 bg-slate-700 rounded overflow-hidden">
+                                                <div className={`${progressClass(uptimePct)} h-2`} style={{ width: `${Math.max(0, Math.min(100, uptimePct))}%` }} />
+                                            </div>
+                                            <div className="text-xs text-slate-500 mt-1">
+                                                Outage: {st.outage_duration_text || '0s'} | Events: {st.outage_count || 0}
+                                            </div>
+                                            {st.latest_outage && (
+                                                <div className="text-xs text-slate-500">Latest outage: {st.latest_outage.duration_text}{st.latest_outage.ongoing ? ' (ongoing)' : ''}</div>
+                                            )}
+                                        </td>
+                                        <td className="py-3 pr-3">
+                                            <div className="text-xs text-slate-300">{c.last_run ? new Date(c.last_run).toLocaleString() : 'never'}</div>
+                                            <div className="text-xs text-slate-500">Interval {c.interval || 300}s</div>
+                                        </td>
+                                        <td className="py-3 pr-3">
+                                            <div className="flex flex-wrap gap-2">
+                                                <button className="icon-btn" title="Run now" onClick={() => runNow(c._id)}><PlayCircle size={14} /></button>
+                                                <button className="icon-btn" title={c.enabled ? 'Pause' : 'Resume'} onClick={async () => { await api.put(`/synthetics/${c._id}`, { enabled: !c.enabled }); fetchChecks(); }}>{c.enabled ? <Pause size={14} /> : <Play size={14} />}</button>
+                                                <button className="icon-btn" title="Edit" onClick={() => { setEditing(c); setModalOpen(true); }}><Edit3 size={14} /></button>
+                                                <button className="icon-btn" title="View incidents" onClick={() => navigate(`/alerts?target_id=${encodeURIComponent(c._id)}&target_type=synthetic`)}><ExternalLink size={14} /></button>
+                                                <button className="icon-btn text-red-400" title="Delete" onClick={async () => { await api.delete(`/synthetics/${c._id}`); fetchChecks(); }}><Trash2 size={14} /></button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                            {checks.length === 0 && (
+                                <tr>
+                                    <td className="py-6 text-slate-400" colSpan={6}>No monitors found. Create a website/API monitor.</td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
                 </div>
             )}
 
@@ -385,3 +446,4 @@ export const Synthetics = () => {
         </div>
     );
 };
+

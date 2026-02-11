@@ -1,4 +1,4 @@
-import SyntheticCheck from '../models/SyntheticCheck';
+﻿import SyntheticCheck from '../models/SyntheticCheck';
 import Incident from '../models/Incident';
 import { NotificationService } from './NotificationService';
 import SystemSettings from '../models/SystemSettings';
@@ -547,6 +547,14 @@ const runCheck = async (check: any) => {
     await check.save();
 };
 
+export const runSyntheticCheckById = async (checkId: string) => {
+    const check = await SyntheticCheck.findById(checkId);
+    if (!check) return null;
+
+    await runCheck(check);
+    return check;
+};
+
 const tick = async () => {
     const checks = await SyntheticCheck.find({ enabled: true });
     const now = Date.now();
@@ -674,3 +682,4 @@ export const startSyntheticRunner = () => {
         }, 30 * 1000);
     }
 };
+
