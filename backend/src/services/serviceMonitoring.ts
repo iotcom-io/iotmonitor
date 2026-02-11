@@ -124,6 +124,14 @@ const pickRuleForEndpoint = (rules: any[], endpoint: string) => {
     return rules.find((rule) => GLOBAL_SIP_TARGETS.has(normalizeText(rule.target)));
 };
 
+const getCheckUnit = (checkType: string) => {
+    if (checkType === 'sip_rtt') return 'ms';
+    if (checkType === 'bandwidth') return 'Mbps';
+    if (['cpu', 'memory', 'disk', 'utilization', 'sip_registration'].includes(checkType)) return '%';
+    if (checkType === 'container_status') return 'state';
+    return '';
+};
+
 /**
  * Service Monitoring Service
  *
@@ -185,6 +193,7 @@ export async function applyThresholdRules(device: any, metrics: any) {
         let value: number | undefined;
         let isProblem = false;
         let message = '';
+        let alertDetails: Record<string, any> = {};
 
         if (check.check_type === 'cpu') {
             const systemPayload = metrics.system || metrics;
@@ -258,35 +267,68 @@ export async function applyThresholdRules(device: any, metrics: any) {
 
                 return names.some((n) => String(n).replace(/^\//, '').toLowerCase() === targetName);
             });
-            if (container) {
-                const criticalStates = check.config?.critical_states || ['stopped', 'exited', 'unhealthy'];
-                const warningStates = check.config?.warning_states || ['restarting', 'paused'];
-                const containerState = String(container.state || container.status || '').toLowerCase();
-                const statusText = String(container.status || container.state || '');
-                const isUnhealthy = /unhealthy/.test(statusText.toLowerCase());
-                const displayName =
+            const normalizedTarget = String(check.target || '').replace(/^\//, '') || 'unknown-container';
+            const criticalStates = check.config?.critical_states || ['stopped', 'dead', 'exited', 'unhealthy'];
+            const warningStates = check.config?.warning_states || ['restarting', 'paused', 'created'];
+
+            if (!container && containers.length > 0) {
+                isProblem = true;
+                value = 100;
+                message = `Container ${normalizedTarget} was not found in latest docker telemetry`;
+                alertDetails = {
+                    container_name: normalizedTarget,
+                    container_state: 'not_found',
+                    container_status: 'not_found',
+                    expected_state: 'running/healthy',
+                };
+            } else if (container) {
+                const rawDisplayName =
                     (Array.isArray(container.names) && container.names[0]) ||
                     (Array.isArray(container.Names) && container.Names[0]) ||
                     container.name ||
                     check.target;
+                const displayName = String(rawDisplayName || normalizedTarget).replace(/^\//, '');
+                const containerState = String(container.state || '').toLowerCase().trim();
+                const statusText = String(container.status || container.state || '').trim();
+                const health = String(container.health || '').toLowerCase().trim();
+                const normalizedStatusText = statusText.toLowerCase();
+                const isUnhealthy = normalizedStatusText.includes('unhealthy') || health === 'unhealthy';
+                const effectiveState = containerState || (isUnhealthy ? 'unhealthy' : 'running');
 
-                if (criticalStates.includes(containerState) || isUnhealthy || container.health === 'unhealthy') {
+                alertDetails = {
+                    container_name: displayName,
+                    container_state: effectiveState,
+                    container_status: statusText || effectiveState,
+                    container_health: health || 'unknown',
+                    expected_state: 'running/healthy',
+                };
+
+                if (criticalStates.includes(effectiveState) || isUnhealthy) {
                     isProblem = true;
                     value = 100;
-                    message = `Container ${displayName} is ${statusText}${container.health ? ` (${container.health})` : ''}`;
-                } else if (warningStates.includes(containerState)) {
+                    message = `Container ${displayName} is ${statusText || effectiveState}`;
+                } else if (warningStates.includes(effectiveState)) {
                     isProblem = true;
                     value = 50;
-                    message = `Container ${displayName} is ${statusText}`;
+                    message = `Container ${displayName} is ${statusText || effectiveState}`;
+                } else {
+                    value = 0;
+                    message = `Container ${displayName} is healthy (${statusText || effectiveState})`;
                 }
             }
         }
 
         if (value !== undefined || isProblem) {
-            const unit = check.check_type === 'sip_rtt' ? 'ms' : (['cpu', 'memory', 'disk', 'utilization', 'sip_registration'].includes(check.check_type) ? '%' : 'Mbps');
+            const unit = getCheckUnit(String(check.check_type));
 
             let newState: 'ok' | 'warning' | 'critical' = 'ok';
-            if (check.check_type === 'sip_registration') {
+            if (check.check_type === 'container_status') {
+                if (value === 100) {
+                    newState = 'critical';
+                } else if (value === 50) {
+                    newState = 'warning';
+                }
+            } else if (check.check_type === 'sip_registration') {
                 if (check.thresholds.critical !== undefined && value! <= check.thresholds.critical) {
                     newState = 'critical';
                 } else if (check.thresholds.warning !== undefined && value! <= check.thresholds.warning) {
@@ -304,7 +346,10 @@ export async function applyThresholdRules(device: any, metrics: any) {
             (check as any).last_value = value;
             check.last_state = newState;
             check.last_evaluated_at = new Date();
-            check.last_message = message || `${check.check_type.toUpperCase()} is ${value}${unit} (Threshold: ${newState === 'critical' ? check.thresholds.critical : check.thresholds.warning}${unit})`;
+            const thresholdValue = newState === 'critical' ? check.thresholds.critical : check.thresholds.warning;
+            check.last_message = message || (unit
+                ? `${check.check_type.toUpperCase()} is ${value}${unit} (Threshold: ${thresholdValue}${unit})`
+                : `${check.check_type.toUpperCase()} is ${value} (Threshold: ${thresholdValue})`);
             await check.save();
 
             if (newState !== 'ok') {
@@ -320,9 +365,13 @@ export async function applyThresholdRules(device: any, metrics: any) {
                     specific_service: check.check_type,
                     specific_endpoint: check.target,
                     details: {
-                        value,
-                        threshold: newState === 'critical' ? check.thresholds.critical : check.thresholds.warning,
-                        unit,
+                        ...(check.check_type === 'container_status'
+                            ? alertDetails
+                            : {
+                                value,
+                                threshold: thresholdValue,
+                                unit,
+                            }),
                         rule_id: check._id,
                     },
                     throttling_config: throttlingConfig,

@@ -360,6 +360,13 @@ router.patch('/:id', authorize(['admin', 'operator']), async (req: AuthRequest, 
             }
         }
 
+        if (typeof updateBody.monitoring_paused === 'boolean') {
+            if (updateBody.monitoring_paused) {
+                updateBody.monitoring_paused_at = new Date();
+                unsetFields.pause_window_online_at = '';
+            }
+        }
+
         const updateDoc: any = { $set: updateBody };
         if (Object.keys(unsetFields).length > 0) {
             updateDoc.$unset = unsetFields;
@@ -377,22 +384,59 @@ router.patch('/:id', authorize(['admin', 'operator']), async (req: AuthRequest, 
             const { NotificationService } = await import('../services/NotificationService');
             const SystemSettings = (await import('../models/SystemSettings')).default;
             const settings = await SystemSettings.findOne();
+            const formatTime = (value?: Date | string) => {
+                if (!value) return 'N/A';
+                const date = value instanceof Date ? value : new Date(value);
+                if (Number.isNaN(date.getTime())) return 'N/A';
+                return date.toLocaleString('en-US', { timeZone: process.env.APP_TIMEZONE || 'Asia/Kolkata' });
+            };
 
             if (device.monitoring_paused) {
                 await resolveAllActiveAlertsForDevice(device.device_id, device.name, 'Monitoring paused', true);
                 await NotificationService.send({
                     subject: `Monitoring Paused: ${device.name}`,
-                    message: `Monitoring has been paused for ${device.name}. No further monitoring alerts will be sent until resumed.`,
+                    message:
+                        `Monitoring paused for ${device.name}.\n` +
+                        `Paused At: ${formatTime(device.monitoring_paused_at || new Date())}\n` +
+                        `No monitoring alerts will be sent until resume.`,
                     channels: ['slack'],
                     recipients: { slackWebhook: settings?.notification_slack_webhook || device.notification_slack_webhook },
                 });
             } else {
+                const pausedAt = previous.monitoring_paused_at || previous.updated_at;
+                const resumedAt = new Date();
+                const heartbeatDuringPause = previous.pause_window_online_at
+                    || (
+                        previous.last_seen &&
+                        pausedAt &&
+                        new Date(previous.last_seen).getTime() > new Date(pausedAt).getTime()
+                        ? previous.last_seen
+                        : undefined
+                    );
+
+                let resumeMessage =
+                    `Monitoring resumed for ${device.name}.\n` +
+                    `Paused At: ${formatTime(pausedAt)}\n` +
+                    `Resumed At: ${formatTime(resumedAt)}\n`;
+
+                if (heartbeatDuringPause) {
+                    resumeMessage += `Heartbeat During Pause: ${formatTime(heartbeatDuringPause)}\n`;
+                    resumeMessage += `Observation: Device likely came online while monitoring was paused.`;
+                } else {
+                    resumeMessage += 'No heartbeat was detected during the paused window.';
+                }
+
                 await NotificationService.send({
                     subject: `Monitoring Resumed: ${device.name}`,
-                    message: `Monitoring has resumed for ${device.name}. Alerts and real-time monitoring are active again.`,
+                    message: resumeMessage,
                     channels: ['slack'],
                     recipients: { slackWebhook: settings?.notification_slack_webhook || device.notification_slack_webhook },
                 });
+
+                await Device.findOneAndUpdate(
+                    { device_id: device.device_id },
+                    { $unset: { monitoring_paused_at: '', pause_window_online_at: '' } }
+                );
             }
         }
 

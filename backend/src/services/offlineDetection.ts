@@ -111,6 +111,16 @@ export async function updateDeviceHeartbeat(deviceId: string) {
             consecutive_missed_messages: 0,
         };
 
+        // If monitoring is paused and the device heartbeat returns while status is still offline,
+        // keep a marker so resume flow can report that recovery happened during the paused window.
+        if (
+            device.monitoring_paused &&
+            (oldStatus === 'offline' || oldStatus === 'not_monitored') &&
+            !device.pause_window_online_at
+        ) {
+            updateData.pause_window_online_at = now;
+        }
+
         if ((oldStatus === 'offline' || oldStatus === 'not_monitored') && !device.monitoring_paused) {
             updateData.status = 'online';
 
