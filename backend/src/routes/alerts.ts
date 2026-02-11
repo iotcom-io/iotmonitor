@@ -75,10 +75,15 @@ router.get('/active', authorizePermission('alerts.view'), async (req: AuthReques
                     ? new Date(lastNotified.getTime() + repeatMinutes * 60 * 1000)
                     : null;
 
+                const assignedUserIds = Array.isArray(deviceMeta.get(String(alert.device_id))?.assigned_user_ids)
+                    ? deviceMeta.get(String(alert.device_id)).assigned_user_ids
+                    : [];
+
                 return {
                     ...alert,
                     device_name: deviceMap.get(String(alert.device_id)) || String(alert.device_id || 'Unknown'),
                     next_notification_at: nextNotificationAt ? nextNotificationAt.toISOString() : null,
+                    assigned_user_ids: assignedUserIds,
                 };
             })
             .sort((a: any, b: any) => {

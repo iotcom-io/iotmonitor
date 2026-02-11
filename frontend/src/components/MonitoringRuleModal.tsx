@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, ShieldCheck, Activity, Phone, Wifi, Cpu, MemoryStick as Memory, Bell, HardDrive, Box, LayoutGrid } from 'lucide-react';
+import { X, ShieldCheck, Activity, Phone, Wifi, Cpu, MemoryStick as Memory, Bell, HardDrive, Box, LayoutGrid, Users } from 'lucide-react';
 import { clsx } from 'clsx';
 
 type ModuleName = 'system' | 'docker' | 'asterisk' | 'network';
@@ -31,6 +31,8 @@ interface MonitoringRuleModalProps {
     initialData?: any;
     enabledModules?: ModuleName[];
     availableDockerTargets?: string[];
+    assignableUsers?: { id: string; name?: string; email?: string; is_active?: boolean }[];
+    canAssignUsers?: boolean;
     latestMetrics?: {
         extra?: {
             registrations?: { name: string; status: string; serverUri: string; expiresS: number }[];
@@ -52,7 +54,17 @@ const normalizeContainerName = (container: any): string | null => {
     return normalized || null;
 };
 
-export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, latestMetrics, enabledModules, availableDockerTargets }: MonitoringRuleModalProps) => {
+export const MonitoringRuleModal = ({
+    isOpen,
+    onClose,
+    onSave,
+    initialData,
+    latestMetrics,
+    enabledModules,
+    availableDockerTargets,
+    assignableUsers = [],
+    canAssignUsers = false,
+}: MonitoringRuleModalProps) => {
     // Default thresholds for each rule type
     const TYPE_DEFAULTS: Record<string, any> = {
         cpu: { thresholds: { warning: 70, critical: 90 }, target: 'System-wide' },
@@ -73,6 +85,7 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, late
             thresholds: { warning: 70, critical: 90, consecutive_failures: 1 },
             notification_frequency: 15,
             notify: { channels: ['slack'] },
+            assigned_user_ids: [],
             enabled: true
         };
         if (!data) return defaultData;
@@ -81,7 +94,10 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, late
             thresholds.warning = thresholds.attention;
             delete thresholds.attention;
         }
-        return { ...data, thresholds };
+        const assigned_user_ids = Array.isArray(data.assigned_user_ids)
+            ? data.assigned_user_ids.filter(Boolean)
+            : [];
+        return { ...defaultData, ...data, thresholds, assigned_user_ids };
     };
 
     const [formData, setFormData] = useState(prepData(initialData));
@@ -96,6 +112,7 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, late
         target?: string;
         notification_frequency: number;
         notify: any;
+        assigned_user_ids: string[];
     }
 
     // Store customizations per type to prevent loss when switching tabs
@@ -149,13 +166,18 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, late
                     thresholds: prepped.thresholds,
                     targets: initialTargets,
                     notification_frequency: prepped.notification_frequency || 15,
-                    notify: prepped.notify || { channels: ['slack'] }
+                    notify: prepped.notify || { channels: ['slack'] },
+                    assigned_user_ids: Array.isArray(prepped.assigned_user_ids) ? prepped.assigned_user_ids : [],
                 };
                 setSessionConfigs({ [prepped.check_type]: config });
                 setModifiedTypes(new Set<string>([prepped.check_type]));
 
                 // Update formData with targets array for the multi-select UI
-                setFormData({ ...prepped, targets: initialTargets });
+                setFormData({
+                    ...prepped,
+                    targets: initialTargets,
+                    assigned_user_ids: config.assigned_user_ids,
+                });
             } else {
                 setModifiedTypes(new Set<string>());
                 setSessionConfigs({});
@@ -175,6 +197,7 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, late
             thresholds: config.thresholds,
             target: config.target || (config.targets?.[0] || ''),
             targets: config.targets || (config.target ? [config.target] : []),
+            assigned_user_ids: config.assigned_user_ids || [],
         }));
     }, [checkTypes, formData.check_type, isOpen, sessionConfigs]);
 
@@ -196,7 +219,8 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, late
                     thresholds: next.thresholds,
                     targets: next.targets || (next.target ? [next.target] : []),
                     notification_frequency: next.notification_frequency,
-                    notify: next.notify
+                    notify: next.notify,
+                    assigned_user_ids: next.assigned_user_ids || [],
                 }
             }));
             return next;
@@ -236,6 +260,7 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, late
                     thresholds: config.thresholds,
                     notification_frequency: config.notification_frequency,
                     notify: config.notify,
+                    assigned_user_ids: config.assigned_user_ids || [],
                     enabled: true
                 };
 
@@ -292,7 +317,8 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, late
                                                 check_type: type.id as any,
                                                 thresholds: config.thresholds,
                                                 target: config.target || (config.targets?.[0] || ''),
-                                                targets: config.targets || (config.target ? [config.target] : [])
+                                                targets: config.targets || (config.target ? [config.target] : []),
+                                                assigned_user_ids: config.assigned_user_ids || [],
                                             });
                                         }}
                                         className={clsx(
@@ -591,6 +617,54 @@ export const MonitoringRuleModal = ({ isOpen, onClose, onSave, initialData, late
                             ))}
                         </div>
                     </div>
+
+                    {canAssignUsers && (
+                        <div className="space-y-3">
+                            <label className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                                <Users size={14} />
+                                Rule Assignees
+                            </label>
+                            <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
+                                <p className="text-xs text-slate-400">
+                                    Restrict this monitoring rule to selected users. Leave empty to keep rule visible to all users with device access.
+                                </p>
+                                <div className="max-h-44 overflow-y-auto custom-scrollbar space-y-2 pr-1">
+                                    {assignableUsers
+                                        .filter((user) => user.is_active !== false)
+                                        .map((user) => {
+                                            const checked = formData.assigned_user_ids?.includes(user.id);
+                                            const displayName = (user.name || '').trim() || user.email || user.id;
+                                            return (
+                                                <label
+                                                    key={user.id}
+                                                    className="flex items-center gap-3 rounded-lg border border-white/10 bg-black/10 px-3 py-2 cursor-pointer hover:bg-white/5 transition-colors"
+                                                >
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={checked}
+                                                        onChange={() => {
+                                                            const current: string[] = Array.isArray(formData.assigned_user_ids) ? formData.assigned_user_ids : [];
+                                                            const next = checked
+                                                                ? current.filter((id) => id !== user.id)
+                                                                : [...current, user.id];
+                                                            updateField({ assigned_user_ids: next });
+                                                        }}
+                                                        className="w-4 h-4 rounded border-dark-border bg-dark-bg text-primary-600 focus:ring-primary-500"
+                                                    />
+                                                    <span className="text-sm text-slate-200">{displayName}</span>
+                                                    {user.email && user.name && (
+                                                        <span className="text-xs text-slate-500">{user.email}</span>
+                                                    )}
+                                                </label>
+                                            );
+                                        })}
+                                    {assignableUsers.filter((user) => user.is_active !== false).length === 0 && (
+                                        <p className="text-xs text-slate-500">No active users available for assignment.</p>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </form>
 
                 <div className="px-6 py-4 bg-black/20 border-t border-dark-border flex justify-end gap-3">

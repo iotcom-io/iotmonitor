@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import api from '../lib/axios';
 import { KeyRound, Plus, RefreshCw, Edit3, Trash2, X } from 'lucide-react';
+import { useAuthStore } from '../store/useAuthStore';
+import { hasPermission } from '../lib/permissions';
+import { AssigneeBadges } from '../components/AssigneeBadges';
 
 const blankForm = {
     name: '',
@@ -181,7 +184,10 @@ const LicenseModal = ({ open, onClose, onSaved, initial }: any) => {
 };
 
 export const Licenses = () => {
+    const user = useAuthStore(state => state.user);
+    const canViewUsers = hasPermission('users.view', user);
     const [items, setItems] = useState<any[]>([]);
+    const [users, setUsers] = useState<Record<string, { name?: string; email?: string }>>({});
     const [stats, setStats] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [modalOpen, setModalOpen] = useState(false);
@@ -204,6 +210,35 @@ export const Licenses = () => {
     useEffect(() => {
         fetchData();
     }, []);
+
+    useEffect(() => {
+        if (!canViewUsers) {
+            setUsers({});
+            return;
+        }
+
+        let isMounted = true;
+        api.get('/users')
+            .then((res) => {
+                if (!isMounted) return;
+                const rows = Array.isArray(res.data) ? res.data : [];
+                const map = rows.reduce((acc: Record<string, { name?: string; email?: string }>, row: any) => {
+                    const id = String(row.id || row._id || '').trim();
+                    if (!id) return acc;
+                    acc[id] = { name: row.name, email: row.email };
+                    return acc;
+                }, {});
+                setUsers(map);
+            })
+            .catch((error) => {
+                console.error('Failed to fetch users for license assignments', error);
+                if (isMounted) setUsers({});
+            });
+
+        return () => {
+            isMounted = false;
+        };
+    }, [canViewUsers]);
 
     const sorted = useMemo(() => {
         return [...items].sort((a, b) => Number(a.days_left || 0) - Number(b.days_left || 0));
@@ -267,6 +302,7 @@ export const Licenses = () => {
                                     <td className="py-3 pr-3">
                                         <div className="text-white font-semibold">{row.name}</div>
                                         <div className="text-xs text-slate-500">{row.vendor || 'N/A'} / {row.product || 'N/A'}</div>
+                                        <AssigneeBadges ids={row.assigned_user_ids} users={users} className="mt-1" />
                                     </td>
                                     <td className="py-3 pr-3 text-slate-300">{String(row.type || '').toUpperCase()}</td>
                                     <td className="py-3 pr-3 text-slate-300">{row.owner || 'N/A'}</td>
@@ -299,4 +335,3 @@ export const Licenses = () => {
         </div>
     );
 };
-

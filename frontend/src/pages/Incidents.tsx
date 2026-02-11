@@ -2,6 +2,9 @@
 import api from '../lib/axios';
 import { ShieldCheck, RefreshCw, Search, Filter, CheckCircle2 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
+import { useAuthStore } from '../store/useAuthStore';
+import { hasPermission } from '../lib/permissions';
+import { AssigneeBadges } from '../components/AssigneeBadges';
 
 const PAGE_SIZE = 25;
 
@@ -14,9 +17,12 @@ const formatDate = (value?: string) => {
 
 export const Incidents = () => {
     const [searchParams] = useSearchParams();
+    const user = useAuthStore(state => state.user);
+    const canViewUsers = hasPermission('users.view', user);
 
     const [activeIncidents, setActiveIncidents] = useState<any[]>([]);
     const [incidents, setIncidents] = useState<any[]>([]);
+    const [users, setUsers] = useState<Record<string, { name?: string; email?: string }>>({});
     const [loading, setLoading] = useState(true);
     const [activeLoading, setActiveLoading] = useState(true);
     const [total, setTotal] = useState(0);
@@ -76,6 +82,35 @@ export const Incidents = () => {
         fetchActiveIncidents();
     }, [page]);
 
+    useEffect(() => {
+        if (!canViewUsers) {
+            setUsers({});
+            return;
+        }
+
+        let isMounted = true;
+        api.get('/users')
+            .then((res) => {
+                if (!isMounted) return;
+                const rows = Array.isArray(res.data) ? res.data : [];
+                const map = rows.reduce((acc: Record<string, { name?: string; email?: string }>, row: any) => {
+                    const id = String(row.id || row._id || '').trim();
+                    if (!id) return acc;
+                    acc[id] = { name: row.name, email: row.email };
+                    return acc;
+                }, {});
+                setUsers(map);
+            })
+            .catch((error) => {
+                console.error('Failed to fetch users for incident assignments', error);
+                if (isMounted) setUsers({});
+            });
+
+        return () => {
+            isMounted = false;
+        };
+    }, [canViewUsers]);
+
     const applyFilters = async () => {
         setPage(1);
         await fetchIncidents();
@@ -98,6 +133,14 @@ export const Incidents = () => {
     };
 
     const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);
+    const showActiveAssignees = useMemo(
+        () => activeIncidents.some((inc) => Array.isArray(inc.assigned_user_ids) && inc.assigned_user_ids.length > 0),
+        [activeIncidents]
+    );
+    const showHistoricalAssignees = useMemo(
+        () => incidents.some((inc) => Array.isArray(inc.assigned_user_ids) && inc.assigned_user_ids.length > 0),
+        [incidents]
+    );
 
     return (
         <div className="space-y-4">
@@ -126,6 +169,7 @@ export const Incidents = () => {
                                 <th className="py-3 pr-3">Target</th>
                                 <th className="py-3 pr-3">Severity</th>
                                 <th className="py-3 pr-3">Started</th>
+                                {showActiveAssignees && <th className="py-3 pr-3">Assigned</th>}
                                 <th className="py-3 pr-3">Action</th>
                             </tr>
                         </thead>
@@ -145,6 +189,11 @@ export const Incidents = () => {
                                         </span>
                                     </td>
                                     <td className="py-3 pr-3 text-xs text-slate-300">{formatDate(inc.started_at)}</td>
+                                    {showActiveAssignees && (
+                                        <td className="py-3 pr-3 min-w-[180px]">
+                                            <AssigneeBadges ids={inc.assigned_user_ids} users={users} />
+                                        </td>
+                                    )}
                                     <td className="py-3 pr-3">
                                         <button className="text-xs px-3 py-1 bg-emerald-500/20 text-emerald-300 rounded inline-flex items-center gap-1" onClick={() => resolve(inc._id)}>
                                             <CheckCircle2 size={12} /> Resolve
@@ -212,6 +261,7 @@ export const Incidents = () => {
                                 <th className="py-3 pr-3">Started</th>
                                 <th className="py-3 pr-3">Resolved</th>
                                 <th className="py-3 pr-3">Last Update</th>
+                                {showHistoricalAssignees && <th className="py-3 pr-3">Assigned</th>}
                                 <th className="py-3 pr-3">Action</th>
                             </tr>
                         </thead>
@@ -244,6 +294,11 @@ export const Incidents = () => {
                                         <td className="py-3 pr-3 text-xs text-slate-300">{formatDate(inc.started_at)}</td>
                                         <td className="py-3 pr-3 text-xs text-slate-300">{formatDate(inc.resolved_at)}</td>
                                         <td className="py-3 pr-3 text-xs text-slate-500">{formatDate(lastUpdate?.at)}</td>
+                                        {showHistoricalAssignees && (
+                                            <td className="py-3 pr-3 min-w-[180px]">
+                                                <AssigneeBadges ids={inc.assigned_user_ids} users={users} />
+                                            </td>
+                                        )}
                                         <td className="py-3 pr-3">
                                             {inc.status === 'open' ? (
                                                 <button className="text-xs px-3 py-1 bg-emerald-500/20 text-emerald-300 rounded inline-flex items-center gap-1" onClick={() => resolve(inc._id)}>
@@ -258,7 +313,7 @@ export const Incidents = () => {
                             })}
                             {!loading && incidents.length === 0 && (
                                 <tr>
-                                    <td colSpan={8} className="py-6 text-slate-400">No incidents found for current filters.</td>
+                                    <td colSpan={showHistoricalAssignees ? 9 : 8} className="py-6 text-slate-400">No incidents found for current filters.</td>
                                 </tr>
                             )}
                         </tbody>

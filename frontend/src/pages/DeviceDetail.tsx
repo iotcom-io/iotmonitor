@@ -128,11 +128,14 @@ export const DeviceDetail = () => {
     const canUpdateMonitoring = hasPermission('monitoring.update', user);
     const canDeleteMonitoring = hasPermission('monitoring.delete', user);
     const canPauseResumeMonitoring = hasPermission('monitoring.pause_resume', user);
+    const canAssignMonitoringRules = hasPermission('devices.assign', user);
+    const canViewUsers = hasPermission('users.view', user);
     const [activeTab, setActiveTab] = useState('metrics');
     const [device, setDevice] = useState<any>(null);
     const [metrics, setMetrics] = useState<any[]>([]);
     const [historicalMetrics, setHistoricalMetrics] = useState<any[]>([]);
     const [checks, setChecks] = useState<any[]>([]);
+    const [assignableUsers, setAssignableUsers] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [historyLoading, setHistoryLoading] = useState(false);
     const [historyExporting, setHistoryExporting] = useState(false);
@@ -174,6 +177,42 @@ export const DeviceDetail = () => {
         const interval = setInterval(fetchData, 5000); // 5s refresh
         return () => clearInterval(interval);
     }, [id]);
+
+    useEffect(() => {
+        if (!canAssignMonitoringRules || !canViewUsers) {
+            setAssignableUsers([]);
+            return;
+        }
+
+        let isMounted = true;
+        api.get('/users')
+            .then((res) => {
+                if (!isMounted) return;
+                const users = Array.isArray(res.data) ? res.data : [];
+                const normalized = users
+                    .map((entry: any) => ({
+                        id: String(entry.id || entry._id || ''),
+                        name: entry.name || '',
+                        email: entry.email || '',
+                        is_active: entry.is_active !== false,
+                    }))
+                    .filter((entry: any) => entry.id);
+                normalized.sort((a: any, b: any) => {
+                    const aLabel = (a.name || a.email || a.id).toLowerCase();
+                    const bLabel = (b.name || b.email || b.id).toLowerCase();
+                    return aLabel.localeCompare(bLabel);
+                });
+                setAssignableUsers(normalized);
+            })
+            .catch((error) => {
+                console.error('Failed to fetch users for monitoring assignment', error);
+                if (isMounted) setAssignableUsers([]);
+            });
+
+        return () => {
+            isMounted = false;
+        };
+    }, [canAssignMonitoringRules, canViewUsers]);
 
     const fetchData = async () => {
         try {
@@ -424,6 +463,22 @@ export const DeviceDetail = () => {
         () => tabs.filter((tab: any) => !tab.hidden && (!tab.requiredModule || enabledModules.includes(tab.requiredModule))),
         [tabs, enabledModules]
     );
+
+    const assignableUsersById = useMemo(() => {
+        const map = new Map<string, any>();
+        assignableUsers.forEach((entry) => {
+            if (entry?.id) map.set(entry.id, entry);
+        });
+        return map;
+    }, [assignableUsers]);
+
+    const getAssigneeLabel = (userId: string) => {
+        const userEntry = assignableUsersById.get(userId);
+        if (!userEntry) return userId;
+        const name = String(userEntry.name || '').trim();
+        if (name) return name;
+        return userEntry.email || userId;
+    };
 
     useEffect(() => {
         if (visibleTabs.length === 0) return;
@@ -1739,6 +1794,9 @@ export const DeviceDetail = () => {
                                                 check.check_type === 'memory' ? Memory :
                                                     check.check_type === 'disk' ? HardDrive :
                                                         check.check_type.startsWith('sip') ? Phone : NetworkIcon;
+                                            const assignedIds = Array.isArray(check.assigned_user_ids) ? check.assigned_user_ids : [];
+                                            const assignedPreview = assignedIds.slice(0, 2).map((userId: string) => getAssigneeLabel(userId));
+                                            const remainingAssigned = Math.max(0, assignedIds.length - assignedPreview.length);
 
                                             return (
                                                 <div
@@ -1761,9 +1819,16 @@ export const DeviceDetail = () => {
                                                                 {check.check_type.replace(/_/g, ' ')}
                                                             </span>
                                                             {density === 'comfortable' && (
-                                                                <span className="text-[10px] font-mono text-slate-500 uppercase">
-                                                                    {check.target || 'GLOBAL'}
-                                                                </span>
+                                                                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                                                    <span className="text-[10px] font-mono text-slate-500 uppercase">
+                                                                        {check.target || 'GLOBAL'}
+                                                                    </span>
+                                                                    {assignedIds.length > 0 && (
+                                                                        <span className="text-[10px] text-slate-400">
+                                                                            Assigned: {assignedPreview.join(', ')}{remainingAssigned > 0 ? ` +${remainingAssigned}` : ''}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
                                                             )}
                                                         </div>
                                                     </div>
@@ -1908,6 +1973,27 @@ export const DeviceDetail = () => {
                                                     ))}
                                                 </div>
                                             </div>
+                                        </div>
+
+                                        <div className="p-5 bg-white/[0.02] rounded-3xl border border-white/5 space-y-3">
+                                            <div className="flex items-center gap-2 text-slate-500">
+                                                <Settings size={12} />
+                                                <span className="text-[10px] font-black uppercase tracking-widest">Assignments</span>
+                                            </div>
+                                            {Array.isArray(selectedRule.assigned_user_ids) && selectedRule.assigned_user_ids.length > 0 ? (
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {selectedRule.assigned_user_ids.map((userId: string) => (
+                                                        <span
+                                                            key={userId}
+                                                            className="px-2 py-0.5 bg-primary-500/10 text-primary-300 rounded text-[10px] font-bold border border-primary-500/20"
+                                                        >
+                                                            {getAssigneeLabel(userId)}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <p className="text-xs text-slate-500">No rule-level assignees configured.</p>
+                                            )}
                                         </div>
                                     </div>
 
@@ -2320,6 +2406,8 @@ export const DeviceDetail = () => {
                 latestMetrics={latestForRuleModal}
                 enabledModules={enabledModules}
                 availableDockerTargets={availableDockerTargets}
+                assignableUsers={assignableUsers}
+                canAssignUsers={canAssignMonitoringRules && canViewUsers}
             />
 
             <ConfirmationModal

@@ -127,8 +127,68 @@ router.get('/', authorizePermission('incidents.view'), async (req: AuthRequest, 
             }) as any;
         }
 
-        res.setHeader('X-Total-Count', String(req.user?.role === 'admin' ? total : incidents.length));
-        res.json(incidents);
+        const incidentRows = incidents as any[];
+        const deviceTargetIds = Array.from(new Set(
+            incidentRows
+                .filter((incident: any) => incident.target_type !== 'synthetic' && incident.target_type !== 'license')
+                .map((incident: any) => String(incident.target_id || ''))
+                .filter(Boolean)
+        ));
+        const syntheticTargetIds = Array.from(new Set(
+            incidentRows
+                .filter((incident: any) => incident.target_type === 'synthetic')
+                .map((incident: any) => String(incident.target_id || ''))
+                .filter(Boolean)
+        ));
+        const licenseTargetIds = Array.from(new Set(
+            incidentRows
+                .filter((incident: any) => incident.target_type === 'license')
+                .map((incident: any) => String(incident.target_id || ''))
+                .filter(Boolean)
+        ));
+
+        const [devices, synthetics, licenses] = await Promise.all([
+            deviceTargetIds.length > 0
+                ? Device.find({ device_id: { $in: deviceTargetIds } }).select({ device_id: 1, assigned_user_ids: 1 })
+                : Promise.resolve([] as any[]),
+            syntheticTargetIds.length > 0
+                ? SyntheticCheck.find({ _id: { $in: syntheticTargetIds } }).select({ _id: 1, assigned_user_ids: 1 })
+                : Promise.resolve([] as any[]),
+            licenseTargetIds.length > 0
+                ? LicenseAsset.find({ _id: { $in: licenseTargetIds } }).select({ _id: 1, assigned_user_ids: 1 })
+                : Promise.resolve([] as any[]),
+        ]);
+
+        const deviceMap = new Map<string, any>();
+        const syntheticMap = new Map<string, any>();
+        const licenseMap = new Map<string, any>();
+        devices.forEach((device: any) => deviceMap.set(String(device.device_id), device));
+        synthetics.forEach((synthetic: any) => syntheticMap.set(String(synthetic._id), synthetic));
+        licenses.forEach((license: any) => licenseMap.set(String(license._id), license));
+
+        const withAssignees = incidentRows.map((incident: any) => {
+            const row = typeof incident.toObject === 'function' ? incident.toObject() : incident;
+            let assignedUserIds: string[] = [];
+
+            if (row.target_type === 'synthetic') {
+                const monitor = syntheticMap.get(String(row.target_id));
+                assignedUserIds = Array.isArray(monitor?.assigned_user_ids) ? monitor.assigned_user_ids : [];
+            } else if (row.target_type === 'license') {
+                const license = licenseMap.get(String(row.target_id));
+                assignedUserIds = Array.isArray(license?.assigned_user_ids) ? license.assigned_user_ids : [];
+            } else {
+                const device = deviceMap.get(String(row.target_id));
+                assignedUserIds = Array.isArray(device?.assigned_user_ids) ? device.assigned_user_ids : [];
+            }
+
+            return {
+                ...row,
+                assigned_user_ids: assignedUserIds,
+            };
+        });
+
+        res.setHeader('X-Total-Count', String(req.user?.role === 'admin' ? total : withAssignees.length));
+        res.json(withAssignees);
     } catch (error: any) {
         res.status(500).json({ message: error.message || 'Failed to fetch incidents' });
     }

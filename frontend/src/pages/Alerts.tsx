@@ -1,6 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import api from '../lib/axios';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { useAuthStore } from '../store/useAuthStore';
+import { hasPermission } from '../lib/permissions';
+import { AssigneeBadges } from '../components/AssigneeBadges';
 
 const formatDate = (value?: string) => {
     if (!value) return '—';
@@ -35,7 +38,10 @@ const compactDetails = (details: any) => {
 };
 
 export const Alerts = () => {
+    const user = useAuthStore(state => state.user);
+    const canViewUsers = hasPermission('users.view', user);
     const [alerts, setAlerts] = useState<any[]>([]);
+    const [users, setUsers] = useState<Record<string, { name?: string; email?: string }>>({});
     const [loading, setLoading] = useState(true);
 
     const fetchAlerts = async () => {
@@ -51,6 +57,40 @@ export const Alerts = () => {
     useEffect(() => {
         fetchAlerts();
     }, []);
+
+    useEffect(() => {
+        if (!canViewUsers) {
+            setUsers({});
+            return;
+        }
+
+        let isMounted = true;
+        api.get('/users')
+            .then((res) => {
+                if (!isMounted) return;
+                const rows = Array.isArray(res.data) ? res.data : [];
+                const map = rows.reduce((acc: Record<string, { name?: string; email?: string }>, row: any) => {
+                    const id = String(row.id || row._id || '').trim();
+                    if (!id) return acc;
+                    acc[id] = { name: row.name, email: row.email };
+                    return acc;
+                }, {});
+                setUsers(map);
+            })
+            .catch((error) => {
+                console.error('Failed to fetch users for alert assignments', error);
+                if (isMounted) setUsers({});
+            });
+
+        return () => {
+            isMounted = false;
+        };
+    }, [canViewUsers]);
+
+    const hasAnyAssignees = useMemo(
+        () => alerts.some((alert) => Array.isArray(alert.assigned_user_ids) && alert.assigned_user_ids.length > 0),
+        [alerts]
+    );
 
     return (
         <div className="space-y-4">
@@ -78,6 +118,7 @@ export const Alerts = () => {
                                 <th className="py-3 pr-3">Triggered</th>
                                 <th className="py-3 pr-3">Last Notified</th>
                                 <th className="py-3 pr-3">Next Notification</th>
+                                {hasAnyAssignees && <th className="py-3 pr-3">Assigned</th>}
                                 <th className="py-3 pr-3">Details</th>
                             </tr>
                         </thead>
@@ -98,6 +139,11 @@ export const Alerts = () => {
                                     <td className="py-3 pr-3 text-xs text-slate-300">{formatDate(alert.first_triggered)}</td>
                                     <td className="py-3 pr-3 text-xs text-slate-300">{formatDate(alert.last_notified)}</td>
                                     <td className="py-3 pr-3 text-xs text-slate-300">{formatDate(alert.next_notification_at)}</td>
+                                    {hasAnyAssignees && (
+                                        <td className="py-3 pr-3 min-w-[180px]">
+                                            <AssigneeBadges ids={alert.assigned_user_ids} users={users} />
+                                        </td>
+                                    )}
                                     <td className="py-3 pr-3 text-xs text-slate-500 min-w-[260px]">{compactDetails(alert.details)}</td>
                                 </tr>
                             ))}
@@ -108,4 +154,3 @@ export const Alerts = () => {
         </div>
     );
 };
-

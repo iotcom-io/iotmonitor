@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
 import { useAuthStore } from '../store/useAuthStore';
 import { hasPermission } from '../lib/permissions';
+import { AssigneeBadges } from '../components/AssigneeBadges';
 
 const typeLabels: Record<string, string> = {
     http: 'Website/API',
@@ -436,6 +437,7 @@ export const Synthetics = () => {
     const navigate = useNavigate();
     const user = useAuthStore(state => state.user);
     const [checks, setChecks] = useState<any[]>([]);
+    const [users, setUsers] = useState<Record<string, { name?: string; email?: string }>>({});
     const [stats, setStats] = useState<Record<string, any>>({});
     const [summary, setSummary] = useState<any>(null);
     const [loading, setLoading] = useState(true);
@@ -474,6 +476,36 @@ export const Synthetics = () => {
     const canUpdate = hasPermission('synthetics.update', user);
     const canDelete = hasPermission('synthetics.delete', user);
     const canRun = hasPermission('synthetics.run', user);
+    const canViewUsers = hasPermission('users.view', user);
+
+    useEffect(() => {
+        if (!canViewUsers) {
+            setUsers({});
+            return;
+        }
+
+        let isMounted = true;
+        api.get('/users')
+            .then((res) => {
+                if (!isMounted) return;
+                const rows = Array.isArray(res.data) ? res.data : [];
+                const map = rows.reduce((acc: Record<string, { name?: string; email?: string }>, row: any) => {
+                    const id = String(row.id || row._id || '').trim();
+                    if (!id) return acc;
+                    acc[id] = { name: row.name, email: row.email };
+                    return acc;
+                }, {});
+                setUsers(map);
+            })
+            .catch((error) => {
+                console.error('Failed to fetch users for monitor assignments', error);
+                if (isMounted) setUsers({});
+            });
+
+        return () => {
+            isMounted = false;
+        };
+    }, [canViewUsers]);
 
     return (
         <div className="space-y-6">
@@ -542,6 +574,7 @@ export const Synthetics = () => {
                                         <td className="py-3 pr-3 min-w-[260px]">
                                             <div className="font-semibold text-white">{c.name}</div>
                                             <div className="text-xs text-slate-400 break-all">{c.url}</div>
+                                            <AssigneeBadges ids={c.assigned_user_ids} users={users} className="mt-1" />
                                             {!c.enabled && <div className="text-xs text-amber-300 mt-1">Paused</div>}
                                         </td>
                                         <td className="py-3 pr-3">
