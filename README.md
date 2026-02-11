@@ -1,294 +1,293 @@
-# 🚀 IoT Monitor - Complete Docker Deployment
+# IoTMonitor
 
-A comprehensive IoT device monitoring platform with real-time telemetry, agent management, and alerting capabilities. Fully containerized for easy deployment.
+IoTMonitor is a full-stack monitoring platform for:
+- Device and server telemetry (CPU, memory, disk, bandwidth, network, Docker, SIP/PBX)
+- Website/API uptime and response validation
+- SSL certificate health and expiry tracking
+- License/subscription renewal monitoring
+- Real-time alerts, incidents, notification routing, and role-based operations
 
-## 📋 Table of Contents
-- [Features](#features)
-- [Architecture](#architecture)
-- [Quick Start](#quick-start)
-- [Manual Setup](#manual-setup)
-- [Usage](#usage)
-- [Documentation](#documentation)
+This README describes end-to-end flow, system architecture, operations, and UI usage.
 
-## ✨ Features
+## 1. Core Capabilities
 
-- **Real-Time Monitoring**: Live device metrics via WebSocket (Socket.IO)
-- **Multi-Module Agents**: System, Docker, Asterisk, Network monitoring
-- **Custom Agent Builder**: On-demand agent compilation for Linux/Windows
-- **Alert Management**: Configurable notification rules with test alerts
-- **MQTT Integration**: Device communication via Mosquitto broker
-- **REST API**: Comprehensive device and metrics management
-- **Modern UI**: React + Vite with real-time charts (Recharts)
+### Device Monitoring
+- Agent-based telemetry over MQTT.
+- Module-driven monitoring per device (system, network, docker, asterisk/pbx, terminal).
+- Real-time and historical charts.
+- Rule-based threshold checks with assignees and notification policies.
 
-## 🏗️ Architecture
+### Web/API Monitoring
+- Single monitor can include both HTTP/API check and SSL check.
+- HTTP method support with method-specific request payload/headers.
+- Expected status code and response-content validation.
+- Uptime percentage, outage durations, and incident tracking.
 
-### Services
-- **Frontend** (Port 3000): React SPA served by Nginx
-- **Backend** (Port 5001): Node.js + TypeScript + Socket.IO
-- **MongoDB** (Port 27017): Primary database
-- **Redis** (Port 6379): Caching and session storage
-- **Mosquitto** (Ports 1883, 8883): MQTT broker for agents
+### SSL Monitoring
+- SSL checks attached to web monitors (single listing model).
+- Expiry-state transitions (`ok`, `warning`, `critical`, `expired`).
+- Weekly SSL summary and reminder cadence in monitoring service.
 
-### Technology Stack
-- **Backend**: Express.js, Socket.IO, Mongoose, MQTT.js
-- **Frontend**: React 18, Vite, TailwindCSS, Zustand
-- **Database**: MongoDB 7.0
-- **Broker**: Eclipse Mosquitto 2.0
-- **Container**: Docker + Docker Compose
+### License/Subscription Monitoring
+- Renewal/expiry state tracking (`ok`, `warning`, `critical`, `expired`, `paused`).
+- Seat, owner, amount, currency, and billing-cycle metadata.
+- Renewal amount insight for upcoming windows (30d/90d).
 
-## 🚀 Quick Start
+### Alerts and Incidents
+- Active alert tracking, reminder throttling, and recovery notifications.
+- Incident lifecycle: open -> updates -> resolve.
+- Unified incident list with filters and historical search.
 
-### Prerequisites
+### Notification Routing
+- Multiple channel types in UI: Slack, Email, Webhook, SMS placeholder.
+- One or more default channels are supported.
+- Per-monitor/per-license channel assignment by channel IDs.
+- Fallback behavior: if no monitor-specific channels are selected, default channel(s) are used.
+
+### Access Control
+- JWT authentication.
+- Role and permission checks across backend routes and frontend screens.
+- Assignment-aware access for devices, synthetic monitors, incidents, alerts, and licenses.
+
+### Reporting and Export
+- CSV export available for:
+  - Active alerts
+  - Incidents
+  - Web monitors
+  - Licenses/subscriptions
+  - Device telemetry history (from device detail)
+
+### UI/UX
+- Collapsible sidebar.
+- Mobile sidebar drawer behavior.
+- Persistent light/dark theme toggle.
+
+## 2. Architecture and Data Flow
+
+## High-Level Components
+- `frontend/`: React + Vite + Tailwind UI.
+- `backend/`: Express + TypeScript + Socket.IO + MQTT consumers.
+- MongoDB: primary data store.
+- Redis: caching/service support.
+- MQTT broker: agent telemetry command channel.
+- `agent/`: Go-based telemetry agent compiled per target.
+
+## Runtime Flow
+1. Agent publishes telemetry to MQTT topics.
+2. Backend MQTT service ingests and stores telemetry.
+3. Monitoring services evaluate rules and state transitions.
+4. Alert tracking updates and incident records are created/updated/resolved.
+5. Notification service resolves destination channels and sends messages.
+6. Frontend receives API + socket updates for live views.
+
+## Monitoring Services
+- Offline detection
+- Threshold/service monitoring
+- Notification throttling
+- Scheduled summaries
+- Synthetic runner
+- License monitoring
+
+## 3. Notification Model
+
+Notification channels are managed in **Notifications** UI.
+
+Each channel has:
+- `type` (`slack`, `email`, `webhook`, `sms`)
+- `enabled`
+- `is_default`
+- `alert_types`
+- `severity_levels`
+- Type-specific config (e.g., webhook URL, email list)
+
+### Routing precedence
+1. If monitor/license has `notification_channel_ids`, send to those enabled channels.
+2. Else send to enabled default channel(s).
+3. Else fallback to legacy channel settings.
+
+This allows different destination sets by monitor class (device rules vs web monitors vs licenses).
+
+## 4. Alert and Incident Lifecycle
+
+## Alert lifecycle
+- Trigger: check fails / threshold breached / offline event.
+- Tracking record updates notification counters and schedule.
+- Reminder cadence follows severity/state policy.
+- Resolve: when condition returns normal or monitor paused.
+
+## Incident lifecycle
+- Opened on first failure condition.
+- Updated while condition remains active.
+- Resolved manually or automatically on recovery.
+- Historical incidents remain queryable and exportable.
+
+## 5. UI Flows
+
+## Device Flow
+1. Create device and choose device type/modules.
+2. Build and download agent binary.
+3. Deploy agent on target host.
+4. View real-time metrics, checks, incidents, and historical trends.
+5. Configure monitor rules and assignees from device detail.
+
+## Web Monitor Flow
+1. Go to **Web Monitoring** -> **New Monitor**.
+2. Select website/API target.
+3. Configure HTTP/API validation.
+4. Optionally enable SSL monitoring in same monitor.
+5. Assign notification channels (or leave empty for default fallback).
+6. View uptime/outage and incidents.
+
+## License Flow
+1. Go to **Licenses** -> **New Entry**.
+2. Fill renewal, amount, owner, and thresholds.
+3. Assign notification channels (or default fallback).
+4. Track state transitions and upcoming renewal spend.
+
+## Incidents and Alerts
+- **Alerts** page: active alert stream and export.
+- **Incidents** page: active + historical lists with filters and export.
+
+## 6. Setup and Deployment
+
+## Prerequisites
+- Docker + Docker Compose
+- Node 18+ for local frontend
+- Node 20+ for backend build/runtime
+- MongoDB, Redis, MQTT (via compose or external)
+
+## Environment
+Use `backend/.env.example` as baseline.
+
+Important variables:
+- `MONGODB_URI`
+- `REDIS_URL`
+- `MQTT_URL`
+- `JWT_SECRET`
+- Notification credentials/webhooks as needed
+
+## Docker deployment
+From repo root:
 ```bash
-# Verify Docker installation
-docker --version  # (20.10+)
-docker-compose --version  # (2.0+)
+cd d:\Projects\Iotcom\iotmonitor
+docker compose up -d --build
 ```
 
-### One-Command Setup
+Compose defaults are external Mongo + external MQTT.
+
+Optional local service profiles:
 ```bash
-cd /mnt/projects/iotmonitor
-./quick-start.sh
+# local Mongo only
+docker compose --profile local-db up -d --build
+
+# local MQTT only
+docker compose --profile local-mqtt up -d --build
+
+# both local Mongo and local MQTT
+docker compose --profile local-db --profile local-mqtt up -d --build
 ```
 
-This script will:
-1. Build all Docker images
-2. Start all services
-3. Initialize the database
-4. Seed with demo data
+Set matching values in `backend/.env`:
+- Local Mongo profile: `MONGODB_URI=mongodb://mongodb:27017/iotmonitor`
+- Local MQTT profile: `MQTT_URL=mqtt://mosquitto:1883`
 
-**Access the app at:** http://localhost:3000
-
-### Default Credentials
-```
-Email: admin@iotcom.io
-Password: admin123456
-```
-
-## 🔧 Manual Setup
-
-### 1. Configure Environment
+## Local development
+### Backend
 ```bash
-# Copy example env file (already configured for Docker)
-cp backend/.env.example backend/.env
-
-# Edit if needed
-nano backend/.env
+cd backend
+npm install
+npm run dev
 ```
 
-**Important variables:**
+### Frontend
 ```bash
-JWT_SECRET=change_this_in_production
-MONGODB_URI=mongodb://mongodb:27017/iotmonitor
-REDIS_URL=redis://redis:6379
-MQTT_URL=mqtt://mosquitto:1883
-SLACK_WEBHOOK_URL=your_slack_webhook_url (optional)
+cd frontend
+npm install
+npm run dev
 ```
 
-### 2. Build Images
+## Build verification
 ```bash
-docker-compose build
+cd backend
+npm run build
+
+cd ../frontend
+npm run lint
 ```
 
-### 3. Start Services
-```bash
-# Start in detached mode
-docker-compose up -d
+## 7. Data Model Overview
 
-# View logs
-docker-compose logs -f
-```
+Key backend models:
+- `Device`
+- `Telemetry`
+- `MonitoringCheck`
+- `AlertTracking`
+- `Incident`
+- `SyntheticCheck`
+- `LicenseAsset`
+- `NotificationChannel`
+- `SystemSettings`
+- `User`
 
-### 4. Initialize Database
-```bash
-# Run seed script
-docker-compose exec backend npm run seed
-```
+## 8. Scalability and Data Retention Guidance
 
-## 📖 Usage
+As telemetry grows, enforce retention controls early:
+- Keep high-resolution telemetry for short windows.
+- Aggregate hourly/daily rollups for long-term charts.
+- Archive/TTL historical raw telemetry and resolved alerts beyond policy.
+- Index heavy query paths (`device_id`, `timestamp`, `status`, `severity`, `target_type`).
+- Run periodic archival jobs during low-load windows.
 
-### Accessing Services
-| Service | URL | Purpose |
-|---------|-----|---------|
-| Frontend | http://localhost:3000 | Web UI |
-| Backend API | http://localhost:5001 | REST API |
-| MongoDB | mongodb://localhost:27017 | Database |
-| MQTT Broker | mqtt://localhost:1883 | Agent comms |
+Suggested policy baseline:
+- Raw telemetry: 30-90 days
+- Aggregated telemetry: 12-18 months
+- Incidents/audit logs: 12+ months
 
-### Managing Containers
+## 9. Security Checklist
 
-**View running containers:**
-```bash
-docker-compose ps
-```
+- Rotate `JWT_SECRET` and all webhook/API credentials.
+- Restrict MongoDB/Redis/MQTT network exposure.
+- Enforce TLS at reverse proxy and broker where possible.
+- Use least-privilege roles and assignment scoping.
+- Audit remote-terminal permissions carefully.
 
-**View logs:**
-```bash
-# All services
-docker-compose logs -f
+## 10. Troubleshooting
 
-# Specific service
-docker-compose logs -f backend
-```
+## False alerts around startup/restarts
+- Verify offline thresholds and heartbeat intervals.
+- Confirm monitor pause/resume logic and notification throttling settings.
+- Ensure monitor assignment and module selection match actual agent payload.
 
-**Restart a service:**
-```bash
-docker-compose restart backend
-```
+## No notifications
+- Check channel `enabled` state.
+- Check default channel exists.
+- Verify monitor-specific `notification_channel_ids`.
+- Run channel test from Notifications page.
 
-**Rebuild after code changes:**
-```bash
-# Rebuild specific service
-docker-compose up -d --build backend
+## Web monitor status mismatch
+- Validate expected status code list.
+- Validate response match rule and regex/text.
+- Confirm method-specific payload/headers.
 
-# Rebuild everything
-docker-compose up -d --build
-```
+## 11. Current Completion and Next Scope
 
-**Stop all services:**
-```bash
-docker-compose down
-```
+Implemented platform scope now includes:
+- Device + web + SSL + license monitoring
+- Channel routing/default fallback
+- Role/assignment-aware access controls
+- CSV exports and dashboard insights
+- Mobile navigation + theme toggle
 
-**Remove all data (destructive!):**
-```bash
-docker-compose down -v
-```
+Planned next expansion:
+- Subscription billing automation integrations
+- Advanced archival workers and retention UI controls
+- Additional report templates and scheduled exports
+- SMS provider integration
 
-### Registering Devices
+## 12. Repository Paths
 
-1. Navigate to **Devices** → **Register Device**
-2. Fill in device details:
-   - Name: e.g., "Production Server 1"
-   - Type: Server, Network Device, or Website
-   - Hostname/IP: e.g., 192.168.1.100
-   - Monitoring Modules: Select system, docker, asterisk, network
-3. Click **Register Device**
-4. Build agent for your platform (Linux/Windows, amd64/arm64)
-5. Download and deploy agent on target device
+- Frontend app: `frontend/src`
+- Backend API/services: `backend/src`
+- Agent source: `agent/`
+- Compose/deployment: `docker-compose.yml`, `DOCKER_DEPLOYMENT.md`
 
-### Building Agents
-
-**Via UI:**
-1. Go to Device List
-2. Click "Build Agent" icon
-3. Select OS and architecture
-4. Download binary
-
-**Agent runs automatically** and reports to MQTT broker.
-
-### Viewing Real-Time Metrics
-
-- **Dashboard**: Aggregated stats with live charts
-- **Device Detail**: Per-device metrics, network info, SIP status
-- **Settings Tab**: Configure notifications, test alerts
-
-## 📚 Documentation
-
-- [DOCKER_DEPLOYMENT.md](./DOCKER_DEPLOYMENT.md) - Comprehensive Docker guide
-- [API Documentation](#) - REST API reference (coming soon)
-- [Agent Development](#) - Custom agent modules (coming soon)
-
-## 🔐 Security Recommendations
-
-### For Production:
-
-1. **Change secrets:**
-   ```bash
-   # Generate strong JWT secret
-   openssl rand -base64 32
-   ```
-
-2. **Enable MongoDB auth:**
-   ```yaml
-   mongodb:
-     environment:
-       MONGO_INITDB_ROOT_USERNAME: admin
-       MONGO_INITDB_ROOT_PASSWORD: <strong-password>
-   ```
-
-3. **Remove exposed ports** (only expose frontend):
-   ```yaml
-   mongodb:
-     # Comment out ports section
-     # ports:
-     #   - "27017:27017"
-   ```
-
-4. **Use TLS for MQTT** (port 8883)
-
-5. **Set up reverse proxy** (Nginx, Traefik, Caddy)
-
-6. **Enable firewall rules**
-
-## 🐛 Troubleshooting
-
-### Container won't start
-```bash
-# Check detailed logs
-docker-compose logs backend
-
-# Rebuild without cache
-docker-compose build --no-cache backend
-docker-compose up -d
-```
-
-### MongoDB connection failed
-```bash
-# Check MongoDB health
-docker-compose exec mongodb mongosh --eval "db.adminCommand('ping')"
-
-# Verify connection string
-docker-compose exec backend env | grep MONGODB_URI
-```
-
-### Port already in use
-```bash
-# Find process using port
-netstat -tulpn | grep 3000
-
-# Change port in docker-compose.yml
-# frontend:
-#   ports:
-#     - "8080:80"  # Changed from 3000:80
-```
-
-## 📊 Monitoring & Maintenance
-
-### Backup Database
-```bash
-# Backup MongoDB
-docker-compose exec mongodb mongodump --out /data/db/backup
-
-# Copy backup from container
-docker cp iotmonitor-mongodb:/data/db/backup ./mongodb-backup
-```
-
-### View Resource Usage
-```bash
-docker stats
-```
-
-### Clean Up
-```bash
-# Remove unused images
-docker image prune -a
-
-# Remove unused volumes
-docker volume prune
-
-# Full cleanup
-docker system prune -a
-```
-
-## 🤝 Contributing
-
-Contributions welcome! See Phase 2, 3, and 4 tasks in `task.md`.
-
-## 📄 License
-
-MIT License
-
----
-
-**Built with Docker** 🐳 | **Powered by Socket.IO** ⚡ | **Monitored by MQTT** 📡

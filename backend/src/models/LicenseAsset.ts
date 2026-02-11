@@ -21,6 +21,7 @@ export interface ILicenseAsset extends Document {
     seats_used?: number;
     auto_renew?: boolean;
     channels?: ('slack' | 'email' | 'custom')[];
+    notification_channel_ids?: string[];
     enabled: boolean;
     status: LicenseStatus;
     assigned_user_ids?: string[];
@@ -44,11 +45,12 @@ const LicenseAssetSchema: Schema = new Schema({
     critical_days: { type: Number, default: 7 },
     billing_cycle: { type: String, enum: ['monthly', 'quarterly', 'yearly', 'custom'], default: 'yearly' },
     amount: { type: Number },
-    currency: { type: String, default: 'USD' },
+    currency: { type: String, default: 'INR' },
     seats_total: { type: Number },
     seats_used: { type: Number },
     auto_renew: { type: Boolean, default: false },
     channels: [{ type: String, enum: ['slack', 'email', 'custom'] }],
+    notification_channel_ids: [{ type: String }],
     enabled: { type: Boolean, default: true },
     status: { type: String, enum: ['active', 'paused', 'expired'], default: 'active' },
     assigned_user_ids: [{ type: String }],
@@ -62,4 +64,3 @@ LicenseAssetSchema.index({ renewal_date: 1 });
 LicenseAssetSchema.index({ enabled: 1, status: 1 });
 
 export default mongoose.model<ILicenseAsset>('LicenseAsset', LicenseAssetSchema);
-

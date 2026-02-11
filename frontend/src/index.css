@@ -4,12 +4,45 @@
 
 :root {
   color-scheme: dark;
+  --app-bg: #0f172a;
+  --app-surface: #1e293b;
+  --app-border: #334155;
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --input-bg: #0f172a;
+  --card-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+  --app-bg: #eef2ff;
+  --app-surface: #ffffff;
+  --app-border: #cbd5e1;
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+  --input-bg: #f8fafc;
+  --card-shadow: 0 14px 36px rgba(15, 23, 42, 0.08);
 }
 
 body {
   @apply bg-dark-bg text-slate-200 antialiased;
   margin: 0;
   min-height: 100vh;
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+.bg-dark-bg {
+  background-color: var(--app-bg) !important;
+}
+
+.bg-dark-surface {
+  background-color: var(--app-surface) !important;
+}
+
+.border-dark-border {
+  border-color: var(--app-border) !important;
 }
 
 .glass {
@@ -17,11 +50,23 @@ body {
 }
 
 .card {
-  @apply bg-dark-surface border border-dark-border rounded-xl p-6 shadow-xl transition-all hover:border-primary-500/50;
+  @apply bg-dark-surface border border-dark-border rounded-xl p-6 transition-all hover:border-primary-500/50;
+  box-shadow: var(--card-shadow);
+  color: var(--text-primary);
 }
 
 .btn-primary {
   @apply bg-primary-600 hover:bg-primary-500 text-white px-4 py-2 rounded-lg font-medium transition-colors;
+}
+
+.icon-btn {
+  @apply inline-flex items-center justify-center rounded-lg border border-dark-border bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 transition-colors;
+  width: 2rem;
+  height: 2rem;
+}
+
+.icon-btn:disabled {
+  @apply opacity-50 cursor-not-allowed;
 }
 
 /* Custom scrollbar */
@@ -38,5 +83,36 @@ body {
 @layer components {
   .input-field {
     @apply w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-3 text-white outline-none focus:border-primary-500/50 transition-all placeholder:text-slate-600;
+    color: var(--text-primary);
+    background-color: var(--input-bg) !important;
+    border-color: var(--app-border) !important;
   }
+}
+
+[data-theme='light'] .text-white {
+  color: #0f172a !important;
+}
+
+[data-theme='light'] .text-slate-200 {
+  color: #1e293b !important;
+}
+
+[data-theme='light'] .text-slate-300 {
+  color: #334155 !important;
+}
+
+[data-theme='light'] .text-slate-400 {
+  color: #475569 !important;
+}
+
+[data-theme='light'] .text-slate-500 {
+  color: #64748b !important;
+}
+
+[data-theme='light'] .text-slate-600 {
+  color: #64748b !important;
+}
+
+[data-theme='light'] .hover\:text-white:hover {
+  color: #0f172a !important;
 }

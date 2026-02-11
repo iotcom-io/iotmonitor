@@ -1,314 +1,151 @@
-# Docker Deployment Guide - IoT Monitor
+# Docker Deployment Guide - IoTMonitor
 
-## Prerequisites
+This guide is aligned with the current `docker-compose.yml`:
+- External MongoDB and external MQTT are the default runtime model.
+- Local Mongo and local Mosquitto are optional profiles.
+- Redis runs locally by default.
 
-- Docker Engine 20.10+ 
+## 1) Prerequisites
+
+- Docker Engine 20.10+
 - Docker Compose 2.0+
-- 2GB+ free disk space
-- Ports available: 3000, 5001, 27017, 6379, 1883, 8883
+- Open ports: `3000`, `5001` (plus `1883/8883` only if using local MQTT profile)
 
-## Quick Start
+## 2) Configure Environment
 
-### 1. Clone and Navigate
-```bash
-cd /mnt/projects/iotmonitor
-```
-
-### 2. Environment Configuration
-The `.env` file is already configured for Docker deployment. Review and update if needed:
-```bash
-nano backend/.env
-```
-
-**Key Variables:**
-- `MONGODB_URI`: Uses `mongodb://mongodb:27017/iotmonitor` (Docker service name)
-- `REDIS_URL`: Uses `redis://redis:6379` 
-- `MQTT_URL`: Uses `mqtt://mosquitto:1883`
-- `JWT_SECRET`: **Change for production!**
-- `SLACK_WEBHOOK_URL`: Optional Slack notifications
-
-### 3. Build and Start All Services
-```bash
-# Build images and start all containers
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Check service status
-docker-compose ps
-```
-
-### 4. Access the Application
-- **Frontend**: http://localhost:3000
-- **Backend API**: http://localhost:5001
-- **MongoDB**: localhost:27017
-- **MQTT Broker**: localhost:1883
-
-### 5. Initialize Database (First Run Only)
-```bash
-# Run database seed script
-docker-compose exec backend npm run seed
-```
-
-## Services Architecture
-
-### MongoDB
-- **Image**: `mongo:7.0`
-- **Port**: 27017
-- **Volume**: `mongodb_data:/data/db`
-- **Health Check**: Enabled with mongosh ping
-
-### Redis
-- **Image**: `redis:7.0-alpine`
-- **Port**: 6379
-- **Volume**: `redis_data:/data`
-- **Persistence**: AOF enabled
-
-### Mosquitto (MQTT Broker)
-- **Image**: `eclipse-mosquitto:2.0`
-- **Ports**: 1883 (MQTT), 8883 (MQTT over TLS)
-- **Volumes**: Config, data, and logs persisted
-
-### Backend (Node.js + TypeScript)
-- **Build**: Multi-stage from `backend/Dockerfile`
-- **Port**: 5001
-- **Features**:
-  - Built-in Go for agent compilation
-  - REST API + Socket.IO
-  - Auto-restart on failure
-
-### Frontend (React + Vite + Nginx)
-- **Build**: Multi-stage from `frontend/Dockerfile`
-- **Port**: 3000 (Nginx serves on port 80 internally)
-- **Features**:
-  - Production-optimized build
-  - API proxy to backend
-  - Socket.IO WebSocket support
-
-## Docker Commands Reference
-
-### Managing Containers
-```bash
-# Start all services
-docker-compose up -d
-
-# Stop all services
-docker-compose down
-
-# Restart specific service
-docker-compose restart backend
-
-# View logs for specific service
-docker-compose logs -f backend
-
-# View logs for all services
-docker-compose logs -f
-```
-
-### Rebuilding After Code Changes
-```bash
-# Rebuild and restart specific service
-docker-compose up -d --build backend
-
-# Rebuild all services
-docker-compose up -d --build
-
-# Rebuild without cache (clean build)
-docker-compose build --no-cache
-docker-compose up -d
-```
-
-### Database Management
-```bash
-# Access MongoDB shell
-docker-compose exec mongodb mongosh iotmonitor
-
-# Backup MongoDB
-docker-compose exec mongodb mongodump --out /data/db/backup
-
-# Access Redis CLI
-docker-compose exec redis redis-cli
-
-# View MQTT logs
-docker-compose exec mosquitto cat /mosquitto/log/mosquitto.log
-```
-
-### Maintenance
-```bash
-# Remove stopped containers
-docker-compose down
-
-# Remove stopped containers AND volumes (DESTRUCTIVE!)
-docker-compose down -v
-
-# View disk usage
-docker system df
-
-# Clean up unused images
-docker image prune -a
-```
-
-## Volume Management
-
-Persistent data is stored in Docker volumes:
-- `mongodb_data` - Database files
-- `redis_data` - Redis persistence
-- `mosquitto_data` - MQTT broker data
-- `mosquitto_log` - MQTT logs
-
-### Backup Volumes
-```bash
-# Backup MongoDB volume
-docker run --rm -v iotmonitor_mongodb_data:/data -v $(pwd):/backup alpine tar czf /backup/mongodb-backup.tar.gz /data
-
-# Restore MongoDB volume
-docker run --rm -v iotmonitor_mongodb_data:/data -v $(pwd):/backup alpine tar xzf /backup/mongodb-backup.tar.gz -C /
-```
-
-## Troubleshooting
-
-### Container Won't Start
-```bash
-# Check logs
-docker-compose logs backend
-
-# Check if port is already in use
-netstat -tulpn | grep 5001
-
-# Restart with fresh build
-docker-compose down
-docker-compose up -d --build
-```
-
-### MongoDB Connection Issues
-```bash
-# Verify MongoDB is running
-docker-compose ps mongodb
-
-# Check MongoDB health
-docker-compose exec mongodb mongosh --eval "db.adminCommand('ping')"
-
-# Verify environment variable
-docker-compose exec backend env | grep MONGODB_URI
-```
-
-### Backend Build Failures
-```bash
-# Check if Go is installed in container
-docker-compose exec backend go version
-
-# Rebuild with verbose output
-docker-compose build --progress=plain backend
-```
-
-## Production Considerations
-
-### Security
-1. **Change JWT_SECRET** in `.env` to a strong random value
-2. **Remove exposed ports** for databases (27017, 6379) from docker-compose.yml
-3. **Enable MongoDB authentication**:
-   ```yaml
-   environment:
-     MONGO_INITDB_ROOT_USERNAME: admin
-     MONGO_INITDB_ROOT_PASSWORD: strongpassword
-   ```
-4. **Use TLS** for MQTT (port 8883)
-5. **Set up firewall rules** for production server
-
-### Performance
-1. **Limit container resources**:
-   ```yaml
-   deploy:
-     resources:
-       limits:
-         cpus: '1.0'
-         memory: 512M
-   ```
-2. **Use production-grade reverse proxy** (Traefik, Caddy)
-3. **Enable log rotation**
-4. **Monitor container health** with health checks
-
-### Scaling
-For high-availability production deployment:
-- Use MongoDB replica sets
-- Add Redis Sentinel for failover
-- Deploy multiple backend instances with load balancer
-- Use container orchestration (Kubernetes, Docker Swarm)
-
-## Development vs Production
-
-This docker-compose.yml is configured for **production use**. For development:
+Create runtime env file from example:
 
 ```bash
-# Override for development with hot-reload
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+cp backend/.env.example backend/.env
 ```
 
-Create `docker-compose.dev.yml`:
-```yaml
-version: '3.8'
-services:
-  backend:
-    volumes:
-      - ./backend/src:/app/src
-    command: npm run dev
-  frontend:
-    volumes:
-      - ./frontend/src:/app/src
-    command: npm run dev
+Update at minimum:
+
+- `JWT_SECRET`
+- `MONGODB_URI`
+- `MQTT_URL`
+- `MQTT_USERNAME`
+- `MQTT_PASSWORD`
+
+### External services (default)
+
+Use these style values in `backend/.env`:
+
+```env
+MONGODB_URI=mongodb://host.docker.internal:27017/iotmonitor
+MQTT_URL=mqtt://monitoring.iotcom.io:1883
+MQTT_USERNAME=your_mqtt_username
+MQTT_PASSWORD=your_mqtt_password
 ```
 
-## Network Architecture
+### Local profile values
 
-All services run on the `iotmonitor-network` bridge network:
-- Services communicate using container names (e.g., `mongodb`, `redis`)
-- Internal DNS resolution provided by Docker
-- Frontend Nginx proxies API requests to backend
-- Socket.IO connections are maintained through WebSocket upgrade
+If you run local Mongo or Mosquitto via compose profiles:
 
-## Agent Deployment
-
-IoT agents built in the backend container can be downloaded via:
-```
-http://localhost:3000/api/devices/download/{filename}
+```env
+MONGODB_URI=mongodb://mongodb:27017/iotmonitor
+MQTT_URL=mqtt://mosquitto:1883
 ```
 
-The backend container includes Go runtime for on-demand agent compilation.
+## 3) Start Services
 
-## Historical Telemetry APIs
+### A. Standard (external Mongo + external MQTT)
 
-The monitoring API supports archival range queries, time-bucket aggregation, and CSV export.
-
-### Range Query (JSON)
-
-```http
-GET /api/monitoring/metrics/{deviceId}?from=2026-02-09T00:00:00.000Z&to=2026-02-10T00:00:00.000Z&bucket=auto&max_points=1200
+```bash
+docker compose up -d --build
 ```
 
-Query params:
-- `from`, `to`: ISO datetime range
-- `bucket`: `auto`, `raw`, `1m`, `5m`, `15m`, `1h`, `6h`, `1d`
-- `max_points`: max points returned after sampling (default 1200)
-- `limit`: scan limit for raw mode (default 60000)
+### B. Include local Mongo
 
-Notes:
-- `raw` bucket supports up to 48 hours.
-- `auto` chooses a bucket based on range and point limit.
-- If range is omitted, endpoint returns recent real-time points (latest 50 by default).
-
-### CSV Export
-
-```http
-GET /api/monitoring/metrics/{deviceId}/export?from=2026-02-09T00:00:00.000Z&to=2026-02-10T00:00:00.000Z&bucket=1m
+```bash
+docker compose --profile local-db up -d --build
 ```
 
-CSV columns:
-- `timestamp`
-- `cpu_usage`
-- `memory_usage`
-- `disk_usage`
-- `bandwidth_mbps`
-- `sip_rtt_avg_ms`
-- `sip_registration_percent`
-- `point_count`
+### C. Include local MQTT broker
+
+```bash
+docker compose --profile local-mqtt up -d --build
+```
+
+### D. Include both local Mongo + local MQTT
+
+```bash
+docker compose --profile local-db --profile local-mqtt up -d --build
+```
+
+## 4) Access URLs
+
+- Frontend: `http://localhost:3000`
+- Backend API: `http://localhost:5001`
+- Backend health: `http://localhost:5001/health`
+
+## 5) Operational Commands
+
+```bash
+# service status
+docker compose ps
+
+# logs
+docker compose logs -f
+docker compose logs -f backend
+
+# restart backend
+docker compose restart backend
+
+# stop all
+docker compose down
+
+# stop + delete volumes (destructive)
+docker compose down -v
+```
+
+## 6) First-Run Seed
+
+```bash
+docker compose exec backend npm run seed
+```
+
+## 7) Security Defaults in Compose
+
+Current compose hardening includes:
+
+- Removed obsolete `version` key.
+- Optional local infra via profiles (`local-db`, `local-mqtt`).
+- Backend/Frontend `no-new-privileges` security option.
+- Health checks on `redis` and `backend`.
+- `mongodb` and `redis` ports bound to localhost only.
+
+## 8) Production Checklist
+
+1. Use managed MongoDB and secured MQTT broker.
+2. Keep strong `JWT_SECRET` and rotate credentials.
+3. Restrict inbound firewall to `3000/5001` (and MQTT only where required).
+4. Keep `backend/.env` out of source control.
+5. Enable TLS termination using reverse proxy (Nginx/Caddy/Traefik).
+6. Monitor container logs and resource usage.
+
+## 9) Troubleshooting
+
+### Backend cannot connect to Mongo or MQTT
+
+- Check `backend/.env` values.
+- From backend container, test DNS/connectivity to targets.
+- Verify broker credentials and ACLs.
+
+### Frontend up but API failing
+
+- Check backend health endpoint:
+  - `curl http://localhost:5001/health`
+- Check backend logs:
+  - `docker compose logs -f backend`
+
+### Local MQTT profile not receiving traffic
+
+- Ensure `MQTT_URL=mqtt://mosquitto:1883` in `backend/.env`.
+- Start with profile:
+  - `docker compose --profile local-mqtt up -d`
+
+## 10) Notes
+
+- Compose uses `docker compose` syntax (not legacy `docker-compose`).
+- If your Mongo runs on host OS, `host.docker.internal` is mapped for backend via `extra_hosts`.

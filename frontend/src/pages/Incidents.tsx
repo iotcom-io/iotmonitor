@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
 import api from '../lib/axios';
-import { ShieldCheck, RefreshCw, Search, Filter, CheckCircle2 } from 'lucide-react';
+import { ShieldCheck, RefreshCw, Search, Filter, CheckCircle2, Download } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { hasPermission } from '../lib/permissions';
@@ -26,6 +26,7 @@ export const Incidents = () => {
     const [loading, setLoading] = useState(true);
     const [activeLoading, setActiveLoading] = useState(true);
     const [total, setTotal] = useState(0);
+    const [exporting, setExporting] = useState(false);
 
     const [query, setQuery] = useState(searchParams.get('q') || '');
     const [status, setStatus] = useState(searchParams.get('status') || 'all');
@@ -75,6 +76,39 @@ export const Incidents = () => {
         await api.post(`/incidents/${id}/resolve`);
         fetchIncidents();
         fetchActiveIncidents();
+    };
+
+    const exportIncidents = async () => {
+        try {
+            setExporting(true);
+            const params: any = { limit: 10000 };
+            if (query.trim()) params.q = query.trim();
+            if (status !== 'all') params.status = status;
+            if (targetType !== 'all') params.target_type = targetType;
+            if (severity !== 'all') params.severity = severity;
+            if (targetId.trim()) params.target_id = targetId.trim();
+            if (fromDate) params.from = fromDate;
+            if (toDate) params.to = toDate;
+
+            const response = await api.get('/incidents/export', {
+                params,
+                responseType: 'blob',
+            });
+            const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `incidents-${Date.now()}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error('Failed to export incidents', error);
+            window.alert('Failed to export incidents.');
+        } finally {
+            setExporting(false);
+        }
     };
 
     useEffect(() => {
@@ -149,7 +183,12 @@ export const Incidents = () => {
                     <ShieldCheck className="text-primary-400" />
                     <h2 className="text-2xl font-bold text-white">Incidents</h2>
                 </div>
-                <button className="icon-btn" onClick={() => { fetchIncidents(); fetchActiveIncidents(); }}><RefreshCw size={16} /></button>
+                <div className="flex items-center gap-2">
+                    <button className="icon-btn" disabled={exporting} onClick={exportIncidents} title="Export incidents CSV">
+                        <Download size={16} />
+                    </button>
+                    <button className="icon-btn" onClick={() => { fetchIncidents(); fetchActiveIncidents(); }}><RefreshCw size={16} /></button>
+                </div>
             </div>
 
             <div className="card overflow-x-auto">

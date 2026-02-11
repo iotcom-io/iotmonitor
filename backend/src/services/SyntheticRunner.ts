@@ -387,10 +387,14 @@ const buildRecoveryMessage = (check: any, result: SyntheticResult) => {
 const sendCheckNotification = async (check: any, subject: string, message: string, settings?: any) => {
     const resolvedSettings = settings || await SystemSettings.findOne();
     const slackWebhook = resolveSlackWebhook(check, resolvedSettings);
+    const notificationChannelIds: string[] = Array.isArray(check.notification_channel_ids)
+        ? Array.from(new Set<string>(check.notification_channel_ids.map((entry: any) => String(entry || '').trim()).filter(Boolean)))
+        : [];
 
     await NotificationService.send({
         subject,
         message,
+        channelIds: notificationChannelIds,
         channels: normalizeChannels(check.channels),
         recipients: {
             slackWebhook,

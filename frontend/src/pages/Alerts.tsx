@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import api from '../lib/axios';
-import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { AlertTriangle, RefreshCw, Download } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 import { hasPermission } from '../lib/permissions';
 import { AssigneeBadges } from '../components/AssigneeBadges';
@@ -43,6 +43,7 @@ export const Alerts = () => {
     const [alerts, setAlerts] = useState<any[]>([]);
     const [users, setUsers] = useState<Record<string, { name?: string; email?: string }>>({});
     const [loading, setLoading] = useState(true);
+    const [exporting, setExporting] = useState(false);
 
     const fetchAlerts = async () => {
         setLoading(true);
@@ -51,6 +52,27 @@ export const Alerts = () => {
             setAlerts(Array.isArray(res.data) ? res.data : []);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const exportAlerts = async () => {
+        try {
+            setExporting(true);
+            const response = await api.get('/alerts/active/export', { responseType: 'blob' });
+            const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `active-alerts-${Date.now()}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error('Failed to export active alerts', error);
+            window.alert('Failed to export active alerts.');
+        } finally {
+            setExporting(false);
         }
     };
 
@@ -99,7 +121,12 @@ export const Alerts = () => {
                     <AlertTriangle className="text-primary-400" />
                     <h2 className="text-2xl font-bold text-white">Active Alerts</h2>
                 </div>
-                <button className="icon-btn" onClick={fetchAlerts}><RefreshCw size={16} /></button>
+                <div className="flex items-center gap-2">
+                    <button className="icon-btn" onClick={exportAlerts} disabled={exporting} title="Export active alerts CSV">
+                        <Download size={16} />
+                    </button>
+                    <button className="icon-btn" onClick={fetchAlerts}><RefreshCw size={16} /></button>
+                </div>
             </div>
 
             <div className="card overflow-x-auto">

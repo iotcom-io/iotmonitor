@@ -61,7 +61,7 @@ const buildAlertMessage = (license: any, state: LicenseState, days: number, rene
         lines.push(`Seats: ${license.seats_used || 0}/${license.seats_total}`);
     }
     if (license.amount) {
-        lines.push(`Amount: ${license.amount} ${license.currency || 'USD'}`);
+        lines.push(`Amount: ${license.amount} ${license.currency || 'INR'}`);
     }
 
     return lines.join('\n');
@@ -80,11 +80,22 @@ const buildResolvedMessage = (license: any, renewalDate: Date, previousState: Li
     ].join('\n');
 };
 
-const channelsForLicense = (license: any) => {
+const channelsForLicense = (license: any): ('slack' | 'email' | 'custom')[] => {
     const channels = Array.isArray(license.channels) && license.channels.length > 0
         ? license.channels
         : ['slack'];
-    return channels.filter((entry: string) => ['slack', 'email', 'custom'].includes(String(entry)));
+    return channels
+        .map((entry: any) => String(entry || '').trim().toLowerCase())
+        .filter((entry: string): entry is 'slack' | 'email' | 'custom' => ['slack', 'email', 'custom'].includes(entry));
+};
+
+const channelIdsForLicense = (license: any): string[] => {
+    if (!Array.isArray(license.notification_channel_ids)) return [];
+    return Array.from(new Set<string>(
+        license.notification_channel_ids
+            .map((entry: any) => String(entry || '').trim())
+            .filter(Boolean)
+    ));
 };
 
 const ensureIncident = async (
@@ -157,6 +168,7 @@ const evaluateOne = async (license: any, settings: any) => {
 
     const lifecycle = await ensureIncident(license, state, severity, summary, message);
     const channels = channelsForLicense(license) as ('slack' | 'email' | 'custom')[];
+    const channelIds = channelIdsForLicense(license);
     const slackWebhook = settings?.notification_slack_webhook || settings?.slack_webhooks?.[0]?.url;
 
     // state transition notifications
@@ -164,6 +176,7 @@ const evaluateOne = async (license: any, settings: any) => {
         await NotificationService.send({
             subject: `LICENSE ${state.toUpperCase()}: ${license.name}`,
             message: buildAlertMessage(license, state, days, renewalDate),
+            channelIds,
             channels,
             recipients: { slackWebhook },
         });
@@ -173,6 +186,7 @@ const evaluateOne = async (license: any, settings: any) => {
         await NotificationService.send({
             subject: `LICENSE RECOVERED: ${license.name}`,
             message: buildResolvedMessage(license, renewalDate, previousState),
+            channelIds,
             channels,
             recipients: { slackWebhook },
         });
@@ -185,6 +199,7 @@ const evaluateOne = async (license: any, settings: any) => {
             await NotificationService.send({
                 subject: `LICENSE REMINDER: ${license.name}`,
                 message: buildAlertMessage(license, state, days, renewalDate),
+                channelIds,
                 channels,
                 recipients: { slackWebhook },
             });
@@ -291,4 +306,3 @@ export const startLicenseMonitoring = () => {
         }, 30000);
     }
 };
-

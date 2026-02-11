@@ -1,9 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import api from '../lib/axios';
-import { KeyRound, Plus, RefreshCw, Edit3, Trash2, X } from 'lucide-react';
+import { KeyRound, Plus, RefreshCw, Edit3, Trash2, X, Download } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 import { hasPermission } from '../lib/permissions';
 import { AssigneeBadges } from '../components/AssigneeBadges';
+
+type NotificationChannelOption = {
+    _id: string;
+    name: string;
+    type: 'slack' | 'email' | 'webhook' | 'sms';
+    enabled: boolean;
+    is_default?: boolean;
+};
 
 const blankForm = {
     name: '',
@@ -17,12 +25,13 @@ const blankForm = {
     critical_days: 7,
     billing_cycle: 'yearly',
     amount: '',
-    currency: 'USD',
+    currency: 'INR',
     seats_total: '',
     seats_used: '',
     auto_renew: false,
     enabled: true,
     status: 'active',
+    notification_channel_ids: [] as string[],
 };
 
 const stateClass = (state: string) => {
@@ -33,7 +42,14 @@ const stateClass = (state: string) => {
     return 'bg-emerald-500/20 text-emerald-300';
 };
 
-const LicenseModal = ({ open, onClose, onSaved, initial }: any) => {
+const renderCurrencyTotals = (totals: Record<string, number> | undefined) => {
+    if (!totals || Object.keys(totals).length === 0) return 'INR 0.00';
+    return Object.entries(totals)
+        .map(([currency, amount]) => `${currency} ${Number(amount || 0).toFixed(2)}`)
+        .join(' | ');
+};
+
+const LicenseModal = ({ open, onClose, onSaved, initial, availableChannels }: any) => {
     const [form, setForm] = useState<any>(blankForm);
     const [saving, setSaving] = useState(false);
 
@@ -53,6 +69,7 @@ const LicenseModal = ({ open, onClose, onSaved, initial }: any) => {
             amount: initial.amount ?? '',
             seats_total: initial.seats_total ?? '',
             seats_used: initial.seats_used ?? '',
+            notification_channel_ids: Array.isArray(initial.notification_channel_ids) ? initial.notification_channel_ids : [],
         });
     }, [open, initial]);
 
@@ -69,6 +86,11 @@ const LicenseModal = ({ open, onClose, onSaved, initial }: any) => {
                 seats_used: String(form.seats_used).trim() ? Number(form.seats_used) : undefined,
                 warning_days: Number(form.warning_days || 30),
                 critical_days: Number(form.critical_days || 7),
+                notification_channel_ids: Array.from(new Set(
+                    (Array.isArray(form.notification_channel_ids) ? form.notification_channel_ids : [])
+                        .map((entry: any) => String(entry || '').trim())
+                        .filter(Boolean)
+                )),
             };
 
             if (form._id) {
@@ -121,6 +143,36 @@ const LicenseModal = ({ open, onClose, onSaved, initial }: any) => {
                     </div>
                 </div>
 
+                <div className="space-y-2">
+                    <label className="text-sm text-slate-400">Notification Destinations</label>
+                    <div className="rounded-xl border border-dark-border p-3 space-y-2">
+                        <div className="text-xs text-slate-500">
+                            Select channel(s) for this license/subscription. Leave empty to use the default channel fallback.
+                        </div>
+                        {availableChannels.length === 0 ? (
+                            <div className="text-xs text-amber-300">No channels configured. Add channels in Notifications settings.</div>
+                        ) : availableChannels.map((channel: NotificationChannelOption) => (
+                            <label key={channel._id} className="flex items-center justify-between gap-2 text-sm text-slate-200">
+                                <span className="flex items-center gap-2">
+                                    <input
+                                        type="checkbox"
+                                        checked={(form.notification_channel_ids || []).includes(channel._id)}
+                                        onChange={(e) => {
+                                            const set = new Set(form.notification_channel_ids || []);
+                                            if (e.target.checked) set.add(channel._id);
+                                            else set.delete(channel._id);
+                                            setForm({ ...form, notification_channel_ids: Array.from(set) });
+                                        }}
+                                    />
+                                    <span>{channel.name}</span>
+                                    <span className="text-xs text-slate-500 uppercase">{channel.type}</span>
+                                </span>
+                                {channel.is_default && <span className="text-[10px] px-2 py-0.5 rounded bg-primary-500/20 text-primary-300">default</span>}
+                            </label>
+                        ))}
+                    </div>
+                </div>
+
                 <div className="grid md:grid-cols-3 gap-3">
                     <div className="space-y-2">
                         <label className="text-sm text-slate-400">Renewal Date</label>
@@ -143,7 +195,7 @@ const LicenseModal = ({ open, onClose, onSaved, initial }: any) => {
                     </div>
                     <div className="space-y-2">
                         <label className="text-sm text-slate-400">Currency</label>
-                        <input className="input-field" value={form.currency || 'USD'} onChange={(e) => setForm({ ...form, currency: e.target.value })} />
+                        <input className="input-field" value={form.currency || 'INR'} onChange={(e) => setForm({ ...form, currency: e.target.value })} />
                     </div>
                     <div className="space-y-2">
                         <label className="text-sm text-slate-400">Seats Total</label>
@@ -192,6 +244,8 @@ export const Licenses = () => {
     const [loading, setLoading] = useState(true);
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState<any>(null);
+    const [notificationChannels, setNotificationChannels] = useState<NotificationChannelOption[]>([]);
+    const [exporting, setExporting] = useState(false);
 
     const fetchData = async () => {
         setLoading(true);
@@ -209,6 +263,18 @@ export const Licenses = () => {
 
     useEffect(() => {
         fetchData();
+    }, []);
+
+    useEffect(() => {
+        api.get('/notification-channels')
+            .then((res) => {
+                const rows = Array.isArray(res.data) ? res.data : [];
+                setNotificationChannels(rows.filter((row: NotificationChannelOption) => row.enabled));
+            })
+            .catch((error) => {
+                console.error('Failed to fetch notification channels for licenses', error);
+                setNotificationChannels([]);
+            });
     }, []);
 
     useEffect(() => {
@@ -251,6 +317,27 @@ export const Licenses = () => {
         fetchData();
     };
 
+    const exportLicenses = async () => {
+        try {
+            setExporting(true);
+            const response = await api.get('/licenses/export', { responseType: 'blob' });
+            const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `licenses-${Date.now()}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error('Failed to export licenses', error);
+            window.alert('Failed to export licenses.');
+        } finally {
+            setExporting(false);
+        }
+    };
+
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -262,6 +349,7 @@ export const Licenses = () => {
                     </div>
                 </div>
                 <div className="flex gap-2">
+                    <button className="icon-btn" disabled={exporting} onClick={exportLicenses} title="Export licenses CSV"><Download size={16} /></button>
                     <button className="icon-btn" onClick={fetchData}><RefreshCw size={16} /></button>
                     <button className="btn-primary flex items-center gap-2" onClick={() => { setEditing(null); setModalOpen(true); }}>
                         <Plus size={16} /> New Entry
@@ -270,13 +358,23 @@ export const Licenses = () => {
             </div>
 
             {stats && (
-                <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
                     <div className="card"><div className="text-xs text-slate-400">Total</div><div className="text-xl font-bold text-white">{stats.total || 0}</div></div>
                     <div className="card"><div className="text-xs text-slate-400">OK</div><div className="text-xl font-bold text-emerald-400">{stats.ok || 0}</div></div>
                     <div className="card"><div className="text-xs text-slate-400">Warning</div><div className="text-xl font-bold text-amber-400">{stats.warning || 0}</div></div>
                     <div className="card"><div className="text-xs text-slate-400">Critical</div><div className="text-xl font-bold text-rose-400">{stats.critical || 0}</div></div>
                     <div className="card"><div className="text-xs text-slate-400">Expired</div><div className="text-xl font-bold text-red-400">{stats.expired || 0}</div></div>
                     <div className="card"><div className="text-xs text-slate-400">Paused</div><div className="text-xl font-bold text-slate-300">{stats.paused || 0}</div></div>
+                    <div className="card">
+                        <div className="text-xs text-slate-400">Renewal Amount (30d)</div>
+                        <div className="text-sm font-bold text-cyan-300">{renderCurrencyTotals(stats.renewal_spend_30d?.totals_by_currency)}</div>
+                        <div className="text-xs text-slate-500 mt-1">{stats.renewal_spend_30d?.count || 0} item(s)</div>
+                    </div>
+                    <div className="card">
+                        <div className="text-xs text-slate-400">Renewal Amount (90d)</div>
+                        <div className="text-sm font-bold text-cyan-300">{renderCurrencyTotals(stats.renewal_spend_90d?.totals_by_currency)}</div>
+                        <div className="text-xs text-slate-500 mt-1">{stats.renewal_spend_90d?.count || 0} item(s)</div>
+                    </div>
                 </div>
             )}
 
@@ -331,7 +429,13 @@ export const Licenses = () => {
                 )}
             </div>
 
-            <LicenseModal open={modalOpen} onClose={() => setModalOpen(false)} onSaved={fetchData} initial={editing} />
+            <LicenseModal
+                open={modalOpen}
+                onClose={() => setModalOpen(false)}
+                onSaved={fetchData}
+                initial={editing}
+                availableChannels={notificationChannels}
+            />
         </div>
     );
 };

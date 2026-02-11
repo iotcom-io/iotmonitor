@@ -1,10 +1,12 @@
 import nodemailer from 'nodemailer';
 import axios from 'axios';
 import SystemSettings from '../models/SystemSettings';
+import NotificationChannel from '../models/NotificationChannel';
 
 interface NotificationOptions {
     subject: string;
     message: string;
+    channelIds?: string[];
     channels: ('email' | 'slack' | 'whatsapp' | 'custom')[];
     recipients: {
         email?: string;
@@ -30,6 +32,30 @@ export class NotificationService {
 
         const settings = await SystemSettings.findOne();
 
+        const explicitChannelIds = Array.isArray(options.channelIds)
+            ? Array.from(new Set(options.channelIds.map((entry) => String(entry || '').trim()).filter(Boolean)))
+            : [];
+
+        let configuredChannels: any[] = [];
+        if (explicitChannelIds.length > 0) {
+            configuredChannels = await NotificationChannel.find({
+                _id: { $in: explicitChannelIds },
+                enabled: true,
+            });
+        } else {
+            configuredChannels = await NotificationChannel.find({
+                enabled: true,
+                is_default: true,
+            });
+        }
+
+        if (configuredChannels.length > 0) {
+            await Promise.allSettled(
+                configuredChannels.map((channel) => this.sendViaConfiguredChannel(channel, options.subject, options.message))
+            );
+            return;
+        }
+
         let slackUrl = options.recipients.slackWebhook || options.deviceSlack || process.env.SLACK_WEBHOOK_URL;
         if (!slackUrl && options.channels.includes('slack')) {
             slackUrl = settings?.notification_slack_webhook || settings?.slack_webhooks?.[0]?.url;
@@ -52,6 +78,53 @@ export class NotificationService {
         }
 
         await Promise.allSettled(promises);
+    }
+
+    private static async sendViaConfiguredChannel(channel: any, subject: string, message: string) {
+        const channelType = String(channel.type || '').toLowerCase();
+        const config = channel.config || {};
+
+        if (channelType === 'slack') {
+            const slackUrl = String(config.slack_webhook_url || '').trim();
+            if (!slackUrl) {
+                console.warn(`[NotificationService] Slack channel '${channel.name}' has no webhook URL`);
+                return;
+            }
+            await this.sendSlack(slackUrl, message);
+            return;
+        }
+
+        if (channelType === 'email') {
+            const recipients = Array.isArray(config.email_addresses)
+                ? config.email_addresses.map((entry: any) => String(entry || '').trim()).filter(Boolean)
+                : [];
+            if (recipients.length === 0) {
+                console.warn(`[NotificationService] Email channel '${channel.name}' has no email addresses`);
+                return;
+            }
+            await Promise.allSettled(recipients.map((email: string) => this.sendEmail(email, subject, message)));
+            return;
+        }
+
+        if (channelType === 'webhook') {
+            const webhookUrl = String(config.webhook_url || '').trim();
+            if (!webhookUrl) {
+                console.warn(`[NotificationService] Webhook channel '${channel.name}' has no URL`);
+                return;
+            }
+            await axios.post(webhookUrl, {
+                subject,
+                message,
+                channel: channel.name,
+                timestamp: new Date().toISOString(),
+            });
+            return;
+        }
+
+        if (channelType === 'sms') {
+            console.warn(`[NotificationService] SMS channel '${channel.name}' is not implemented yet`);
+            return;
+        }
     }
 
     private static async sendEmail(to: string, subject: string, text: string) {

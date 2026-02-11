@@ -5,6 +5,7 @@ export interface INotificationChannel extends Document {
     description?: string;
     type: 'slack' | 'email' | 'webhook' | 'sms';
     enabled: boolean;
+    is_default?: boolean;
     config: {
         slack_webhook_url?: string;
         slack_channel?: string;
@@ -33,6 +34,7 @@ const NotificationChannelSchema = new Schema<INotificationChannel>({
         enum: ['slack', 'email', 'webhook', 'sms']
     },
     enabled: { type: Boolean, default: true },
+    is_default: { type: Boolean, default: false },
     config: {
         slack_webhook_url: { type: String },
         slack_channel: { type: String },
@@ -56,5 +58,7 @@ const NotificationChannelSchema = new Schema<INotificationChannel>({
 NotificationChannelSchema.pre('save', function (this: any) {
     this.updated_at = new Date();
 });
+
+NotificationChannelSchema.index({ is_default: 1, enabled: 1 });
 
 export default mongoose.model<INotificationChannel>('NotificationChannel', NotificationChannelSchema);

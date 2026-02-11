@@ -68,6 +68,13 @@ const formatDateTime = (value?: string | Date | null) => {
     return date.toLocaleString();
 };
 
+const formatCurrencyTotals = (totals?: Record<string, number>) => {
+    if (!totals || Object.keys(totals).length === 0) return '$0';
+    return Object.entries(totals)
+        .map(([currency, amount]) => `${currency} ${Number(amount || 0).toFixed(2)}`)
+        .join(' | ');
+};
+
 const licenseRiskRank = (row: any) => {
     const state = String(row?.status === 'paused' ? 'paused' : row?.computed_state || '').toLowerCase();
     if (state === 'expired') return 4;
@@ -281,6 +288,15 @@ export const Dashboard = () => {
                 <StatCard icon={HardDrive} label="Monitor Avg Uptime" value={`${Number(webStats?.summary?.avg_uptime_pct || 0).toFixed(2)}%`} tone="amber" subvalue={canViewSynthetics ? 'Last 24h' : 'No access'} />
                 <StatCard icon={KeyRound} label="License Items" value={String(licenseStats?.total || 0)} tone="slate" subvalue={canViewLicenses ? `${atRiskLicenses} at risk` : 'No access'} />
                 <StatCard icon={Cpu} label="Avg Device Uptime" value={formatDuration(avgUptimeSeconds)} tone="emerald" subvalue="Across online fleet" />
+                {canViewLicenses && (
+                    <StatCard
+                        icon={KeyRound}
+                        label="Renewal Amount (30d)"
+                        value={formatCurrencyTotals(licenseStats?.renewal_spend_30d?.totals_by_currency)}
+                        tone="cyan"
+                        subvalue={`${Number(licenseStats?.renewal_spend_30d?.count || 0)} upcoming`}
+                    />
+                )}
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">

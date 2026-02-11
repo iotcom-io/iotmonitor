@@ -1,33 +1,46 @@
-version: '3.8'
-
 services:
   mongodb:
-    # Optional local MongoDB. Disabled by default.
-    # Start with: docker compose --profile local-db up -d
+    # Optional local MongoDB (disabled by default).
+    # Enable with: docker compose --profile local-db up -d
     profiles: ["local-db"]
     image: mongo:7.0
     container_name: iotmonitor-mongodb
     ports:
-      - "27017:27017"
+      - "127.0.0.1:27017:27017"
     volumes:
       - mongodb_data:/data/db
     networks:
       - iotmonitor-network
-    restart: always
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand('ping').ok\" | grep 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   redis:
     image: redis:7.0-alpine
     container_name: iotmonitor-redis
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
     networks:
       - iotmonitor-network
-    restart: always
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   mosquitto:
+    # Optional local MQTT broker (disabled by default).
+    # Enable with: docker compose --profile local-mqtt up -d
+    profiles: ["local-mqtt"]
     image: eclipse-mosquitto:2.0
     container_name: iotmonitor-mosquitto
     ports:
@@ -39,7 +52,7 @@ services:
       - mosquitto_log:/mosquitto/log
     networks:
       - iotmonitor-network
-    restart: always
+    restart: unless-stopped
 
   backend:
     build:
@@ -50,33 +63,43 @@ services:
       - "5001:5001"
     env_file: ./backend/.env
     environment:
-      # Use an existing MongoDB running on host by default.
-      # Override by exporting MONGODB_URI before running docker compose.
+      # External infra defaults (override in backend/.env or shell env).
       MONGODB_URI: ${MONGODB_URI:-mongodb://host.docker.internal:27017/iotmonitor}
+      MQTT_URL: ${MQTT_URL:-mqtt://monitoring.iotcom.io:1883}
+      MQTT_USERNAME: ${MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
     depends_on:
       redis:
-        condition: service_started
-      mosquitto:
-        condition: service_started
+        condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
       - iotmonitor-network
-    restart: always
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5001/health >/dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
     volumes:
-      # Mount agent directory for runtime agent generation
       - ./agent:/app/agent
 
   frontend:
     build: ./frontend
     container_name: iotmonitor-frontend
     ports:
-      - "3000:80" # Mapping to Nginx default port inside container
+      - "3000:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     networks:
       - iotmonitor-network
-    restart: always
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
 
 networks:
   iotmonitor-network:

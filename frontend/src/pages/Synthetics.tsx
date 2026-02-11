@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
 import api from '../lib/axios';
-import { Globe, Plus, RefreshCw, X, Pause, Play, Trash2, Edit3, PlayCircle, ExternalLink } from 'lucide-react';
+import { Globe, Plus, RefreshCw, X, Pause, Play, Trash2, Edit3, PlayCircle, ExternalLink, Download } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
 import { useAuthStore } from '../store/useAuthStore';
@@ -15,6 +15,14 @@ const typeLabels: Record<string, string> = {
 const kindLabels: Record<string, string> = {
     website: 'Website',
     api: 'API',
+};
+
+type NotificationChannelOption = {
+    _id: string;
+    name: string;
+    type: 'slack' | 'email' | 'webhook' | 'sms';
+    enabled: boolean;
+    is_default?: boolean;
 };
 
 const normalizeStatusCodes = (raw: string) => {
@@ -96,7 +104,7 @@ const describeSslState = (check: any) => {
     return 'Awaiting first SSL check';
 };
 
-const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
+const NewCheckModal = ({ isOpen, onClose, onSaved, initial, availableChannels }: any) => {
     const blank = {
         name: '',
         target_kind: 'website',
@@ -114,6 +122,7 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
         max_response_time_ms: '',
         ssl_expiry_days: 7,
         channels: ['slack'],
+        notification_channel_ids: [] as string[],
         slack_webhook_name: '',
         custom_webhook_name: '',
     };
@@ -137,6 +146,7 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
             ssl_enabled: Boolean(source.ssl_enabled),
             max_response_time_ms: source.max_response_time_ms ?? '',
             ssl_expiry_days: source.ssl_expiry_days ?? 7,
+            notification_channel_ids: Array.isArray(source.notification_channel_ids) ? source.notification_channel_ids : [],
         });
         setRequestConfigError('');
     }, [initial, isOpen]);
@@ -177,6 +187,11 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
             const payload: any = {
                 ...form,
                 method,
+                notification_channel_ids: Array.from(new Set(
+                    (Array.isArray(form.notification_channel_ids) ? form.notification_channel_ids : [])
+                        .map((entry: any) => String(entry || '').trim())
+                        .filter(Boolean)
+                )),
                 expected_status_codes: normalizeStatusCodes(
                     Array.isArray(form.expected_status_codes)
                         ? form.expected_status_codes.join(',')
@@ -404,20 +419,30 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
                     </div>
 
                     <div className="space-y-2">
-                        <label className="text-sm text-slate-400">Notification Channels</label>
-                        <div className="flex gap-3 text-sm text-white">
-                            {['slack', 'email', 'custom'].map(ch => (
-                                <label key={ch} className="flex items-center gap-2">
-                                    <input
-                                        type="checkbox"
-                                        checked={(form.channels || []).includes(ch)}
-                                        onChange={e => {
-                                            const set = new Set(form.channels || []);
-                                            e.target.checked ? set.add(ch) : set.delete(ch);
-                                            setForm({ ...form, channels: Array.from(set) });
-                                        }}
-                                    />
-                                    {ch.toUpperCase()}
+                        <label className="text-sm text-slate-400">Notification Destinations</label>
+                        <div className="rounded-xl border border-dark-border p-3 space-y-2">
+                            <div className="text-xs text-slate-500">
+                                Select channel(s) for this monitor. Leave empty to use the default channel fallback.
+                            </div>
+                            {availableChannels.length === 0 ? (
+                                <div className="text-xs text-amber-300">No channels configured. Add channels in Notifications settings.</div>
+                            ) : availableChannels.map((channel: NotificationChannelOption) => (
+                                <label key={channel._id} className="flex items-center justify-between gap-2 text-sm text-slate-200">
+                                    <span className="flex items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={(form.notification_channel_ids || []).includes(channel._id)}
+                                            onChange={(e) => {
+                                                const set = new Set(form.notification_channel_ids || []);
+                                                if (e.target.checked) set.add(channel._id);
+                                                else set.delete(channel._id);
+                                                setForm({ ...form, notification_channel_ids: Array.from(set) });
+                                            }}
+                                        />
+                                        <span>{channel.name}</span>
+                                        <span className="text-xs text-slate-500 uppercase">{channel.type}</span>
+                                    </span>
+                                    {channel.is_default && <span className="text-[10px] px-2 py-0.5 rounded bg-primary-500/20 text-primary-300">default</span>}
                                 </label>
                             ))}
                         </div>
@@ -444,6 +469,8 @@ export const Synthetics = () => {
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState<any>(null);
     const [windowHours, setWindowHours] = useState<number>(24);
+    const [notificationChannels, setNotificationChannels] = useState<NotificationChannelOption[]>([]);
+    const [exporting, setExporting] = useState(false);
 
     const fetchChecks = async () => {
         setLoading(true);
@@ -467,9 +494,42 @@ export const Synthetics = () => {
 
     useEffect(() => { fetchChecks(); }, [windowHours]);
 
+    useEffect(() => {
+        api.get('/notification-channels')
+            .then((res) => {
+                const rows = Array.isArray(res.data) ? res.data : [];
+                setNotificationChannels(rows.filter((row: NotificationChannelOption) => row.enabled));
+            })
+            .catch((error) => {
+                console.error('Failed to fetch notification channels for web monitor form', error);
+                setNotificationChannels([]);
+            });
+    }, []);
+
     const runNow = async (id: string) => {
         await api.post(`/synthetics/${id}/run`);
         await fetchChecks();
+    };
+
+    const exportChecks = async () => {
+        try {
+            setExporting(true);
+            const response = await api.get('/synthetics/export', { responseType: 'blob' });
+            const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `web-monitors-${Date.now()}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error('Failed to export web monitors', error);
+            window.alert('Failed to export web monitors.');
+        } finally {
+            setExporting(false);
+        }
     };
 
     const canCreate = hasPermission('synthetics.create', user);
@@ -527,6 +587,7 @@ export const Synthetics = () => {
                         <option value={72}>Last 72h</option>
                         <option value={168}>Last 7d</option>
                     </select>
+                    <button className="icon-btn" disabled={exporting} title="Export web monitors CSV" onClick={exportChecks}><Download size={18} /></button>
                     <button className="icon-btn" onClick={fetchChecks}><RefreshCw size={18} /></button>
                     {canCreate && (
                         <button className="btn-primary flex items-center gap-2" onClick={() => { setEditing(null); setModalOpen(true); }}>
@@ -633,7 +694,13 @@ export const Synthetics = () => {
                 </div>
             )}
 
-            <NewCheckModal isOpen={modalOpen} onClose={() => setModalOpen(false)} onSaved={fetchChecks} initial={editing} />
+            <NewCheckModal
+                isOpen={modalOpen}
+                onClose={() => setModalOpen(false)}
+                onSaved={fetchChecks}
+                initial={editing}
+                availableChannels={notificationChannels}
+            />
         </div>
     );
 };

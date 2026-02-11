@@ -15,6 +15,15 @@ const parseDate = (value: any): Date | null => {
     return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
+const csvEscape = (value: unknown) => {
+    if (value === null || value === undefined) return '';
+    const text = String(value);
+    if (/[",\n]/.test(text)) {
+        return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
+};
+
 // list by target
 router.get('/', authorizePermission('incidents.view'), async (req: AuthRequest, res) => {
     try {
@@ -191,6 +200,158 @@ router.get('/', authorizePermission('incidents.view'), async (req: AuthRequest, 
         res.json(withAssignees);
     } catch (error: any) {
         res.status(500).json({ message: error.message || 'Failed to fetch incidents' });
+    }
+});
+
+router.get('/export', authorizePermission('incidents.view'), async (req: AuthRequest, res) => {
+    try {
+        const {
+            target_id,
+            status,
+            target_type,
+            severity,
+            q,
+            from,
+            to,
+            limit = '5000',
+        } = req.query as Record<string, string | undefined>;
+
+        const query: any = {};
+
+        if (target_id) query.target_id = target_id;
+        if (status) query.status = status;
+        if (target_type) query.target_type = target_type;
+        if (severity) query.severity = severity;
+
+        const fromDate = parseDate(from);
+        const toDate = parseDate(to);
+        if (fromDate || toDate) {
+            query.started_at = {};
+            if (fromDate) query.started_at.$gte = fromDate;
+            if (toDate) query.started_at.$lte = toDate;
+        }
+
+        if (q && q.trim()) {
+            const regex = new RegExp(q.trim(), 'i');
+            query.$or = [
+                { summary: regex },
+                { target_name: regex },
+                { target_id: regex },
+                { 'updates.message': regex },
+            ];
+        }
+
+        const parsedLimit = Math.max(1, Math.min(10000, Number(limit) || 5000));
+        const incidentsRaw = await Incident.find(query).sort({ created_at: -1 }).limit(parsedLimit);
+
+        let incidents = incidentsRaw;
+        if (req.user?.role !== 'admin') {
+            const deviceTargetIds = Array.from(new Set(
+                incidentsRaw
+                    .filter((incident: any) => incident.target_type !== 'synthetic')
+                    .map((incident: any) => String(incident.target_id || ''))
+                    .filter(Boolean)
+            ));
+            const syntheticTargetIds = Array.from(new Set(
+                incidentsRaw
+                    .filter((incident: any) => incident.target_type === 'synthetic')
+                    .map((incident: any) => String(incident.target_id || ''))
+                    .filter(Boolean)
+            ));
+            const licenseTargetIds = Array.from(new Set(
+                incidentsRaw
+                    .filter((incident: any) => incident.target_type === 'license')
+                    .map((incident: any) => String(incident.target_id || ''))
+                    .filter(Boolean)
+            ));
+
+            const [devices, synthetics, licenses] = await Promise.all([
+                deviceTargetIds.length > 0
+                    ? Device.find({ device_id: { $in: deviceTargetIds } }).select({ device_id: 1, assigned_user_ids: 1 })
+                    : Promise.resolve([] as any[]),
+                syntheticTargetIds.length > 0
+                    ? SyntheticCheck.find({ _id: { $in: syntheticTargetIds } }).select({ _id: 1, assigned_user_ids: 1 })
+                    : Promise.resolve([] as any[]),
+                licenseTargetIds.length > 0
+                    ? LicenseAsset.find({ _id: { $in: licenseTargetIds } }).select({ _id: 1, assigned_user_ids: 1 })
+                    : Promise.resolve([] as any[]),
+            ]);
+
+            const deviceMap = new Map<string, any>();
+            const syntheticMap = new Map<string, any>();
+            const licenseMap = new Map<string, any>();
+            devices.forEach((device: any) => deviceMap.set(String(device.device_id), device));
+            synthetics.forEach((synthetic: any) => syntheticMap.set(String(synthetic._id), synthetic));
+            licenses.forEach((license: any) => licenseMap.set(String(license._id), license));
+
+            incidents = incidentsRaw.filter((incident: any) => {
+                if (incident.target_type === 'synthetic') {
+                    const monitor = syntheticMap.get(String(incident.target_id));
+                    if (!monitor) return false;
+                    return canAccessSynthetic(req.user, monitor);
+                }
+
+                if (incident.target_type === 'license') {
+                    const license = licenseMap.get(String(incident.target_id));
+                    if (!license) return false;
+                    const assigned = Array.isArray(license.assigned_user_ids) ? license.assigned_user_ids : [];
+                    if (assigned.length === 0) return true;
+                    return assigned.includes(String(req.user?.id || ''));
+                }
+
+                const device = deviceMap.get(String(incident.target_id));
+                if (!device) return false;
+                return canAccessDevice(req.user, device);
+            }) as any;
+        }
+
+        const rows = (incidents as any[]).map((incident: any) => {
+            const latestUpdate = Array.isArray(incident.updates) && incident.updates.length > 0
+                ? incident.updates[incident.updates.length - 1]
+                : null;
+
+            return [
+                String(incident._id || ''),
+                String(incident.target_type || ''),
+                String(incident.target_id || ''),
+                String(incident.target_name || ''),
+                String(incident.summary || ''),
+                String(incident.severity || ''),
+                String(incident.status || ''),
+                incident.started_at ? new Date(incident.started_at).toISOString() : '',
+                incident.resolved_at ? new Date(incident.resolved_at).toISOString() : '',
+                latestUpdate?.at ? new Date(latestUpdate.at).toISOString() : '',
+                latestUpdate?.message ? String(latestUpdate.message) : '',
+                String(req.user?.email || ''),
+                new Date().toISOString(),
+            ].map(csvEscape).join(',');
+        });
+
+        const csvBody = [
+            [
+                'incident_id',
+                'target_type',
+                'target_id',
+                'target_name',
+                'summary',
+                'severity',
+                'status',
+                'started_at',
+                'resolved_at',
+                'last_update_at',
+                'last_update_message',
+                'exported_by',
+                'exported_at',
+            ].join(','),
+            ...rows,
+        ].join('\n');
+
+        const fileName = `incidents-${Date.now()}.csv`;
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+        return res.send(csvBody);
+    } catch (error: any) {
+        return res.status(500).json({ message: error.message || 'Failed to export incidents' });
     }
 });
 

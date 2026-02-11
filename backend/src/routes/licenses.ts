@@ -24,6 +24,7 @@ const schema = z.object({
     seats_used: z.number().int().nonnegative().optional(),
     auto_renew: z.boolean().optional(),
     channels: z.array(z.enum(['slack', 'email', 'custom'])).optional(),
+    notification_channel_ids: z.array(z.string().trim().min(1)).optional(),
     enabled: z.boolean().optional(),
     status: z.enum(['active', 'paused', 'expired']).optional(),
     assigned_user_ids: z.array(z.string().trim().min(1)).optional(),
@@ -32,6 +33,20 @@ const schema = z.object({
 const normalizeAssigned = (value: unknown) => {
     if (!Array.isArray(value)) return [];
     return Array.from(new Set(value.map((entry) => String(entry || '').trim()).filter(Boolean)));
+};
+
+const normalizeChannelIds = (value: unknown) => {
+    if (!Array.isArray(value)) return [];
+    return Array.from(new Set(value.map((entry) => String(entry || '').trim()).filter(Boolean)));
+};
+
+const csvEscape = (value: unknown) => {
+    if (value === null || value === undefined) return '';
+    const text = String(value);
+    if (/[",\n]/.test(text)) {
+        return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
 };
 
 const getAccessQuery = (user: AuthRequest['user']) => {
@@ -59,6 +74,37 @@ const computeState = (license: any) => {
     else if (days <= Number(license.warning_days || 30)) state = 'warning';
 
     return { days_left: days, state };
+};
+
+const buildRenewalAmountSummary = (rows: any[], horizonDays: number) => {
+    const now = Date.now();
+    const end = now + horizonDays * 24 * 60 * 60 * 1000;
+    const totals: Record<string, number> = {};
+    let count = 0;
+
+    rows.forEach((row: any) => {
+        if (row.status === 'paused') return;
+        const renewal = new Date(row.renewal_date);
+        const renewalMs = renewal.getTime();
+        if (!Number.isFinite(renewalMs)) return;
+        if (renewalMs < now || renewalMs > end) return;
+
+        const amount = Number(row.amount);
+        if (!Number.isFinite(amount) || amount <= 0) return;
+
+        const currency = String(row.currency || 'INR').toUpperCase();
+        totals[currency] = Number((totals[currency] || 0)) + amount;
+        count += 1;
+    });
+
+    Object.keys(totals).forEach((key) => {
+        totals[key] = Number(totals[key].toFixed(2));
+    });
+
+    return {
+        count,
+        totals_by_currency: totals,
+    };
 };
 
 router.get('/', authorizePermission('licenses.view'), async (req: AuthRequest, res) => {
@@ -103,9 +149,81 @@ router.get('/stats', authorizePermission('licenses.view'), async (req: AuthReque
             else stats.ok += 1;
         });
 
-        res.json(stats);
+        const renewalSpend30d = buildRenewalAmountSummary(rows, 30);
+        const renewalSpend90d = buildRenewalAmountSummary(rows, 90);
+
+        res.json({
+            ...stats,
+            renewal_spend_30d: renewalSpend30d,
+            renewal_spend_90d: renewalSpend90d,
+        });
     } catch (error: any) {
         res.status(500).json({ message: error.message || 'Failed to fetch license stats' });
+    }
+});
+
+router.get('/export', authorizePermission('licenses.view'), async (req: AuthRequest, res) => {
+    try {
+        const rows = await LicenseAsset.find(getAccessQuery(req.user)).sort({ renewal_date: 1, name: 1 });
+
+        const csvRows = rows.map((row: any) => {
+            const computed = computeState(row);
+            return [
+                String(row._id || ''),
+                String(row.name || ''),
+                String(row.type || ''),
+                String(row.vendor || ''),
+                String(row.product || ''),
+                String(row.owner || ''),
+                String(row.reference_key || ''),
+                row.renewal_date ? new Date(row.renewal_date).toISOString() : '',
+                String(computed.days_left ?? ''),
+                String(computed.state || ''),
+                String(row.status || ''),
+                String(row.amount ?? ''),
+                String(row.currency || ''),
+                String(row.billing_cycle || ''),
+                String(row.seats_total ?? ''),
+                String(row.seats_used ?? ''),
+                String(Boolean(row.auto_renew)),
+                String(Boolean(row.enabled)),
+                String(req.user?.email || ''),
+                new Date().toISOString(),
+            ].map(csvEscape).join(',');
+        });
+
+        const csvBody = [
+            [
+                'license_id',
+                'name',
+                'type',
+                'vendor',
+                'product',
+                'owner',
+                'reference_key',
+                'renewal_date',
+                'days_left',
+                'computed_state',
+                'status',
+                'amount',
+                'currency',
+                'billing_cycle',
+                'seats_total',
+                'seats_used',
+                'auto_renew',
+                'enabled',
+                'exported_by',
+                'exported_at',
+            ].join(','),
+            ...csvRows,
+        ].join('\n');
+
+        const fileName = `licenses-${Date.now()}.csv`;
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+        return res.send(csvBody);
+    } catch (error: any) {
+        return res.status(500).json({ message: error.message || 'Failed to export licenses' });
     }
 });
 
@@ -115,6 +233,7 @@ router.post('/', authorizePermission('licenses.manage'), async (req: AuthRequest
         const license = await LicenseAsset.create({
             ...payload,
             renewal_date: new Date(payload.renewal_date),
+            notification_channel_ids: normalizeChannelIds(payload.notification_channel_ids),
             assigned_user_ids: hasPermission(req.user, 'devices.assign')
                 ? normalizeAssigned(payload.assigned_user_ids)
                 : [],
@@ -142,6 +261,9 @@ router.put('/:id', authorizePermission('licenses.manage'), async (req: AuthReque
                 updateDoc.assigned_user_ids = normalizeAssigned(payload.assigned_user_ids);
             }
         }
+        if (payload.notification_channel_ids !== undefined) {
+            updateDoc.notification_channel_ids = normalizeChannelIds(payload.notification_channel_ids);
+        }
 
         const row = await LicenseAsset.findByIdAndUpdate(req.params.id, updateDoc, { new: true });
         res.json(row);
@@ -162,4 +284,3 @@ router.delete('/:id', authorizePermission('licenses.manage'), async (req: AuthRe
 });
 
 export default router;
-

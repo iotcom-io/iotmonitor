@@ -17,6 +17,15 @@ const normalizeStatusCodes = (value: any) => {
     return Array.from(new Set(normalized));
 };
 
+const normalizeStringIdArray = (value: unknown) => {
+    if (!Array.isArray(value)) return [];
+    return Array.from(new Set(
+        value
+            .map((entry) => String(entry || '').trim())
+            .filter(Boolean)
+    ));
+};
+
 const normalizePayload = (payload: any) => {
     const next: any = { ...payload };
 
@@ -31,6 +40,10 @@ const normalizePayload = (payload: any) => {
         next.channels = Array.isArray(next.channels)
             ? next.channels.map((ch: string) => String(ch).toLowerCase())
             : ['slack'];
+    }
+
+    if (next.notification_channel_ids !== undefined) {
+        next.notification_channel_ids = normalizeStringIdArray(next.notification_channel_ids);
     }
 
     if (next.expected_status_codes !== undefined) {
@@ -115,6 +128,14 @@ const formatDuration = (durationMs: number) => {
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
     return `${hours}h ${minutes}m`;
+};
+const csvEscape = (value: unknown) => {
+    if (value === null || value === undefined) return '';
+    const text = String(value);
+    if (/[",\n]/.test(text)) {
+        return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
 };
 
 const normalizeUrlKey = (value: unknown) => String(value || '').trim().toLowerCase().replace(/\/+$/, '');
@@ -363,6 +384,67 @@ router.get('/stats', authorizePermission('synthetics.view'), async (req: AuthReq
         });
     } catch (error: any) {
         res.status(500).json({ message: error.message || 'Failed to calculate monitor stats' });
+    }
+});
+
+router.get('/export', authorizePermission('synthetics.view'), async (req: AuthRequest, res) => {
+    try {
+        await consolidateLegacySslCompanions();
+        const checks = await SyntheticCheck.find(getSyntheticAccessQuery(req.user)).sort({ updated_at: -1 });
+
+        const csvRows = checks.map((check: any) => [
+            String(check._id || ''),
+            String(check.name || ''),
+            String(check.target_kind || 'website'),
+            String(check.type || ''),
+            String(check.url || ''),
+            String(check.method || ''),
+            String(check.enabled),
+            String(Boolean(check.ssl_enabled || check.type === 'ssl')),
+            String(check.ssl_last_state || ''),
+            check.ssl_expiry_at ? new Date(check.ssl_expiry_at).toISOString() : '',
+            String(check.last_status || ''),
+            check.last_run ? new Date(check.last_run).toISOString() : '',
+            String(check.last_response_status ?? ''),
+            String(check.last_response_time_ms ?? ''),
+            String(check.last_message || ''),
+            String(check.interval ?? ''),
+            String(check.timeout ?? ''),
+            String(req.user?.email || ''),
+            new Date().toISOString(),
+        ].map(csvEscape).join(','));
+
+        const csvBody = [
+            [
+                'monitor_id',
+                'name',
+                'target_kind',
+                'type',
+                'url',
+                'method',
+                'enabled',
+                'ssl_enabled',
+                'ssl_state',
+                'ssl_expiry_at',
+                'last_status',
+                'last_run',
+                'last_response_status',
+                'last_response_time_ms',
+                'last_message',
+                'interval_seconds',
+                'timeout_ms',
+                'exported_by',
+                'exported_at',
+            ].join(','),
+            ...csvRows,
+        ].join('\n');
+
+        const fileName = `web-monitors-${Date.now()}.csv`;
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+        return res.send(csvBody);
+    } catch (error: any) {
+        return res.status(500).json({ message: error.message || 'Failed to export monitors' });
     }
 });
 

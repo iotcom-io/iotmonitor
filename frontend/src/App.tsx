@@ -1,5 +1,6 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { Menu, X } from 'lucide-react';
 import { useAuthStore } from './store/useAuthStore';
 import { Sidebar } from './components/layout/Sidebar';
 import { Dashboard } from './pages/Dashboard';
@@ -35,6 +36,12 @@ function App() {
         if (typeof window === 'undefined') return false;
         return window.localStorage.getItem('iotmonitor.sidebar.collapsed') === '1';
     });
+    const [mobileSidebarOpen, setMobileSidebarOpen] = React.useState(false);
+    const [theme, setTheme] = React.useState<'dark' | 'light'>(() => {
+        if (typeof window === 'undefined') return 'dark';
+        const raw = window.localStorage.getItem('iotmonitor.theme');
+        return raw === 'light' ? 'light' : 'dark';
+    });
     const version = import.meta.env.VITE_APP_VERSION || 'dev';
     const build = import.meta.env.VITE_APP_BUILD || 'local';
 
@@ -57,14 +64,53 @@ function App() {
         window.localStorage.setItem('iotmonitor.sidebar.collapsed', sidebarCollapsed ? '1' : '0');
     }, [sidebarCollapsed]);
 
+    React.useEffect(() => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.setItem('iotmonitor.theme', theme);
+        document.documentElement.setAttribute('data-theme', theme);
+    }, [theme]);
+
     return (
         <Router>
             <div className="flex bg-dark-bg min-h-screen text-slate-200">
-                {token && <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed((prev) => !prev)} />}
+                {token && (
+                    <>
+                        <Sidebar
+                            collapsed={sidebarCollapsed}
+                            onToggle={() => setSidebarCollapsed((prev) => !prev)}
+                            mobileOpen={mobileSidebarOpen}
+                            onCloseMobile={() => setMobileSidebarOpen(false)}
+                            theme={theme}
+                            onToggleTheme={() => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))}
+                        />
+                        {mobileSidebarOpen && (
+                            <button
+                                type="button"
+                                aria-label="Close sidebar backdrop"
+                                className="fixed inset-0 z-30 bg-black/50 md:hidden"
+                                onClick={() => setMobileSidebarOpen(false)}
+                            />
+                        )}
+                    </>
+                )}
                 <main className={token
-                    ? `flex-1 ${sidebarCollapsed ? 'ml-20' : 'ml-64'} p-8 transition-all duration-300 flex flex-col min-h-screen`
+                    ? `flex-1 ${sidebarCollapsed ? 'md:ml-20' : 'md:ml-64'} p-4 md:p-8 transition-all duration-300 flex flex-col min-h-screen`
                     : "flex-1 flex flex-col min-h-screen"}
                 >
+                    {token && (
+                        <div className="md:hidden mb-4 flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                            <button
+                                type="button"
+                                className="icon-btn"
+                                onClick={() => setMobileSidebarOpen((prev) => !prev)}
+                                aria-label="Toggle sidebar"
+                            >
+                                {mobileSidebarOpen ? <X size={18} /> : <Menu size={18} />}
+                            </button>
+                            <span className="text-sm font-semibold text-slate-200">IoTMonitor</span>
+                            <div className="w-8" />
+                        </div>
+                    )}
                     <div className="flex-1">
                         <Routes>
                             <Route path="/login" element={!token ? <Login /> : <Navigate to="/" />} />

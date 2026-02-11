@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Server, ShieldCheck, Settings, LogOut, Terminal, Bell, Globe, FileText, KeyRound, Users, ChevronLeft, ChevronRight } from 'lucide-react';
+import { LayoutDashboard, Server, ShieldCheck, Settings, LogOut, Terminal, Bell, Globe, FileText, KeyRound, Users, ChevronLeft, ChevronRight, Moon, Sun } from 'lucide-react';
 import { useAuthStore } from '../../store/useAuthStore';
 import { Link, useLocation } from 'react-router-dom';
 import { clsx } from 'clsx';
@@ -11,16 +11,19 @@ const SidebarItem = ({
     to,
     active,
     collapsed,
+    onNavigate,
 }: {
     icon: any,
     label: string,
     to: string,
     active?: boolean,
-    collapsed?: boolean
+    collapsed?: boolean,
+    onNavigate?: () => void,
 }) => (
     <Link
         to={to}
         title={label}
+        onClick={onNavigate}
         className={clsx(
             "flex items-center rounded-lg transition-all duration-200 group",
             collapsed ? "justify-center px-3 py-3" : "gap-3 px-4 py-3",
@@ -34,15 +37,36 @@ const SidebarItem = ({
     </Link>
 );
 
-export const Sidebar = ({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) => {
+export const Sidebar = ({
+    collapsed,
+    onToggle,
+    mobileOpen,
+    onCloseMobile,
+    theme,
+    onToggleTheme,
+}: {
+    collapsed: boolean;
+    onToggle: () => void;
+    mobileOpen: boolean;
+    onCloseMobile: () => void;
+    theme: 'dark' | 'light';
+    onToggleTheme: () => void;
+}) => {
     const location = useLocation();
     const logout = useAuthStore(state => state.logout);
     const user = useAuthStore(state => state.user);
+    const handleNavigate = () => {
+        if (typeof window !== 'undefined' && window.innerWidth < 768) {
+            onCloseMobile();
+        }
+    };
 
     return (
         <aside className={clsx(
-            "fixed left-0 top-0 h-screen bg-dark-surface border-r border-dark-border flex flex-col p-4 transition-all duration-300",
-            collapsed ? "w-20" : "w-64"
+            "fixed left-0 top-0 h-screen bg-dark-surface border-r border-dark-border flex flex-col p-4 transition-all duration-300 z-40",
+            collapsed ? "md:w-20 w-64" : "w-64",
+            "transform md:translate-x-0",
+            mobileOpen ? "translate-x-0" : "-translate-x-full"
         )}>
             <div className={clsx("flex items-center px-2 py-4 mb-8", collapsed ? "justify-center" : "justify-between gap-3")}>
                 <div className="flex items-center gap-3 min-w-0">
@@ -57,7 +81,7 @@ export const Sidebar = ({ collapsed, onToggle }: { collapsed: boolean; onToggle:
                     <button
                         type="button"
                         onClick={onToggle}
-                        className="p-1.5 rounded-md text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
+                        className="hidden md:inline-flex p-1.5 rounded-md text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
                         title="Collapse sidebar"
                     >
                         <ChevronLeft size={16} />
@@ -69,7 +93,7 @@ export const Sidebar = ({ collapsed, onToggle }: { collapsed: boolean; onToggle:
                 <button
                     type="button"
                     onClick={onToggle}
-                    className="mb-4 mx-auto p-1.5 rounded-md text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
+                    className="mb-4 mx-auto p-1.5 rounded-md text-slate-400 hover:text-white hover:bg-white/5 transition-colors hidden md:inline-flex"
                     title="Expand sidebar"
                 >
                     <ChevronRight size={16} />
@@ -83,6 +107,7 @@ export const Sidebar = ({ collapsed, onToggle }: { collapsed: boolean; onToggle:
                     to="/"
                     active={location.pathname === '/'}
                     collapsed={collapsed}
+                    onNavigate={handleNavigate}
                 />
                 {hasPermission('devices.view', user) && (
                     <SidebarItem
@@ -91,6 +116,7 @@ export const Sidebar = ({ collapsed, onToggle }: { collapsed: boolean; onToggle:
                         to="/devices"
                         active={location.pathname.startsWith('/devices')}
                         collapsed={collapsed}
+                        onNavigate={handleNavigate}
                     />
                 )}
                 {hasPermission('synthetics.view', user) && (
@@ -100,6 +126,7 @@ export const Sidebar = ({ collapsed, onToggle }: { collapsed: boolean; onToggle:
                         to="/web-monitoring"
                         active={location.pathname.startsWith('/web-monitoring') || location.pathname.startsWith('/synthetics')}
                         collapsed={collapsed}
+                        onNavigate={handleNavigate}
                     />
                 )}
                 {hasPermission('devices.build_agent', user) && (
@@ -109,6 +136,7 @@ export const Sidebar = ({ collapsed, onToggle }: { collapsed: boolean; onToggle:
                         to="/agent-builder"
                         active={location.pathname === '/agent-builder'}
                         collapsed={collapsed}
+                        onNavigate={handleNavigate}
                     />
                 )}
                 {hasPermission('alerts.view', user) && (
@@ -118,6 +146,7 @@ export const Sidebar = ({ collapsed, onToggle }: { collapsed: boolean; onToggle:
                         to="/alerts"
                         active={location.pathname === '/alerts'}
                         collapsed={collapsed}
+                        onNavigate={handleNavigate}
                     />
                 )}
                 {hasPermission('incidents.view', user) && (
@@ -127,6 +156,7 @@ export const Sidebar = ({ collapsed, onToggle }: { collapsed: boolean; onToggle:
                         to="/incidents"
                         active={location.pathname === '/incidents'}
                         collapsed={collapsed}
+                        onNavigate={handleNavigate}
                     />
                 )}
                 {hasPermission('licenses.view', user) && (
@@ -136,6 +166,7 @@ export const Sidebar = ({ collapsed, onToggle }: { collapsed: boolean; onToggle:
                         to="/licenses"
                         active={location.pathname === '/licenses'}
                         collapsed={collapsed}
+                        onNavigate={handleNavigate}
                     />
                 )}
                 {hasPermission('settings.view', user) && (
@@ -145,6 +176,7 @@ export const Sidebar = ({ collapsed, onToggle }: { collapsed: boolean; onToggle:
                         to="/notification-channels"
                         active={location.pathname === '/notification-channels'}
                         collapsed={collapsed}
+                        onNavigate={handleNavigate}
                     />
                 )}
                 {hasPermission('users.view', user) && (
@@ -154,11 +186,23 @@ export const Sidebar = ({ collapsed, onToggle }: { collapsed: boolean; onToggle:
                         to="/users"
                         active={location.pathname === '/users'}
                         collapsed={collapsed}
+                        onNavigate={handleNavigate}
                     />
                 )}
             </nav>
 
             <div className="mt-auto space-y-2">
+                <button
+                    onClick={onToggleTheme}
+                    title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+                    className={clsx(
+                        "rounded-lg text-slate-400 hover:text-primary-300 hover:bg-white/5 w-full transition-all duration-200",
+                        collapsed ? "flex items-center justify-center px-3 py-3" : "flex items-center gap-3 px-4 py-3"
+                    )}
+                >
+                    {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+                    {!collapsed && <span className="font-medium">{theme === 'dark' ? 'Light Theme' : 'Dark Theme'}</span>}
+                </button>
                 {hasPermission('settings.view', user) && (
                     <SidebarItem
                         icon={Settings}
@@ -166,10 +210,14 @@ export const Sidebar = ({ collapsed, onToggle }: { collapsed: boolean; onToggle:
                         to="/settings"
                         active={location.pathname === '/settings'}
                         collapsed={collapsed}
+                        onNavigate={handleNavigate}
                     />
                 )}
                 <button
-                    onClick={logout}
+                    onClick={() => {
+                        onCloseMobile();
+                        logout();
+                    }}
                     title="Logout"
                     className={clsx(
                         "rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-400/10 w-full transition-all duration-200",

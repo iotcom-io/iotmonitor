@@ -22,6 +22,7 @@ export interface ISyntheticCheck extends Document {
     max_response_time_ms?: number;
     ssl_expiry_days?: number; // warning when <= this many days
     channels?: string[];
+    notification_channel_ids?: string[];
     slack_webhook_name?: string;
     custom_webhook_name?: string;
     assigned_user_ids?: string[];
@@ -58,6 +59,7 @@ const SyntheticCheckSchema: Schema = new Schema({
     max_response_time_ms: { type: Number },
     ssl_expiry_days: { type: Number, default: 7 },
     channels: [{ type: String }],
+    notification_channel_ids: [{ type: String }],
     slack_webhook_name: { type: String },
     custom_webhook_name: { type: String },
     assigned_user_ids: [{ type: String }],

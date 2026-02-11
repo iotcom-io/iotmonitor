@@ -160,6 +160,7 @@ export async function seedDefaultNotificationChannel() {
                 description: 'Default notification channel for all alerts',
                 type: 'slack',
                 enabled: true,
+                is_default: true,
                 config: {
                     slack_webhook_url: process.env.SLACK_WEBHOOK_URL || '',
                     slack_group_name: 'General Alerts'
@@ -175,11 +176,21 @@ export async function seedDefaultNotificationChannel() {
             await NotificationChannel.updateOne(
                 { name: 'Default Slack' },
                 {
+                    $set: { is_default: true },
                     $addToSet: {
                         alert_types: { $each: ['rule_violation', 'ip_change'] }
                     }
                 }
             );
+
+            const hasDefault = await NotificationChannel.exists({ is_default: true });
+            if (!hasDefault) {
+                const firstEnabled = await NotificationChannel.findOne({ enabled: true }).sort({ created_at: 1 });
+                if (firstEnabled) {
+                    firstEnabled.is_default = true;
+                    await firstEnabled.save();
+                }
+            }
         }
     } catch (error) {
         console.error('Error seeding notification channels:', error);
