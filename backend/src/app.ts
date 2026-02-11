@@ -33,6 +33,7 @@ app.use('/api/devices', deviceRoutes);
 app.use('/api/monitoring', monitoringRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/synthetics', syntheticRoutes);
+app.use('/api/web-monitoring', syntheticRoutes);
 app.use('/api/incidents', incidentRoutes);
 app.use('/api/notification-channels', notificationChannelRoutes);
 app.use('/api/templates', templateRoutes);

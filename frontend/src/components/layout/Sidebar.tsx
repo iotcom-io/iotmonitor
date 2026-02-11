@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Server, ShieldCheck, Settings, LogOut, Terminal, Bell } from 'lucide-react';
+import { LayoutDashboard, Server, ShieldCheck, Settings, LogOut, Terminal, Bell, Globe } from 'lucide-react';
 import { useAuthStore } from '../../store/useAuthStore';
 import { Link, useLocation } from 'react-router-dom';
 import { clsx } from 'clsx';
@@ -46,6 +46,12 @@ export const Sidebar = () => {
                     active={location.pathname.startsWith('/devices')}
                 />
                 <SidebarItem
+                    icon={Globe}
+                    label="Web Monitoring"
+                    to="/web-monitoring"
+                    active={location.pathname.startsWith('/web-monitoring') || location.pathname.startsWith('/synthetics')}
+                />
+                <SidebarItem
                     icon={Terminal}
                     label="Agent Builder"
                     to="/agent-builder"
@@ -62,12 +68,6 @@ export const Sidebar = () => {
                     label="Notifications"
                     to="/notification-channels"
                     active={location.pathname === '/notification-channels'}
-                />
-                <SidebarItem
-                    icon={Server}
-                    label="Synthetics"
-                    to="/synthetics"
-                    active={location.pathname.startsWith('/synthetics')}
                 />
             </nav>
 

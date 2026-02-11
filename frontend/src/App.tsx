@@ -45,7 +45,8 @@ function App() {
                             <Route path="/alerts" element={<PrivateRoute><Incidents /></PrivateRoute>} />
                             <Route path="/notification-channels" element={<PrivateRoute><NotificationChannels /></PrivateRoute>} />
                             <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
-                            <Route path="/synthetics" element={<PrivateRoute><Synthetics /></PrivateRoute>} />
+                            <Route path="/web-monitoring" element={<PrivateRoute><Synthetics /></PrivateRoute>} />
+                            <Route path="/synthetics" element={<Navigate to="/web-monitoring" replace />} />
                         </Routes>
                     </div>
                     <footer className="mt-8 text-xs text-slate-500 flex items-center justify-between border-t border-white/5 pt-4">
