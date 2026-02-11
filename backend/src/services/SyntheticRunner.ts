@@ -308,7 +308,7 @@ const runSSL = async (check: any): Promise<SyntheticResult> => {
 };
 
 const getFailureSubject = (check: any, result: SyntheticResult) => {
-    if (check.type === 'ssl') {
+    if (result.category === 'ssl_expiry' || result.category === 'ssl_connectivity') {
         if (result.category === 'ssl_connectivity') return `SSL CHECK DOWN: ${check.name}`;
         if (result.severity === 'critical') return `SSL CRITICAL: ${check.name}`;
         return `SSL WARNING: ${check.name}`;
@@ -325,17 +325,18 @@ const getFailureSubject = (check: any, result: SyntheticResult) => {
     return `WEB/API DOWN: ${check.name}`;
 };
 
-const getRecoverySubject = (check: any) => check.type === 'ssl'
+const getRecoverySubject = (check: any, result: SyntheticResult) => (result.category === 'ssl_expiry' || result.category === 'ssl_connectivity')
     ? `SSL RECOVERED: ${check.name}`
     : `WEB/API RECOVERED: ${check.name}`;
 
 const buildFailureMessage = (check: any, result: SyntheticResult) => {
+    const displayType = (result.category === 'ssl_expiry' || result.category === 'ssl_connectivity') ? 'SSL' : check.type.toUpperCase();
     const lines = [
         'ALERT',
         '',
         `Check: ${check.name}`,
         `Category: ${check.target_kind || (check.type === 'ssl' ? 'website' : 'api')}`,
-        `Type: ${check.type.toUpperCase()}`,
+        `Type: ${displayType}`,
         `URL: ${check.url}`,
         `Time: ${formatTime(new Date())}`,
         `Issue: ${result.message}`,
@@ -358,12 +359,13 @@ const buildFailureMessage = (check: any, result: SyntheticResult) => {
 };
 
 const buildRecoveryMessage = (check: any, result: SyntheticResult) => {
+    const displayType = (result.category === 'ssl_expiry' || result.category === 'ssl_connectivity') ? 'SSL' : check.type.toUpperCase();
     const lines = [
         'RESOLVED',
         '',
         `Check: ${check.name}`,
         `Category: ${check.target_kind || (check.type === 'ssl' ? 'website' : 'api')}`,
-        `Type: ${check.type.toUpperCase()}`,
+        `Type: ${displayType}`,
         `URL: ${check.url}`,
         `Recovery Time: ${formatTime(new Date())}`,
         `Status: ${result.message}`,
@@ -442,7 +444,7 @@ const ensureIncident = async (check: any, result: SyntheticResult): Promise<Inci
         incident.updates.push({ at: new Date(), message: 'Recovered' });
         await incident.save();
 
-        await sendCheckNotification(check, getRecoverySubject(check), buildRecoveryMessage(check, result));
+        await sendCheckNotification(check, getRecoverySubject(check, result), buildRecoveryMessage(check, result));
         return { opened: false, resolved: true };
     }
 
@@ -450,7 +452,8 @@ const ensureIncident = async (check: any, result: SyntheticResult): Promise<Inci
 };
 
 const sendSslRenewalNotificationIfNeeded = async (check: any, result: SyntheticResult) => {
-    if (check.type !== 'ssl' || !result.expiryAt) return false;
+    const sslEnabled = check.type === 'ssl' || check.ssl_enabled === true;
+    if (!sslEnabled || !result.expiryAt) return false;
 
     const previousExpiryAt = check.ssl_expiry_at ? new Date(check.ssl_expiry_at) : null;
     const nextExpiryAt = new Date(result.expiryAt);
@@ -483,7 +486,8 @@ const sendSslRenewalNotificationIfNeeded = async (check: any, result: SyntheticR
 };
 
 const sendSslReminderIfDue = async (check: any, result: SyntheticResult, lifecycle: IncidentLifecycle) => {
-    if (check.type !== 'ssl' || result.category !== 'ssl_expiry' || result.ok) return false;
+    const sslEnabled = check.type === 'ssl' || check.ssl_enabled === true;
+    if (!sslEnabled || result.category !== 'ssl_expiry' || result.ok) return false;
     if (lifecycle.opened) return false;
 
     const days = result.expiryDays;
@@ -521,7 +525,8 @@ const updateCheckRuntimeFields = (check: any, result: SyntheticResult) => {
         check.last_response_time_ms = result.responseTimeMs;
     }
 
-    if (check.type === 'ssl') {
+    const sslEnabled = check.type === 'ssl' || check.ssl_enabled === true;
+    if (sslEnabled) {
         if (result.expiryAt) {
             check.ssl_expiry_at = result.expiryAt;
         }
@@ -535,15 +540,35 @@ const updateCheckRuntimeFields = (check: any, result: SyntheticResult) => {
 };
 
 const runCheck = async (check: any) => {
-    const result = check.type === 'ssl' ? await runSSL(check) : await runHttp(check);
+    const sslEnabled = check.type === 'ssl' || check.ssl_enabled === true;
+    const httpResult = check.type === 'ssl' ? null : await runHttp(check);
+    const sslResult = sslEnabled ? await runSSL(check) : null;
 
-    await sendSslRenewalNotificationIfNeeded(check, result);
+    if (sslResult) {
+        await sendSslRenewalNotificationIfNeeded(check, sslResult);
+    }
 
-    const lifecycle = await ensureIncident(check, result);
+    let effectiveResult: SyntheticResult;
+    if (check.type === 'ssl') {
+        effectiveResult = sslResult as SyntheticResult;
+    } else if (httpResult && !httpResult.ok) {
+        effectiveResult = httpResult;
+    } else if (sslResult && !sslResult.ok) {
+        effectiveResult = sslResult;
+    } else {
+        effectiveResult = (httpResult || sslResult) as SyntheticResult;
+    }
 
-    await sendSslReminderIfDue(check, result, lifecycle);
+    const lifecycle = await ensureIncident(check, effectiveResult);
 
-    updateCheckRuntimeFields(check, result);
+    if (sslResult) {
+        await sendSslReminderIfDue(check, sslResult, lifecycle);
+    }
+
+    if (sslResult) {
+        updateCheckRuntimeFields(check, sslResult);
+    }
+    updateCheckRuntimeFields(check, effectiveResult);
     await check.save();
 };
 
@@ -622,7 +647,13 @@ const sendWeeklySslSummaryIfDue = async () => {
     const settings = await SystemSettings.findOne();
     if (settings?.ssl_weekly_summary_last_sent_on === today) return;
 
-    const sslChecks = await SyntheticCheck.find({ type: 'ssl', enabled: true });
+    const sslChecks = await SyntheticCheck.find({
+        enabled: true,
+        $or: [
+            { type: 'ssl' },
+            { ssl_enabled: true },
+        ],
+    });
     if (sslChecks.length === 0) {
         if (settings) {
             settings.ssl_weekly_summary_last_sent_on = today;

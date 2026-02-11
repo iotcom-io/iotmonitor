@@ -6,6 +6,7 @@ import { runSyntheticCheckById } from '../services/SyntheticRunner';
 
 const router = Router();
 router.use(authenticate);
+let legacySslConsolidated = false;
 
 const normalizeStatusCodes = (value: any) => {
     if (!Array.isArray(value)) return [];
@@ -19,6 +20,7 @@ const normalizePayload = (payload: any) => {
     const next: any = { ...payload };
 
     const checkType = String(next.type || '').toLowerCase();
+    const requestedSslEnabled = Boolean(next.ssl_enabled || next.enable_ssl_monitor);
     if (next.target_kind !== undefined) {
         const normalizedKind = String(next.target_kind || '').toLowerCase();
         next.target_kind = ['website', 'api'].includes(normalizedKind) ? normalizedKind : 'website';
@@ -46,6 +48,7 @@ const normalizePayload = (payload: any) => {
     }
 
     if (checkType === 'ssl') {
+        next.ssl_enabled = true;
         delete next.expected_status;
         delete next.expected_status_codes;
         delete next.response_match_type;
@@ -56,10 +59,15 @@ const normalizePayload = (payload: any) => {
             next.target_kind = 'website';
         }
     } else if (checkType === 'http') {
+        next.ssl_enabled = requestedSslEnabled;
         if (!next.expected_status_codes && next.expected_status) {
             next.expected_status_codes = [Number(next.expected_status)];
         }
+    } else if (next.ssl_enabled !== undefined) {
+        next.ssl_enabled = Boolean(next.ssl_enabled);
     }
+
+    delete next.enable_ssl_monitor;
 
     return next;
 };
@@ -78,8 +86,80 @@ const formatDuration = (durationMs: number) => {
     return `${hours}h ${minutes}m`;
 };
 
+const normalizeUrlKey = (value: unknown) => String(value || '').trim().toLowerCase().replace(/\/+$/, '');
+const normalizeNameKey = (value: unknown) => String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ');
+
+const looksLikeLegacyCompanion = (httpName: string, sslName: string) => {
+    const httpKey = normalizeNameKey(httpName);
+    const sslKey = normalizeNameKey(sslName);
+    return sslKey === `${httpKey} ssl` || sslKey === `${httpKey} tls`;
+};
+
+const consolidateLegacySslCompanions = async () => {
+    if (legacySslConsolidated) return;
+    try {
+        const checks = await SyntheticCheck.find().sort({ created_at: 1 });
+        const httpByUrl = new Map<string, any>();
+
+        checks.forEach((check: any) => {
+            if (check.type !== 'http') return;
+            const key = normalizeUrlKey(check.url);
+            if (!key || httpByUrl.has(key)) return;
+            httpByUrl.set(key, check);
+        });
+
+        for (const check of checks) {
+            if (check.type !== 'ssl') continue;
+
+            const key = normalizeUrlKey(check.url);
+            const httpCheck = httpByUrl.get(key);
+            if (!httpCheck) continue;
+            if (!looksLikeLegacyCompanion(httpCheck.name, check.name)) continue;
+
+            let changed = false;
+            if (!httpCheck.ssl_enabled) {
+                httpCheck.ssl_enabled = true;
+                changed = true;
+            }
+            if (!httpCheck.ssl_expiry_days && check.ssl_expiry_days) {
+                httpCheck.ssl_expiry_days = check.ssl_expiry_days;
+                changed = true;
+            }
+            if (!httpCheck.ssl_expiry_at && check.ssl_expiry_at) {
+                httpCheck.ssl_expiry_at = check.ssl_expiry_at;
+                changed = true;
+            }
+            if (!httpCheck.ssl_last_state && check.ssl_last_state) {
+                httpCheck.ssl_last_state = check.ssl_last_state;
+                changed = true;
+            }
+            if (changed) {
+                await httpCheck.save();
+            }
+
+            await Incident.updateMany(
+                { target_type: 'synthetic', target_id: String(check._id) },
+                {
+                    $set: {
+                        target_id: String(httpCheck._id),
+                        target_name: httpCheck.name,
+                    },
+                }
+            );
+
+            await SyntheticCheck.deleteOne({ _id: check._id });
+        }
+
+        legacySslConsolidated = true;
+    } catch (error) {
+        legacySslConsolidated = false;
+        throw error;
+    }
+};
+
 // list
 router.get('/', async (_req, res) => {
+    await consolidateLegacySslCompanions();
     const checks = await SyntheticCheck.find().sort({ updated_at: -1 });
     res.json(checks);
 });
@@ -87,6 +167,7 @@ router.get('/', async (_req, res) => {
 // aggregate stats for list/dashboard
 router.get('/stats', async (req, res) => {
     try {
+        await consolidateLegacySslCompanions();
         const windowHours = clamp(Number(req.query.window_hours || 24), 1, 24 * 30);
         const now = new Date();
         const from = new Date(now.getTime() - windowHours * 60 * 60 * 1000);
@@ -178,6 +259,7 @@ router.get('/stats', async (req, res) => {
                 check_id: String(check._id),
                 name: check.name,
                 type: check.type,
+                ssl_enabled: Boolean(check.ssl_enabled || check.type === 'ssl'),
                 target_kind: check.target_kind || 'website',
                 url: check.url,
                 enabled: check.enabled,
@@ -217,32 +299,7 @@ router.post('/', async (req: AuthRequest, res) => {
         const payload = normalizePayload(req.body);
         const check = new SyntheticCheck(payload);
         await check.save();
-
-        const enableSslMonitor = Boolean(req.body?.enable_ssl_monitor) && String(payload.type || '').toLowerCase() === 'http';
-        let sslCompanion: any = null;
-
-        if (enableSslMonitor) {
-            sslCompanion = new SyntheticCheck({
-                name: `${payload.name} SSL`,
-                target_kind: payload.target_kind || 'website',
-                type: 'ssl',
-                url: payload.url,
-                interval: payload.interval || 300,
-                timeout: payload.timeout || 8000,
-                ssl_expiry_days: Number(req.body?.ssl_expiry_days || payload.ssl_expiry_days || 7),
-                channels: payload.channels || ['slack'],
-                slack_webhook_name: payload.slack_webhook_name,
-                custom_webhook_name: payload.custom_webhook_name,
-                enabled: payload.enabled !== false,
-            });
-            await sslCompanion.save();
-        }
-
-        const responsePayload = check.toObject();
-        if (sslCompanion) {
-            (responsePayload as any).ssl_companion = sslCompanion;
-        }
-        res.status(201).json(responsePayload);
+        res.status(201).json(check);
     } catch (err: any) {
         res.status(400).json({ message: err.message });
     }

@@ -7,6 +7,7 @@ export interface ISyntheticCheck extends Document {
     name: string;
     target_kind?: SyntheticTargetKind;
     type: SyntheticType;
+    ssl_enabled?: boolean;
     url: string;
     method?: string;
     headers?: Record<string, string>;
@@ -41,6 +42,7 @@ const SyntheticCheckSchema: Schema = new Schema({
     name: { type: String, required: true },
     target_kind: { type: String, enum: ['website', 'api'], default: 'website' },
     type: { type: String, enum: ['http', 'ssl'], required: true },
+    ssl_enabled: { type: Boolean, default: false },
     url: { type: String, required: true },
     method: { type: String, default: 'GET' },
     headers: { type: Schema.Types.Mixed },

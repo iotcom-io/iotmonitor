@@ -33,6 +33,7 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
         name: '',
         target_kind: 'website',
         type: 'http',
+        ssl_enabled: false,
         url: '',
         method: 'GET',
         interval: 300,
@@ -42,7 +43,6 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
         response_match_value: '',
         max_response_time_ms: '',
         ssl_expiry_days: 7,
-        enable_ssl_monitor: false,
         channels: ['slack'],
         slack_webhook_name: '',
         custom_webhook_name: '',
@@ -60,9 +60,9 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
                 : (source.expected_status ? [source.expected_status] : [200]),
             response_match_type: source.response_match_type || 'contains',
             target_kind: source.target_kind || 'website',
+            ssl_enabled: Boolean(source.ssl_enabled),
             max_response_time_ms: source.max_response_time_ms ?? '',
             ssl_expiry_days: source.ssl_expiry_days ?? 7,
-            enable_ssl_monitor: false,
         });
     }, [initial, isOpen]);
 
@@ -83,6 +83,7 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
                         : String(form.expected_status_codes || '200')
                 ),
                 response_match_value: String(form.response_match_value || '').trim(),
+                ssl_enabled: form.type === 'ssl' ? true : Boolean(form.ssl_enabled),
                 max_response_time_ms: String(form.max_response_time_ms || '').trim()
                     ? Number(form.max_response_time_ms)
                     : undefined,
@@ -102,7 +103,6 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
             }
 
             if (form._id) {
-                delete payload.enable_ssl_monitor;
                 await api.put(`/synthetics/${form._id}`, payload);
             } else {
                 await api.post('/synthetics', payload);
@@ -166,14 +166,14 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
                         )}
                     </div>
 
-                    {form.type === 'http' && !form._id && (
+                    {form.type === 'http' && (
                         <label className="flex items-center gap-3 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100">
                             <input
                                 type="checkbox"
-                                checked={Boolean(form.enable_ssl_monitor)}
-                                onChange={(e) => setForm({ ...form, enable_ssl_monitor: e.target.checked })}
+                                checked={Boolean(form.ssl_enabled)}
+                                onChange={(e) => setForm({ ...form, ssl_enabled: e.target.checked })}
                             />
-                            Enable SSL monitoring for this same URL (creates companion SSL monitor)
+                            Enable SSL monitoring in this same monitor
                         </label>
                     )}
 
@@ -227,7 +227,7 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
                         </>
                     ) : null}
 
-                    {(form.type === 'ssl' || Boolean(form.enable_ssl_monitor)) && (
+                    {(form.type === 'ssl' || Boolean(form.ssl_enabled)) && (
                         <div className="grid md:grid-cols-2 gap-3">
                             <div className="space-y-2">
                                 <label className="text-sm text-slate-400">SSL Warning Threshold (days)</label>
@@ -395,6 +395,7 @@ export const Synthetics = () => {
                                             <div className="flex flex-col gap-1 text-xs">
                                                 <span className="px-2 py-0.5 rounded bg-white/5 inline-block w-fit">{kindLabels[c.target_kind] || 'Website'}</span>
                                                 <span className="px-2 py-0.5 rounded bg-white/5 inline-block w-fit">{typeLabels[c.type] || c.type}</span>
+                                                {c.type === 'http' && c.ssl_enabled && <span className="px-2 py-0.5 rounded bg-white/5 inline-block w-fit">SSL</span>}
                                             </div>
                                         </td>
                                         <td className="py-3 pr-3">
