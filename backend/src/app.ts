@@ -9,6 +9,7 @@ import monitoringRoutes from './routes/monitoring';
 import settingsRoutes from './routes/settings';
 import syntheticRoutes from './routes/synthetics';
 import incidentRoutes from './routes/incidents';
+import alertRoutes from './routes/alerts';
 import notificationChannelRoutes from './routes/notificationChannels';
 import templateRoutes from './routes/templates';
 import './services/mqtt'; // Initialize MQTT client
@@ -35,6 +36,7 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/synthetics', syntheticRoutes);
 app.use('/api/web-monitoring', syntheticRoutes);
 app.use('/api/incidents', incidentRoutes);
+app.use('/api/alerts', alertRoutes);
 app.use('/api/notification-channels', notificationChannelRoutes);
 app.use('/api/templates', templateRoutes);
 

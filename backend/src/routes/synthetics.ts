@@ -87,6 +87,17 @@ const formatDuration = (durationMs: number) => {
 };
 
 const normalizeUrlKey = (value: unknown) => String(value || '').trim().toLowerCase().replace(/\/+$/, '');
+const normalizeHostKey = (value: unknown) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    try {
+        const withProtocol = /^[a-z]+:\/\//i.test(raw) ? raw : `https://${raw}`;
+        return new URL(withProtocol).hostname.toLowerCase();
+    } catch {
+        return '';
+    }
+};
 const normalizeNameKey = (value: unknown) => String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ');
 
 const looksLikeLegacyCompanion = (httpName: string, sslName: string) => {
@@ -100,21 +111,44 @@ const consolidateLegacySslCompanions = async () => {
     try {
         const checks = await SyntheticCheck.find().sort({ created_at: 1 });
         const httpByUrl = new Map<string, any>();
+        const httpByHost = new Map<string, any[]>();
 
         checks.forEach((check: any) => {
             if (check.type !== 'http') return;
             const key = normalizeUrlKey(check.url);
-            if (!key || httpByUrl.has(key)) return;
-            httpByUrl.set(key, check);
+            if (key && !httpByUrl.has(key)) {
+                httpByUrl.set(key, check);
+            }
+
+            const hostKey = normalizeHostKey(check.url);
+            if (hostKey) {
+                const list = httpByHost.get(hostKey) || [];
+                list.push(check);
+                httpByHost.set(hostKey, list);
+            }
         });
 
         for (const check of checks) {
             if (check.type !== 'ssl') continue;
 
             const key = normalizeUrlKey(check.url);
-            const httpCheck = httpByUrl.get(key);
+            const hostKey = normalizeHostKey(check.url);
+
+            let httpCheck = httpByUrl.get(key);
+            if (httpCheck && !looksLikeLegacyCompanion(httpCheck.name, check.name)) {
+                httpCheck = null;
+            }
+
+            if (!httpCheck && hostKey) {
+                const hostCandidates = (httpByHost.get(hostKey) || [])
+                    .filter((candidate) => looksLikeLegacyCompanion(candidate.name, check.name));
+
+                if (hostCandidates.length > 0) {
+                    httpCheck = hostCandidates[0];
+                }
+            }
+
             if (!httpCheck) continue;
-            if (!looksLikeLegacyCompanion(httpCheck.name, check.name)) continue;
 
             let changed = false;
             if (!httpCheck.ssl_enabled) {

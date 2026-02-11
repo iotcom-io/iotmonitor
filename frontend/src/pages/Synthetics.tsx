@@ -22,10 +22,75 @@ const normalizeStatusCodes = (raw: string) => {
     return Array.from(new Set(values));
 };
 
+const supportsRequestBody = (method: string) => ['POST', 'PUT', 'PATCH'].includes(String(method || '').toUpperCase());
+const supportsOptionalRequestBody = (method: string) => ['DELETE'].includes(String(method || '').toUpperCase());
+
+const toHeadersText = (headers: any) => {
+    if (!headers || typeof headers !== 'object' || Array.isArray(headers)) return '';
+    try {
+        return JSON.stringify(headers, null, 2);
+    } catch {
+        return '';
+    }
+};
+
 const progressClass = (pct: number) => {
     if (pct >= 99) return 'bg-emerald-500';
     if (pct >= 95) return 'bg-amber-500';
     return 'bg-red-500';
+};
+
+const describeHttpState = (check: any) => {
+    if (check.type === 'ssl') return null;
+
+    const statusCode = Number(check.last_response_status);
+    const responseMs = Number(check.last_response_time_ms);
+
+    if (Number.isFinite(statusCode) && statusCode > 0) {
+        if (Number.isFinite(responseMs) && responseMs >= 0) {
+            return `Status ${statusCode} in ${Math.round(responseMs)}ms`;
+        }
+        return `Status ${statusCode}`;
+    }
+
+    if (check.last_message) {
+        return String(check.last_message);
+    }
+
+    return 'Awaiting first check';
+};
+
+const describeSslState = (check: any) => {
+    if (!(check.type === 'ssl' || check.ssl_enabled)) return null;
+
+    const rawState = String(check.ssl_last_state || '').toLowerCase();
+    const expiryDate = check.ssl_expiry_at ? new Date(check.ssl_expiry_at) : null;
+    const hasValidExpiry = Boolean(expiryDate && !Number.isNaN(expiryDate.getTime()));
+    const daysToExpiry = hasValidExpiry
+        ? Math.floor((((expiryDate as Date).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+        : null;
+
+    if (rawState === 'expired') {
+        return 'Expired';
+    }
+
+    if (hasValidExpiry && daysToExpiry !== null) {
+        if (daysToExpiry < 0) {
+            return `Expired ${Math.abs(daysToExpiry)} day(s) ago`;
+        }
+        if (rawState === 'critical') {
+            return `Critical: expires in ${daysToExpiry} day(s)`;
+        }
+        if (rawState === 'warning') {
+            return `Warning: expires in ${daysToExpiry} day(s)`;
+        }
+        return `Valid for ${daysToExpiry} day(s)`;
+    }
+
+    if (rawState === 'critical') return 'Critical';
+    if (rawState === 'warning') return 'Warning';
+    if (rawState === 'ok') return 'Healthy';
+    return 'Awaiting first SSL check';
 };
 
 const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
@@ -36,6 +101,8 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
         ssl_enabled: false,
         url: '',
         method: 'GET',
+        headers_text: '',
+        body: '',
         interval: 300,
         timeout: 8000,
         expected_status_codes: [200],
@@ -50,11 +117,15 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
 
     const [form, setForm] = useState<any>(initial || blank);
     const [saving, setSaving] = useState(false);
+    const [requestConfigError, setRequestConfigError] = useState('');
 
     useEffect(() => {
         const source = initial || blank;
         setForm({
             ...source,
+            method: String(source.method || 'GET').toUpperCase(),
+            headers_text: toHeadersText(source.headers),
+            body: source.body || '',
             expected_status_codes: Array.isArray(source.expected_status_codes)
                 ? source.expected_status_codes
                 : (source.expected_status ? [source.expected_status] : [200]),
@@ -64,6 +135,7 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
             max_response_time_ms: source.max_response_time_ms ?? '',
             ssl_expiry_days: source.ssl_expiry_days ?? 7,
         });
+        setRequestConfigError('');
     }, [initial, isOpen]);
 
     const expectedStatusInput = useMemo(() => {
@@ -75,8 +147,33 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
     const save = async () => {
         setSaving(true);
         try {
+            const method = String(form.method || 'GET').toUpperCase();
+            const headersText = String(form.headers_text || '').trim();
+            let headers: Record<string, string> | undefined;
+
+            if (headersText) {
+                try {
+                    const parsed = JSON.parse(headersText);
+                    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                        setRequestConfigError('Headers must be a valid JSON object.');
+                        return;
+                    }
+
+                    headers = Object.entries(parsed).reduce((acc: Record<string, string>, [key, value]) => {
+                        const normalizedKey = String(key || '').trim();
+                        if (normalizedKey) acc[normalizedKey] = String(value ?? '');
+                        return acc;
+                    }, {});
+                } catch {
+                    setRequestConfigError('Invalid headers JSON. Use object format like {"Authorization":"Bearer ..."}');
+                    return;
+                }
+            }
+
+            setRequestConfigError('');
             const payload: any = {
                 ...form,
+                method,
                 expected_status_codes: normalizeStatusCodes(
                     Array.isArray(form.expected_status_codes)
                         ? form.expected_status_codes.join(',')
@@ -88,19 +185,31 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
                     ? Number(form.max_response_time_ms)
                     : undefined,
                 ssl_expiry_days: Number(form.ssl_expiry_days || 7),
+                headers,
             };
 
             if (payload.expected_status_codes.length === 0) {
                 payload.expected_status_codes = [200];
             }
 
+            const bodyText = String(form.body || '').trim();
+            if (supportsRequestBody(method) || (supportsOptionalRequestBody(method) && bodyText)) {
+                payload.body = bodyText;
+            } else {
+                delete payload.body;
+            }
+
             if (payload.type === 'ssl') {
                 delete payload.method;
+                delete payload.headers;
+                delete payload.body;
                 delete payload.expected_status_codes;
                 delete payload.response_match_type;
                 delete payload.response_match_value;
                 delete payload.max_response_time_ms;
             }
+
+            delete payload.headers_text;
 
             if (form._id) {
                 await api.put(`/synthetics/${form._id}`, payload);
@@ -161,6 +270,8 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
                                     <option value="PUT">PUT</option>
                                     <option value="PATCH">PATCH</option>
                                     <option value="DELETE">DELETE</option>
+                                    <option value="HEAD">HEAD</option>
+                                    <option value="OPTIONS">OPTIONS</option>
                                 </select>
                             </div>
                         )}
@@ -224,8 +335,38 @@ const NewCheckModal = ({ isOpen, onClose, onSaved, initial }: any) => {
                                     />
                                 </div>
                             </div>
+
+                            <div className="space-y-2">
+                                <label className="text-sm text-slate-400">Request Headers (JSON, optional)</label>
+                                <textarea
+                                    className="input-field min-h-[100px] font-mono text-xs"
+                                    value={form.headers_text || ''}
+                                    onChange={(e) => setForm({ ...form, headers_text: e.target.value })}
+                                    placeholder='{"Content-Type":"application/json","Authorization":"Bearer ..."}'
+                                />
+                            </div>
+
+                            {(supportsRequestBody(form.method) || supportsOptionalRequestBody(form.method)) && (
+                                <div className="space-y-2">
+                                    <label className="text-sm text-slate-400">
+                                        {supportsRequestBody(form.method) ? 'Request Payload' : 'Request Payload (optional for DELETE)'}
+                                    </label>
+                                    <textarea
+                                        className="input-field min-h-[120px] font-mono text-xs"
+                                        value={form.body || ''}
+                                        onChange={(e) => setForm({ ...form, body: e.target.value })}
+                                        placeholder='{"ping":"ok"}'
+                                    />
+                                </div>
+                            )}
                         </>
                     ) : null}
+
+                    {requestConfigError && (
+                        <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                            {requestConfigError}
+                        </div>
+                    )}
 
                     {(form.type === 'ssl' || Boolean(form.ssl_enabled)) && (
                         <div className="grid md:grid-cols-2 gap-3">
@@ -383,6 +524,8 @@ export const Synthetics = () => {
                                 const st = stats[c._id] || {};
                                 const uptimePct = Number(st.uptime_pct ?? 100);
                                 const state = st.state || (c.last_status === 'fail' ? 'down' : 'healthy');
+                                const httpState = describeHttpState(c);
+                                const sslState = describeSslState(c);
 
                                 return (
                                     <tr key={c._id} className="border-b border-white/5 align-top">
@@ -403,7 +546,11 @@ export const Synthetics = () => {
                                                 'px-2 py-0.5 rounded text-xs font-bold',
                                                 state === 'healthy' ? 'bg-emerald-500/20 text-emerald-300' : state === 'degraded' ? 'bg-amber-500/20 text-amber-300' : 'bg-red-500/20 text-red-300'
                                             )}>{state.toUpperCase()}</span>
-                                            <div className="text-xs text-slate-400 mt-1">{c.last_message || '—'}</div>
+                                            <div className="text-xs text-slate-400 mt-1 space-y-1">
+                                                {httpState && <div>HTTP: {httpState}</div>}
+                                                {sslState && <div>SSL: {sslState}</div>}
+                                                {!httpState && !sslState && <div>{c.last_message || '—'}</div>}
+                                            </div>
                                         </td>
                                         <td className="py-3 pr-3 min-w-[280px]">
                                             <div className="text-xs text-slate-300 mb-1">Uptime {uptimePct.toFixed(2)}%</div>
@@ -426,7 +573,7 @@ export const Synthetics = () => {
                                                 <button className="icon-btn" title="Run now" onClick={() => runNow(c._id)}><PlayCircle size={14} /></button>
                                                 <button className="icon-btn" title={c.enabled ? 'Pause' : 'Resume'} onClick={async () => { await api.put(`/synthetics/${c._id}`, { enabled: !c.enabled }); fetchChecks(); }}>{c.enabled ? <Pause size={14} /> : <Play size={14} />}</button>
                                                 <button className="icon-btn" title="Edit" onClick={() => { setEditing(c); setModalOpen(true); }}><Edit3 size={14} /></button>
-                                                <button className="icon-btn" title="View incidents" onClick={() => navigate(`/alerts?target_id=${encodeURIComponent(c._id)}&target_type=synthetic`)}><ExternalLink size={14} /></button>
+                                                <button className="icon-btn" title="View incidents" onClick={() => navigate(`/incidents?target_id=${encodeURIComponent(c._id)}&target_type=synthetic`)}><ExternalLink size={14} /></button>
                                                 <button className="icon-btn text-red-400" title="Delete" onClick={async () => { await api.delete(`/synthetics/${c._id}`); fetchChecks(); }}><Trash2 size={14} /></button>
                                             </div>
                                         </td>
