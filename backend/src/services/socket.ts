@@ -1,15 +1,11 @@
 import { Server, Socket } from 'socket.io';
 import { Server as HttpServer } from 'http';
 import jwt, { JwtPayload } from 'jsonwebtoken';
+import User from '../models/User';
+import Device from '../models/Device';
+import { AuthUserContext, canAccessDevice, hasPermission, toAuthUserContext } from '../lib/rbac';
 
 let io: Server;
-
-type UserRole = 'admin' | 'operator' | 'viewer';
-
-interface SocketUser {
-    id: string;
-    role: UserRole;
-}
 
 interface TerminalCommandData {
     device_id: string;
@@ -78,18 +74,14 @@ const parseSafeCommand = (rawCommand: string): { payload: string; args: string[]
     return { payload, args };
 };
 
-const parseSocketUser = (token: string): SocketUser | null => {
-    const decoded = jwt.verify(token, JWT_SECRET) as JwtPayload & { id?: string; role?: string };
-    if (!decoded?.id || !decoded?.role) return null;
+const parseSocketUser = async (token: string): Promise<AuthUserContext | null> => {
+    const decoded = jwt.verify(token, JWT_SECRET) as JwtPayload & { id?: string };
+    if (!decoded?.id) return null;
 
-    if (!['admin', 'operator', 'viewer'].includes(decoded.role)) {
-        return null;
-    }
+    const userDoc = await User.findById(decoded.id);
+    if (!userDoc || userDoc.is_active === false) return null;
 
-    return {
-        id: String(decoded.id),
-        role: decoded.role as UserRole,
-    };
+    return toAuthUserContext(userDoc);
 };
 
 export const initSocket = (httpServer: HttpServer) => {
@@ -105,14 +97,14 @@ export const initSocket = (httpServer: HttpServer) => {
         },
     });
 
-    io.use((socket, next) => {
+    io.use(async (socket, next) => {
         try {
             const token = extractToken(socket);
             if (!token) {
                 return next(new Error('Unauthorized'));
             }
 
-            const user = parseSocketUser(token);
+            const user = await parseSocketUser(token);
             if (!user) {
                 return next(new Error('Unauthorized'));
             }
@@ -125,14 +117,14 @@ export const initSocket = (httpServer: HttpServer) => {
     });
 
     io.on('connection', (socket) => {
-        const user = socket.data.user as SocketUser;
+        const user = socket.data.user as AuthUserContext;
         console.log('Socket client connected:', socket.id, user.role);
 
         socket.on('terminal:command', async (data: TerminalCommandData) => {
             const { device_id, command } = data || {};
             if (!device_id || !command) return;
 
-            if (!['admin', 'operator'].includes(user.role)) {
+            if (!hasPermission(user, 'remote_terminal.run')) {
                 socket.emit(`terminal:output:${device_id}`, { error: 'Insufficient permissions for terminal command' });
                 return;
             }
@@ -151,6 +143,12 @@ export const initSocket = (httpServer: HttpServer) => {
             }
 
             try {
+                const device = await Device.findOne({ device_id }).select({ device_id: 1, assigned_user_ids: 1 });
+                if (!device || !canAccessDevice(user, device)) {
+                    socket.emit(`terminal:output:${device_id}`, { error: 'Access denied for target device' });
+                    return;
+                }
+
                 const { publishCommand } = await import('./mqtt');
                 publishCommand(device_id, {
                     command_id: Math.random().toString(36).substring(2, 10),
