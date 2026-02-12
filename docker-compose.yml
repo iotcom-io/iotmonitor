@@ -62,10 +62,6 @@ services:
     ports:
       - "5001:5001"
     env_file: ./backend/.env
-    environment:
-      # External infra defaults (override in backend/.env or shell env).
-      MONGODB_URI: ${MONGODB_URI:-mongodb://host.docker.internal:27017/iotmonitor}
-      MQTT_URL: ${MQTT_URL:-mqtt://monitoring.iotcom.io:1883}
     depends_on:
       redis:
         condition: service_healthy
