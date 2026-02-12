@@ -422,6 +422,8 @@ const applyModuleFilter = (row: any, enabledModules: Set<ModuleName>) => {
         normalized.cpu_usage = null;
         normalized.memory_usage = null;
         normalized.disk_usage = null;
+        normalized.disk_read_mbps = null;
+        normalized.disk_write_mbps = null;
     }
     if (!enabledModules.has('network')) {
         normalized.bandwidth_mbps = null;
@@ -576,11 +578,18 @@ const buildRawHistoryRows = (metrics: any[]) => {
             };
         }).filter((entry: any) => entry && entry.endpoint);
 
+        const diskReadBytesPerSec = toNumber(metric?.disk_read_bytes_per_sec)
+            ?? toNumber(metric?.extra?.disk_read_bytes_per_sec);
+        const diskWriteBytesPerSec = toNumber(metric?.disk_write_bytes_per_sec)
+            ?? toNumber(metric?.extra?.disk_write_bytes_per_sec);
+
         return {
             timestamp: metric.timestamp,
             cpu_usage: toNumber(metric.cpu_usage),
             memory_usage: toNumber(metric.memory_usage),
             disk_usage: toNumber(metric.disk_usage),
+            disk_read_mbps: diskReadBytesPerSec !== null ? diskReadBytesPerSec / 1000000 : null,
+            disk_write_mbps: diskWriteBytesPerSec !== null ? diskWriteBytesPerSec / 1000000 : null,
             bandwidth_mbps: bandwidthBps !== null ? bandwidthBps / 1000000 : null,
             sip_rtt_avg_ms: sipRttAvg,
             sip_registration_percent: registrationPct,
@@ -675,6 +684,34 @@ router.get('/metrics/:deviceId', authorizePermission('monitoring.view'), async (
                     _cpu_usage: toNumberExpr('$cpu_usage', true),
                     _memory_usage: toNumberExpr('$memory_usage', true),
                     _disk_usage: toNumberExpr('$disk_usage', true),
+                    _disk_read_mbps: {
+                        $let: {
+                            vars: {
+                                readBytes: toNumberExpr('$disk_read_bytes_per_sec', true),
+                            },
+                            in: {
+                                $cond: [
+                                    { $ne: ['$$readBytes', null] },
+                                    { $divide: ['$$readBytes', 1000000] },
+                                    null,
+                                ],
+                            },
+                        },
+                    },
+                    _disk_write_mbps: {
+                        $let: {
+                            vars: {
+                                writeBytes: toNumberExpr('$disk_write_bytes_per_sec', true),
+                            },
+                            in: {
+                                $cond: [
+                                    { $ne: ['$$writeBytes', null] },
+                                    { $divide: ['$$writeBytes', 1000000] },
+                                    null,
+                                ],
+                            },
+                        },
+                    },
                     _bandwidth_mbps: buildBandwidthExpr(),
                     _sip_rtt_avg_ms: buildSipRttExpr(),
                     _sip_registration_percent: buildSipRegistrationExpr(),
@@ -695,6 +732,8 @@ router.get('/metrics/:deviceId', authorizePermission('monitoring.view'), async (
                     cpu_usage: { $avg: '$_cpu_usage' },
                     memory_usage: { $avg: '$_memory_usage' },
                     disk_usage: { $avg: '$_disk_usage' },
+                    disk_read_mbps: { $avg: '$_disk_read_mbps' },
+                    disk_write_mbps: { $avg: '$_disk_write_mbps' },
                     bandwidth_mbps: { $avg: '$_bandwidth_mbps' },
                     sip_rtt_avg_ms: { $avg: '$_sip_rtt_avg_ms' },
                     sip_registration_percent: { $avg: '$_sip_registration_percent' },
@@ -712,6 +751,8 @@ router.get('/metrics/:deviceId', authorizePermission('monitoring.view'), async (
             cpu_usage: toNumber(row.cpu_usage),
             memory_usage: toNumber(row.memory_usage),
             disk_usage: toNumber(row.disk_usage),
+            disk_read_mbps: toNumber(row.disk_read_mbps),
+            disk_write_mbps: toNumber(row.disk_write_mbps),
             bandwidth_mbps: toNumber(row.bandwidth_mbps),
             sip_rtt_avg_ms: toNumber(row.sip_rtt_avg_ms),
             sip_registration_percent: toNumber(row.sip_registration_percent),
@@ -764,6 +805,34 @@ router.get('/metrics/:deviceId/export', authorizePermission('monitoring.view'), 
                         _cpu_usage: toNumberExpr('$cpu_usage', true),
                         _memory_usage: toNumberExpr('$memory_usage', true),
                         _disk_usage: toNumberExpr('$disk_usage', true),
+                        _disk_read_mbps: {
+                            $let: {
+                                vars: {
+                                    readBytes: toNumberExpr('$disk_read_bytes_per_sec', true),
+                                },
+                                in: {
+                                    $cond: [
+                                        { $ne: ['$$readBytes', null] },
+                                        { $divide: ['$$readBytes', 1000000] },
+                                        null,
+                                    ],
+                                },
+                            },
+                        },
+                        _disk_write_mbps: {
+                            $let: {
+                                vars: {
+                                    writeBytes: toNumberExpr('$disk_write_bytes_per_sec', true),
+                                },
+                                in: {
+                                    $cond: [
+                                        { $ne: ['$$writeBytes', null] },
+                                        { $divide: ['$$writeBytes', 1000000] },
+                                        null,
+                                    ],
+                                },
+                            },
+                        },
                         _bandwidth_mbps: buildBandwidthExpr(),
                         _sip_rtt_avg_ms: buildSipRttExpr(),
                         _sip_registration_percent: buildSipRegistrationExpr(),
@@ -782,6 +851,8 @@ router.get('/metrics/:deviceId/export', authorizePermission('monitoring.view'), 
                         cpu_usage: { $avg: '$_cpu_usage' },
                         memory_usage: { $avg: '$_memory_usage' },
                         disk_usage: { $avg: '$_disk_usage' },
+                        disk_read_mbps: { $avg: '$_disk_read_mbps' },
+                        disk_write_mbps: { $avg: '$_disk_write_mbps' },
                         bandwidth_mbps: { $avg: '$_bandwidth_mbps' },
                         sip_rtt_avg_ms: { $avg: '$_sip_rtt_avg_ms' },
                         sip_registration_percent: { $avg: '$_sip_registration_percent' },
@@ -797,6 +868,8 @@ router.get('/metrics/:deviceId/export', authorizePermission('monitoring.view'), 
                 cpu_usage: toNumber(row.cpu_usage),
                 memory_usage: toNumber(row.memory_usage),
                 disk_usage: toNumber(row.disk_usage),
+                disk_read_mbps: toNumber(row.disk_read_mbps),
+                disk_write_mbps: toNumber(row.disk_write_mbps),
                 bandwidth_mbps: toNumber(row.bandwidth_mbps),
                 sip_rtt_avg_ms: toNumber(row.sip_rtt_avg_ms),
                 sip_registration_percent: toNumber(row.sip_registration_percent),
@@ -804,7 +877,7 @@ router.get('/metrics/:deviceId/export', authorizePermission('monitoring.view'), 
             }, enabledModules));
         }
 
-        const headers = ['timestamp', 'cpu_usage', 'memory_usage', 'disk_usage', 'bandwidth_mbps', 'sip_rtt_avg_ms', 'sip_registration_percent', 'point_count'];
+        const headers = ['timestamp', 'cpu_usage', 'memory_usage', 'disk_usage', 'disk_read_mbps', 'disk_write_mbps', 'bandwidth_mbps', 'sip_rtt_avg_ms', 'sip_registration_percent', 'point_count'];
         const csvBody = [
             headers.join(','),
             ...rows.map((row) => ([
@@ -812,6 +885,8 @@ router.get('/metrics/:deviceId/export', authorizePermission('monitoring.view'), 
                 row.cpu_usage,
                 row.memory_usage,
                 row.disk_usage,
+                row.disk_read_mbps,
+                row.disk_write_mbps,
                 row.bandwidth_mbps,
                 row.sip_rtt_avg_ms,
                 row.sip_registration_percent,

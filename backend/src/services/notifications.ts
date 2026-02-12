@@ -21,6 +21,7 @@ const HIDDEN_DETAIL_KEYS = new Set([
     'duration_minutes',
     'duration_seconds',
     'rule_id',
+    'top_cpu_processes',
 ]);
 
 const toNumberOrNull = (value: unknown): number | null => {
@@ -147,6 +148,17 @@ const appendRuleViolationSummary = (lines: string[], alert: IAlertTracking) => {
     }
     if (threshold !== undefined) {
         lines.push(`Threshold: ${thresholdComparator} ${formatValueWithUnit(threshold, unit)}`);
+    }
+
+    if (checkType === 'cpu' && Array.isArray(details.top_cpu_processes) && details.top_cpu_processes.length > 0) {
+        lines.push('Top CPU Processes:');
+        details.top_cpu_processes.slice(0, 5).forEach((process: any) => {
+            const name = String(process?.name || 'unknown');
+            const pid = process?.pid !== undefined ? ` (pid:${process.pid})` : '';
+            const cpu = process?.cpu_percent !== undefined ? `${formatNumber(process.cpu_percent, 2)}%` : 'N/A';
+            const memory = process?.memory_percent !== undefined ? `${formatNumber(process.memory_percent, 2)}%` : 'N/A';
+            lines.push(`- ${name}${pid} | CPU ${cpu} | MEM ${memory}`);
+        });
     }
 };
 
@@ -354,6 +366,9 @@ function buildAlertMessage(alert: IAlertTracking, deviceName: string, isReminder
     const heading = isReminder ? 'REMINDER' : 'ALERT';
     const severityLabel = String(alert.severity || 'warning').toUpperCase();
     const eventTime = formatTimestamp(alert.first_triggered);
+    const elapsedSeconds = alert.first_triggered
+        ? Math.max(0, Math.floor((Date.now() - new Date(alert.first_triggered).getTime()) / 1000))
+        : 0;
 
     const lines: string[] = [
         `${heading} [${severityLabel}]`,
@@ -365,6 +380,9 @@ function buildAlertMessage(alert: IAlertTracking, deviceName: string, isReminder
 
     if (alert.specific_endpoint) {
         lines.push(`Endpoint: ${alert.specific_endpoint}`);
+    }
+    if (elapsedSeconds > 0) {
+        lines.push(`Elapsed: ${formatDuration(elapsedSeconds)}`);
     }
 
     appendRuleViolationSummary(lines, alert);
@@ -412,6 +430,15 @@ function buildRecoveryMessage(alert: IAlertTracking, deviceName: string): any {
 
     if (alert.details?.resolution_reason) {
         lines.push(`Resolution Reason: ${alert.details.resolution_reason}`);
+    }
+    if (alert.details?.resolution_note) {
+        lines.push(`Resolution Note: ${alert.details.resolution_note}`);
+    }
+    if (alert.details?.rca) {
+        lines.push(`RCA: ${alert.details.rca}`);
+    }
+    if (alert.details?.resolved_by_email) {
+        lines.push(`Resolved By: ${alert.details.resolved_by_email}`);
     }
 
     return {

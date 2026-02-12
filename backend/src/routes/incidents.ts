@@ -24,6 +24,21 @@ const csvEscape = (value: unknown) => {
     return text;
 };
 
+const toValidDate = (value: unknown): Date | null => {
+    if (!value) return null;
+    const date = value instanceof Date ? value : new Date(String(value));
+    return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const calculateDurationSeconds = (startedAt: unknown, endedAt: unknown) => {
+    const start = toValidDate(startedAt);
+    if (!start) return null;
+    const end = toValidDate(endedAt) || new Date();
+    const diffMs = end.getTime() - start.getTime();
+    if (!Number.isFinite(diffMs) || diffMs < 0) return null;
+    return Math.floor(diffMs / 1000);
+};
+
 // list by target
 router.get('/', authorizePermission('incidents.view'), async (req: AuthRequest, res) => {
     try {
@@ -193,6 +208,12 @@ router.get('/', authorizePermission('incidents.view'), async (req: AuthRequest, 
             return {
                 ...row,
                 assigned_user_ids: assignedUserIds,
+                downtime_seconds: row.status === 'resolved'
+                    ? calculateDurationSeconds(row.started_at, row.resolved_at)
+                    : null,
+                elapsed_seconds: row.status !== 'resolved'
+                    ? calculateDurationSeconds(row.started_at, new Date())
+                    : null,
             };
         });
 
@@ -320,6 +341,7 @@ router.get('/export', authorizePermission('incidents.view'), async (req: AuthReq
                 String(incident.status || ''),
                 incident.started_at ? new Date(incident.started_at).toISOString() : '',
                 incident.resolved_at ? new Date(incident.resolved_at).toISOString() : '',
+                calculateDurationSeconds(incident.started_at, incident.resolved_at),
                 latestUpdate?.at ? new Date(latestUpdate.at).toISOString() : '',
                 latestUpdate?.message ? String(latestUpdate.message) : '',
                 String(req.user?.email || ''),
@@ -338,6 +360,7 @@ router.get('/export', authorizePermission('incidents.view'), async (req: AuthReq
                 'status',
                 'started_at',
                 'resolved_at',
+                'downtime_seconds',
                 'last_update_at',
                 'last_update_message',
                 'exported_by',

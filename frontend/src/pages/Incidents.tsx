@@ -15,6 +15,20 @@ const formatDate = (value?: string) => {
     return date.toLocaleString();
 };
 
+const formatDuration = (secondsValue?: number | null) => {
+    const seconds = Number(secondsValue || 0);
+    if (!Number.isFinite(seconds) || seconds <= 0) return '—';
+    const total = Math.floor(seconds);
+    const days = Math.floor(total / 86400);
+    const hours = Math.floor((total % 86400) / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const secs = total % 60;
+    if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    if (minutes > 0) return `${minutes}m ${secs}s`;
+    return `${secs}s`;
+};
+
 export const Incidents = () => {
     const [searchParams] = useSearchParams();
     const user = useAuthStore(state => state.user);
@@ -208,6 +222,7 @@ export const Incidents = () => {
                                 <th className="py-3 pr-3">Target</th>
                                 <th className="py-3 pr-3">Severity</th>
                                 <th className="py-3 pr-3">Started</th>
+                                <th className="py-3 pr-3">Elapsed</th>
                                 {showActiveAssignees && <th className="py-3 pr-3">Assigned</th>}
                                 <th className="py-3 pr-3">Action</th>
                             </tr>
@@ -228,6 +243,7 @@ export const Incidents = () => {
                                         </span>
                                     </td>
                                     <td className="py-3 pr-3 text-xs text-slate-300">{formatDate(inc.started_at)}</td>
+                                    <td className="py-3 pr-3 text-xs text-slate-300">{formatDuration(inc.elapsed_seconds)}</td>
                                     {showActiveAssignees && (
                                         <td className="py-3 pr-3 min-w-[180px]">
                                             <AssigneeBadges ids={inc.assigned_user_ids} users={users} />
@@ -299,6 +315,7 @@ export const Incidents = () => {
                                 <th className="py-3 pr-3">Status</th>
                                 <th className="py-3 pr-3">Started</th>
                                 <th className="py-3 pr-3">Resolved</th>
+                                <th className="py-3 pr-3">Downtime</th>
                                 <th className="py-3 pr-3">Last Update</th>
                                 {showHistoricalAssignees && <th className="py-3 pr-3">Assigned</th>}
                                 <th className="py-3 pr-3">Action</th>
@@ -332,6 +349,7 @@ export const Incidents = () => {
                                         </td>
                                         <td className="py-3 pr-3 text-xs text-slate-300">{formatDate(inc.started_at)}</td>
                                         <td className="py-3 pr-3 text-xs text-slate-300">{formatDate(inc.resolved_at)}</td>
+                                        <td className="py-3 pr-3 text-xs text-slate-300">{formatDuration(inc.downtime_seconds)}</td>
                                         <td className="py-3 pr-3 text-xs text-slate-500">{formatDate(lastUpdate?.at)}</td>
                                         {showHistoricalAssignees && (
                                             <td className="py-3 pr-3 min-w-[180px]">
@@ -352,7 +370,7 @@ export const Incidents = () => {
                             })}
                             {!loading && incidents.length === 0 && (
                                 <tr>
-                                    <td colSpan={showHistoricalAssignees ? 9 : 8} className="py-6 text-slate-400">No incidents found for current filters.</td>
+                                    <td colSpan={showHistoricalAssignees ? 10 : 9} className="py-6 text-slate-400">No incidents found for current filters.</td>
                                 </tr>
                             )}
                         </tbody>

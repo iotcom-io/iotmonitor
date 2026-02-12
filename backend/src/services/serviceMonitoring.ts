@@ -132,6 +132,43 @@ const getCheckUnit = (checkType: string) => {
     return '';
 };
 
+const extractTopCpuProcesses = (metrics: any) => {
+    const systemPayload = metrics?.system || metrics;
+    const candidates = Array.isArray(systemPayload?.top_cpu_processes)
+        ? systemPayload.top_cpu_processes
+        : (Array.isArray(metrics?.top_cpu_processes) ? metrics.top_cpu_processes : []);
+
+    if (!Array.isArray(candidates) || candidates.length === 0) {
+        return [];
+    }
+
+    return candidates
+        .map((entry: any) => {
+            const name = String(entry?.name || '').trim();
+            const pid = toNumber(entry?.pid);
+            const cpuPercent = firstNumber(entry?.cpu_percent, entry?.cpuPercent);
+            const memoryPercent = firstNumber(entry?.memory_percent, entry?.memoryPercent);
+            return {
+                name: name || 'unknown',
+                ...(pid !== undefined ? { pid: Math.floor(pid) } : {}),
+                ...(cpuPercent !== undefined ? { cpu_percent: cpuPercent } : {}),
+                ...(memoryPercent !== undefined ? { memory_percent: memoryPercent } : {}),
+            };
+        })
+        .filter((entry: any) => entry.cpu_percent !== undefined || entry.memory_percent !== undefined)
+        .sort((a: any, b: any) => {
+            const aCpu = typeof a.cpu_percent === 'number' ? a.cpu_percent : -1;
+            const bCpu = typeof b.cpu_percent === 'number' ? b.cpu_percent : -1;
+            if (aCpu === bCpu) {
+                const aMem = typeof a.memory_percent === 'number' ? a.memory_percent : -1;
+                const bMem = typeof b.memory_percent === 'number' ? b.memory_percent : -1;
+                return bMem - aMem;
+            }
+            return bCpu - aCpu;
+        })
+        .slice(0, 5);
+};
+
 /**
  * Service Monitoring Service
  *
@@ -206,6 +243,10 @@ export async function applyThresholdRules(device: any, metrics: any) {
                 metrics?.cpu_percent,
                 systemPayload?.cpu_load
             );
+            const topProcesses = extractTopCpuProcesses(metrics);
+            if (topProcesses.length > 0) {
+                alertDetails.top_cpu_processes = topProcesses;
+            }
         } else if (check.check_type === 'memory') {
             const systemPayload = metrics.system || metrics;
             value = firstNumber(
@@ -371,6 +412,7 @@ export async function applyThresholdRules(device: any, metrics: any) {
                                 value,
                                 threshold: thresholdValue,
                                 unit,
+                                ...alertDetails,
                             }),
                         rule_id: check._id,
                     },

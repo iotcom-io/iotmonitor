@@ -2,7 +2,6 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import dotenv from 'dotenv';
 import authRoutes from './routes/auth';
 import deviceRoutes from './routes/devices';
 import monitoringRoutes from './routes/monitoring';
@@ -14,9 +13,6 @@ import userRoutes from './routes/users';
 import licenseRoutes from './routes/licenses';
 import notificationChannelRoutes from './routes/notificationChannels';
 import templateRoutes from './routes/templates';
-import './services/mqtt'; // Initialize MQTT client
-
-dotenv.config();
 
 const app = express();
 const allowedOrigins = process.env.FRONTEND_ORIGIN

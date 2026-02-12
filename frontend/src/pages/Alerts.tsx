@@ -1,15 +1,29 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import api from '../lib/axios';
-import { AlertTriangle, RefreshCw, Download } from 'lucide-react';
+import { AlertTriangle, RefreshCw, Download, CheckCircle2, X } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 import { hasPermission } from '../lib/permissions';
 import { AssigneeBadges } from '../components/AssigneeBadges';
 
 const formatDate = (value?: string) => {
-    if (!value) return '—';
+    if (!value) return '--';
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
     return date.toLocaleString();
+};
+
+const formatDuration = (secondsValue: unknown) => {
+    const seconds = Number(secondsValue || 0);
+    if (!Number.isFinite(seconds) || seconds <= 0) return '--';
+    const total = Math.floor(seconds);
+    const days = Math.floor(total / 86400);
+    const hours = Math.floor((total % 86400) / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const secs = total % 60;
+    if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    if (minutes > 0) return `${minutes}m ${secs}s`;
+    return `${secs}s`;
 };
 
 const severityClass = (severity: string) => {
@@ -27,23 +41,50 @@ const buildAlertLabel = (alert: any) => {
     const segments = [title];
     if (service) segments.push(service);
     if (endpoint) segments.push(endpoint);
-    return segments.join(' • ');
+    return segments.join(' | ');
 };
 
 const compactDetails = (details: any) => {
-    if (!details || typeof details !== 'object') return '—';
-    const keys = Object.keys(details).slice(0, 3);
-    if (keys.length === 0) return '—';
-    return keys.map((key) => `${key}: ${String(details[key])}`).join(' | ');
+    if (!details || typeof details !== 'object') return '--';
+
+    const lines: string[] = [];
+    if (Array.isArray(details.top_cpu_processes) && details.top_cpu_processes.length > 0) {
+        const top = details.top_cpu_processes.slice(0, 2).map((proc: any) => {
+            const name = String(proc?.name || 'unknown');
+            const cpu = Number(proc?.cpu_percent);
+            if (Number.isFinite(cpu)) return `${name} (${cpu.toFixed(2)}%)`;
+            return name;
+        });
+        lines.push(`top_cpu_processes: ${top.join(', ')}`);
+    }
+
+    Object.entries(details)
+        .filter(([key]) => key !== 'top_cpu_processes')
+        .slice(0, 3)
+        .forEach(([key, value]) => {
+            lines.push(`${key}: ${typeof value === 'object' ? JSON.stringify(value) : String(value)}`);
+        });
+
+    return lines.length > 0 ? lines.join(' | ') : '--';
 };
 
 export const Alerts = () => {
     const user = useAuthStore(state => state.user);
     const canViewUsers = hasPermission('users.view', user);
+    const canResolveAlerts = hasPermission('incidents.resolve', user);
+
     const [alerts, setAlerts] = useState<any[]>([]);
     const [users, setUsers] = useState<Record<string, { name?: string; email?: string }>>({});
     const [loading, setLoading] = useState(true);
     const [exporting, setExporting] = useState(false);
+    const [resolveModal, setResolveModal] = useState<{
+        alertId: string;
+        deviceName: string;
+        alertLabel: string;
+        note: string;
+        rca: string;
+    } | null>(null);
+    const [resolving, setResolving] = useState(false);
 
     const fetchAlerts = async () => {
         setLoading(true);
@@ -73,6 +114,24 @@ export const Alerts = () => {
             window.alert('Failed to export active alerts.');
         } finally {
             setExporting(false);
+        }
+    };
+
+    const submitManualResolve = async () => {
+        if (!resolveModal) return;
+        try {
+            setResolving(true);
+            await api.post(`/alerts/active/${resolveModal.alertId}/resolve`, {
+                note: resolveModal.note,
+                rca: resolveModal.rca,
+            });
+            setResolveModal(null);
+            await fetchAlerts();
+        } catch (error) {
+            console.error('Failed to resolve alert manually', error);
+            window.alert('Failed to resolve alert.');
+        } finally {
+            setResolving(false);
         }
     };
 
@@ -125,7 +184,9 @@ export const Alerts = () => {
                     <button className="icon-btn" onClick={exportAlerts} disabled={exporting} title="Export active alerts CSV">
                         <Download size={16} />
                     </button>
-                    <button className="icon-btn" onClick={fetchAlerts}><RefreshCw size={16} /></button>
+                    <button className="icon-btn" onClick={fetchAlerts} title="Refresh">
+                        <RefreshCw size={16} />
+                    </button>
                 </div>
             </div>
 
@@ -133,7 +194,7 @@ export const Alerts = () => {
                 {loading ? (
                     <div className="text-slate-400">Loading...</div>
                 ) : alerts.length === 0 ? (
-                    <div className="py-6 text-slate-400">No active alert.</div>
+                    <div className="py-6 text-slate-400">No active alerts.</div>
                 ) : (
                     <table className="min-w-full text-sm">
                         <thead>
@@ -143,10 +204,12 @@ export const Alerts = () => {
                                 <th className="py-3 pr-3">Severity</th>
                                 <th className="py-3 pr-3">State</th>
                                 <th className="py-3 pr-3">Triggered</th>
+                                <th className="py-3 pr-3">Elapsed</th>
                                 <th className="py-3 pr-3">Last Notified</th>
                                 <th className="py-3 pr-3">Next Notification</th>
                                 {hasAnyAssignees && <th className="py-3 pr-3">Assigned</th>}
                                 <th className="py-3 pr-3">Details</th>
+                                {canResolveAlerts && <th className="py-3 pr-3">Action</th>}
                             </tr>
                         </thead>
                         <tbody>
@@ -164,6 +227,7 @@ export const Alerts = () => {
                                     </td>
                                     <td className="py-3 pr-3 text-slate-300 text-xs">{String(alert.state || '').toUpperCase()}</td>
                                     <td className="py-3 pr-3 text-xs text-slate-300">{formatDate(alert.first_triggered)}</td>
+                                    <td className="py-3 pr-3 text-xs text-slate-300">{formatDuration(alert.elapsed_seconds)}</td>
                                     <td className="py-3 pr-3 text-xs text-slate-300">{formatDate(alert.last_notified)}</td>
                                     <td className="py-3 pr-3 text-xs text-slate-300">{formatDate(alert.next_notification_at)}</td>
                                     {hasAnyAssignees && (
@@ -171,13 +235,80 @@ export const Alerts = () => {
                                             <AssigneeBadges ids={alert.assigned_user_ids} users={users} />
                                         </td>
                                     )}
-                                    <td className="py-3 pr-3 text-xs text-slate-500 min-w-[260px]">{compactDetails(alert.details)}</td>
+                                    <td className="py-3 pr-3 text-xs text-slate-500 min-w-[280px]">{compactDetails(alert.details)}</td>
+                                    {canResolveAlerts && (
+                                        <td className="py-3 pr-3">
+                                            <button
+                                                className="text-xs px-3 py-1 bg-emerald-500/20 text-emerald-300 rounded inline-flex items-center gap-1"
+                                                onClick={() => setResolveModal({
+                                                    alertId: String(alert._id),
+                                                    deviceName: String(alert.device_name || alert.device_id || 'Unknown'),
+                                                    alertLabel: buildAlertLabel(alert),
+                                                    note: '',
+                                                    rca: '',
+                                                })}
+                                            >
+                                                <CheckCircle2 size={12} /> Resolve
+                                            </button>
+                                        </td>
+                                    )}
                                 </tr>
                             ))}
                         </tbody>
                     </table>
                 )}
             </div>
+
+            {resolveModal && (
+                <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+                    <div className="w-full max-w-xl rounded-xl border border-white/10 bg-dark-surface p-5 space-y-4">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h3 className="text-lg font-semibold text-white">Resolve Alert</h3>
+                                <p className="text-xs text-slate-400 mt-1">{resolveModal.deviceName} | {resolveModal.alertLabel}</p>
+                            </div>
+                            <button
+                                type="button"
+                                className="icon-btn"
+                                onClick={() => setResolveModal(null)}
+                                aria-label="Close"
+                            >
+                                <X size={14} />
+                            </button>
+                        </div>
+
+                        <div className="space-y-3">
+                            <div>
+                                <label className="text-xs text-slate-400 block mb-1">Resolution Note</label>
+                                <textarea
+                                    className="input-field min-h-[88px]"
+                                    value={resolveModal.note}
+                                    onChange={(e) => setResolveModal({ ...resolveModal, note: e.target.value })}
+                                    placeholder="What action was taken?"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs text-slate-400 block mb-1">RCA (Root Cause Analysis)</label>
+                                <textarea
+                                    className="input-field min-h-[88px]"
+                                    value={resolveModal.rca}
+                                    onChange={(e) => setResolveModal({ ...resolveModal, rca: e.target.value })}
+                                    placeholder="Root cause summary"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="flex items-center justify-end gap-2">
+                            <button className="px-3 py-2 rounded-lg border border-white/10 text-slate-300 hover:bg-white/5" onClick={() => setResolveModal(null)}>
+                                Cancel
+                            </button>
+                            <button className="btn-primary" onClick={submitManualResolve} disabled={resolving}>
+                                {resolving ? 'Resolving...' : 'Resolve Alert'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

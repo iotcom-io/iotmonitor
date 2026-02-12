@@ -16,6 +16,8 @@ export interface ITelemetry extends Document {
     disk_usage: number;
     disk_total?: number;
     disk_used?: number;
+    disk_read_bytes_per_sec?: number;
+    disk_write_bytes_per_sec?: number;
     network_in?: number;
     network_out?: number;
     public_ip?: string;
@@ -39,6 +41,8 @@ const TelemetrySchema: Schema = new Schema({
     disk_usage: { type: Number },
     disk_total: { type: Number },
     disk_used: { type: Number },
+    disk_read_bytes_per_sec: { type: Number },
+    disk_write_bytes_per_sec: { type: Number },
     network_in: { type: Number },
     network_out: { type: Number },
     public_ip: { type: String },

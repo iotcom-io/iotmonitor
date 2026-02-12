@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { Menu, X } from 'lucide-react';
+import { Menu, X, Moon, Sun } from 'lucide-react';
 import { useAuthStore } from './store/useAuthStore';
 import { Sidebar } from './components/layout/Sidebar';
 import { Dashboard } from './pages/Dashboard';
@@ -80,8 +80,6 @@ function App() {
                             onToggle={() => setSidebarCollapsed((prev) => !prev)}
                             mobileOpen={mobileSidebarOpen}
                             onCloseMobile={() => setMobileSidebarOpen(false)}
-                            theme={theme}
-                            onToggleTheme={() => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))}
                         />
                         {mobileSidebarOpen && (
                             <button
@@ -98,17 +96,27 @@ function App() {
                     : "flex-1 flex flex-col min-h-screen"}
                 >
                     {token && (
-                        <div className="md:hidden mb-4 flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                        <div className="mb-4 flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    className="icon-btn md:hidden"
+                                    onClick={() => setMobileSidebarOpen((prev) => !prev)}
+                                    aria-label="Toggle sidebar"
+                                >
+                                    {mobileSidebarOpen ? <X size={18} /> : <Menu size={18} />}
+                                </button>
+                                <span className="text-sm font-semibold text-slate-200">IoTMonitor</span>
+                            </div>
                             <button
                                 type="button"
                                 className="icon-btn"
-                                onClick={() => setMobileSidebarOpen((prev) => !prev)}
-                                aria-label="Toggle sidebar"
+                                onClick={() => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))}
+                                aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+                                title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
                             >
-                                {mobileSidebarOpen ? <X size={18} /> : <Menu size={18} />}
+                                {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
                             </button>
-                            <span className="text-sm font-semibold text-slate-200">IoTMonitor</span>
-                            <div className="w-8" />
                         </div>
                     )}
                     <div className="flex-1">

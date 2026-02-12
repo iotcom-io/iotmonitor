@@ -76,11 +76,29 @@ client.on('message', async (topic, message, packet) => {
             const isRetained = packet?.retain === true;
             const isStartupSync = Date.now() - mqttConnectedAt < 60000;
 
-            // Never treat retained status messages as live transition events.
-            // Keep startup retained status only as passive state sync.
+            // Retained status messages are primarily used to restore backend state on restart.
+            // We do not emit transition notifications from retained payloads, but we still
+            // refresh heartbeat for retained ONLINE state to prevent false offline alerts.
             if (isRetained) {
-                if (isStartupSync && oldStatus !== status) {
-                    await Device.findOneAndUpdate({ device_id }, { status });
+                if (status === 'online') {
+                    await updateDeviceHeartbeat(device_id);
+                    if (oldStatus !== 'online') {
+                        await Device.findOneAndUpdate(
+                            { device_id },
+                            { status: 'online', last_seen: new Date() }
+                        );
+                    }
+                    return;
+                }
+
+                if (isStartupSync && status !== 'offline' && oldStatus !== status) {
+                    await Device.findOneAndUpdate(
+                        { device_id },
+                        {
+                            status,
+                            last_seen: new Date(),
+                        }
+                    );
                 }
                 return;
             }
@@ -196,12 +214,20 @@ client.on('message', async (topic, message, packet) => {
                     if (payload.disk_usage !== undefined) updateData.disk_usage = payload.disk_usage;
                     if (payload.disk_used !== undefined) updateData.disk_used = payload.disk_used;
                     if (payload.disk_total !== undefined) updateData.disk_total = payload.disk_total;
+                    if (payload.disk_read_bytes_per_sec !== undefined) updateData.disk_read_bytes_per_sec = payload.disk_read_bytes_per_sec;
+                    if (payload.disk_write_bytes_per_sec !== undefined) updateData.disk_write_bytes_per_sec = payload.disk_write_bytes_per_sec;
 
                     if (payload.extra) {
                         for (const key in payload.extra) {
                             recentTelemetry.extra = recentTelemetry.extra || {};
                             recentTelemetry.extra[key] = payload.extra[key];
                         }
+                        recentTelemetry.markModified('extra');
+                    }
+
+                    if (Array.isArray(payload.top_cpu_processes)) {
+                        recentTelemetry.extra = recentTelemetry.extra || {};
+                        recentTelemetry.extra.top_cpu_processes = payload.top_cpu_processes;
                         recentTelemetry.markModified('extra');
                     }
                 } else if (check_type === 'network') {
@@ -277,9 +303,14 @@ client.on('message', async (topic, message, packet) => {
                         disk_usage: payload.disk_usage,
                         disk_total: payload.disk_total,
                         disk_used: payload.disk_used,
+                        disk_read_bytes_per_sec: payload.disk_read_bytes_per_sec,
+                        disk_write_bytes_per_sec: payload.disk_write_bytes_per_sec,
                         network_in: payload.network_in,
                         network_out: payload.network_out,
-                        extra: payload.extra,
+                        extra: {
+                            ...(payload.extra || {}),
+                            ...(Array.isArray(payload.top_cpu_processes) ? { top_cpu_processes: payload.top_cpu_processes } : {}),
+                        },
                     }).save();
                 } else if (check_type === 'network') {
                     const previousPublicIP = freshDevice.public_ip || '';

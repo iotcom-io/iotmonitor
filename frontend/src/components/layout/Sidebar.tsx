@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Server, ShieldCheck, Settings, LogOut, Terminal, Bell, Globe, FileText, KeyRound, Users, ChevronLeft, ChevronRight, Moon, Sun } from 'lucide-react';
+import { LayoutDashboard, Server, ShieldCheck, Settings, LogOut, Terminal, Bell, Globe, FileText, KeyRound, Users, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuthStore } from '../../store/useAuthStore';
 import { Link, useLocation } from 'react-router-dom';
 import { clsx } from 'clsx';
@@ -42,15 +42,11 @@ export const Sidebar = ({
     onToggle,
     mobileOpen,
     onCloseMobile,
-    theme,
-    onToggleTheme,
 }: {
     collapsed: boolean;
     onToggle: () => void;
     mobileOpen: boolean;
     onCloseMobile: () => void;
-    theme: 'dark' | 'light';
-    onToggleTheme: () => void;
 }) => {
     const location = useLocation();
     const logout = useAuthStore(state => state.logout);
@@ -192,17 +188,6 @@ export const Sidebar = ({
             </nav>
 
             <div className="mt-auto space-y-2">
-                <button
-                    onClick={onToggleTheme}
-                    title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-                    className={clsx(
-                        "rounded-lg text-slate-400 hover:text-primary-300 hover:bg-white/5 w-full transition-all duration-200",
-                        collapsed ? "flex items-center justify-center px-3 py-3" : "flex items-center gap-3 px-4 py-3"
-                    )}
-                >
-                    {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
-                    {!collapsed && <span className="font-medium">{theme === 'dark' ? 'Light Theme' : 'Dark Theme'}</span>}
-                </button>
                 {hasPermission('settings.view', user) && (
                     <SidebarItem
                         icon={Settings}

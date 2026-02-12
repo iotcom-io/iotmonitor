@@ -3,6 +3,7 @@ import { authenticate, AuthRequest, authorizePermission } from '../middleware/au
 import AlertTracking from '../models/AlertTracking';
 import Device from '../models/Device';
 import { canAccessDevice } from '../lib/rbac';
+import { resolveAlert } from '../services/notificationThrottling';
 
 const router = Router();
 router.use(authenticate);
@@ -85,12 +86,17 @@ const fetchActiveAlertRows = async (req: AuthRequest, maxLimit: number) => {
             const assignedUserIds = Array.isArray(deviceMeta.get(String(alert.device_id))?.assigned_user_ids)
                 ? deviceMeta.get(String(alert.device_id)).assigned_user_ids
                 : [];
+            const firstTriggered = alert?.first_triggered ? new Date(alert.first_triggered) : null;
+            const elapsedSeconds = firstTriggered && !Number.isNaN(firstTriggered.getTime())
+                ? Math.max(0, Math.floor((Date.now() - firstTriggered.getTime()) / 1000))
+                : null;
 
             return {
                 ...alert,
                 device_name: deviceMap.get(String(alert.device_id)) || String(alert.device_id || 'Unknown'),
                 next_notification_at: nextNotificationAt ? nextNotificationAt.toISOString() : null,
                 assigned_user_ids: assignedUserIds,
+                elapsed_seconds: elapsedSeconds,
             };
         })
         .sort((a: any, b: any) => {
@@ -131,6 +137,7 @@ router.get('/active/export', authorizePermission('alerts.view'), async (req: Aut
                 alert.first_triggered ? new Date(alert.first_triggered).toISOString() : '',
                 alert.last_notified ? new Date(alert.last_notified).toISOString() : '',
                 alert.next_notification_at ? new Date(alert.next_notification_at).toISOString() : '',
+                String(alert.elapsed_seconds ?? ''),
                 String(alert.notification_count ?? ''),
                 details,
                 String(req.user?.email || ''),
@@ -151,6 +158,7 @@ router.get('/active/export', authorizePermission('alerts.view'), async (req: Aut
                 'first_triggered',
                 'last_notified',
                 'next_notification_at',
+                'elapsed_seconds',
                 'notification_count',
                 'details_json',
                 'exported_by',
@@ -165,6 +173,55 @@ router.get('/active/export', authorizePermission('alerts.view'), async (req: Aut
         return res.send(csvBody);
     } catch (error: any) {
         return res.status(500).json({ message: error.message || 'Failed to export active alerts' });
+    }
+});
+
+router.post('/active/:id/resolve', authorizePermission('incidents.resolve'), async (req: AuthRequest, res) => {
+    try {
+        const alert = await AlertTracking.findOne({
+            _id: req.params.id,
+            state: { $ne: 'resolved' },
+        });
+        if (!alert) {
+            return res.status(404).json({ message: 'Active alert not found' });
+        }
+
+        const device = await Device.findOne({ device_id: alert.device_id })
+            .select({ device_id: 1, name: 1, assigned_user_ids: 1 })
+            .lean();
+        if (!device) {
+            return res.status(404).json({ message: 'Device not found for this alert' });
+        }
+        if (!canAccessDevice(req.user, device)) {
+            return res.status(403).json({ message: 'Access denied for this alert' });
+        }
+
+        const rca = typeof req.body?.rca === 'string' ? req.body.rca.trim() : '';
+        const note = typeof req.body?.note === 'string' ? req.body.note.trim() : '';
+        const resolutionDetails: Record<string, any> = {
+            resolution_reason: 'Manually resolved from active alerts',
+            manual_resolution: true,
+            resolved_by_user_id: req.user?.id,
+            resolved_by_email: req.user?.email,
+        };
+        if (note) resolutionDetails.resolution_note = note;
+        if (rca) resolutionDetails.rca = rca;
+
+        const resolved = await resolveAlert({
+            device_id: alert.device_id,
+            device_name: String(device.name || alert.device_id),
+            alert_type: alert.alert_type,
+            specific_service: alert.specific_service,
+            specific_endpoint: alert.specific_endpoint,
+            details: resolutionDetails,
+        });
+
+        if (!resolved) {
+            return res.status(404).json({ message: 'Alert already resolved' });
+        }
+        return res.json(resolved);
+    } catch (error: any) {
+        return res.status(500).json({ message: error.message || 'Failed to resolve alert' });
     }
 });
 

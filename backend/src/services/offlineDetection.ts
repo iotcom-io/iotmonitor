@@ -3,8 +3,13 @@ import SystemSettings from '../models/SystemSettings';
 import { triggerAlert, resolveAlert, resolveOfflineRecoveryBundle } from './notificationThrottling';
 
 const SERVICE_DOWN_GRACE_MS = 120000;
+const OFFLINE_DETECTION_STARTUP_GRACE_MS = Math.max(
+    0,
+    (Number(process.env.OFFLINE_DETECTION_STARTUP_GRACE_SECONDS || 90) || 90) * 1000
+);
 const MODULES = ['system', 'docker', 'asterisk', 'network'] as const;
 type ModuleName = typeof MODULES[number];
+let offlineServiceStartedAt = Date.now();
 
 const getEnabledModules = (device: any): ModuleName[] => {
     const modulesConfig = device.config?.modules;
@@ -28,14 +33,20 @@ export async function checkOfflineDevices() {
         const settings = await SystemSettings.findOne();
         const globalMultiplier = settings?.default_offline_threshold_multiplier || 4;
         const now = new Date();
+        const inStartupGraceWindow = Date.now() - offlineServiceStartedAt < OFFLINE_DETECTION_STARTUP_GRACE_MS;
 
         for (const device of devices) {
             const expectedInterval = (device.expected_message_interval_seconds || 15) * 1000;
             const multiplier = device.offline_threshold_multiplier || globalMultiplier;
             const offlineThreshold = expectedInterval * multiplier;
-            const timeSinceLastMessage = now.getTime() - new Date(device.last_seen).getTime();
+            const lastSeenAt = new Date(device.last_seen || 0);
+            const timeSinceLastMessage = now.getTime() - lastSeenAt.getTime();
 
             if (timeSinceLastMessage > offlineThreshold) {
+                if (inStartupGraceWindow) {
+                    continue;
+                }
+
                 if (device.status !== 'offline') {
                     console.log(`Device ${device.name} is offline (last seen: ${device.last_seen})`);
 
@@ -65,6 +76,10 @@ export async function checkOfflineDevices() {
             }
 
             if (device.status === 'online') {
+                if (inStartupGraceWindow) {
+                    continue;
+                }
+
                 const modules = getEnabledModules(device).filter((m) => m !== 'system');
                 for (const module of modules) {
                     const lastSuccess = (device.last_successful_metrics as any)?.[module];
@@ -191,6 +206,7 @@ export async function updateServiceMetrics(deviceId: string, service: string) {
 
 export async function startOfflineDetection() {
     console.log('Starting offline detection service...');
+    offlineServiceStartedAt = Date.now();
 
     const runDetection = async () => {
         try {

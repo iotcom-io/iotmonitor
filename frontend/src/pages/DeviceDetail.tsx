@@ -503,7 +503,9 @@ export const DeviceDetail = () => {
         sample?.memory_used !== undefined ||
         sample?.memory_available !== undefined ||
         sample?.disk_total !== undefined ||
-        sample?.disk_used !== undefined
+        sample?.disk_used !== undefined ||
+        sample?.disk_read_bytes_per_sec !== undefined ||
+        sample?.disk_write_bytes_per_sec !== undefined
     );
     const hasNetworkPayload = (sample: any) => (
         sample?.public_ip !== undefined ||
@@ -587,25 +589,51 @@ export const DeviceDetail = () => {
     const avgLatency = successfulPings.length
         ? (successfulPings.reduce((sum, p) => sum + (p.latency_ms || 0), 0) / successfulPings.length)
         : null;
+    const latestDiskReadMbps = numberOrNull(latest?.disk_read_mbps)
+        ?? (() => {
+            const bytes = numberOrNull(latest?.disk_read_bytes_per_sec);
+            return bytes !== null ? bytes / 1000000 : null;
+        })();
+    const latestDiskWriteMbps = numberOrNull(latest?.disk_write_mbps)
+        ?? (() => {
+            const bytes = numberOrNull(latest?.disk_write_bytes_per_sec);
+            return bytes !== null ? bytes / 1000000 : null;
+        })();
     const currentUptimeSeconds = numberOrNull(latest?.uptime) ?? numberOrNull(device?.uptime_seconds);
     const realtimeSystemSeries = useMemo(() => {
         let lastCpu: number | null = null;
         let lastMemory: number | null = null;
         let lastDisk: number | null = null;
+        let lastDiskReadMbps: number | null = null;
+        let lastDiskWriteMbps: number | null = null;
         return metrics.map((sample: any) => {
             if (hasSystemPayload(sample)) {
                 const cpuValue = numberOrNull(sample?.cpu_usage);
                 const memoryValue = numberOrNull(sample?.memory_usage);
                 const diskValue = numberOrNull(sample?.disk_usage);
+                const diskReadMbpsValue = numberOrNull(sample?.disk_read_mbps)
+                    ?? (() => {
+                        const bytes = numberOrNull(sample?.disk_read_bytes_per_sec);
+                        return bytes !== null ? bytes / 1000000 : null;
+                    })();
+                const diskWriteMbpsValue = numberOrNull(sample?.disk_write_mbps)
+                    ?? (() => {
+                        const bytes = numberOrNull(sample?.disk_write_bytes_per_sec);
+                        return bytes !== null ? bytes / 1000000 : null;
+                    })();
                 if (cpuValue !== null) lastCpu = cpuValue;
                 if (memoryValue !== null) lastMemory = memoryValue;
                 if (diskValue !== null) lastDisk = diskValue;
+                if (diskReadMbpsValue !== null) lastDiskReadMbps = diskReadMbpsValue;
+                if (diskWriteMbpsValue !== null) lastDiskWriteMbps = diskWriteMbpsValue;
             }
             return {
                 ...sample,
                 cpu_usage: lastCpu,
                 memory_usage: lastMemory,
                 disk_usage: lastDisk,
+                disk_read_mbps: lastDiskReadMbps,
+                disk_write_mbps: lastDiskWriteMbps,
             };
         });
     }, [metrics]);
@@ -648,6 +676,8 @@ export const DeviceDetail = () => {
     const historicalSeries = useMemo(() => {
         return historicalMetrics.map((sample: any) => {
             const precomputedBandwidth = numberOrNull(sample?.bandwidth_mbps);
+            const precomputedDiskReadMbps = numberOrNull(sample?.disk_read_mbps);
+            const precomputedDiskWriteMbps = numberOrNull(sample?.disk_write_mbps);
             const interfaces = Array.isArray(sample?.extra?.interfaces) ? sample.extra.interfaces : [];
             let totalBandwidthBps = 0;
             for (const iface of interfaces) {
@@ -660,6 +690,18 @@ export const DeviceDetail = () => {
             }
             const computedBandwidth = totalBandwidthBps > 0 ? totalBandwidthBps / 1000000 : null;
             const bandwidthMbps = precomputedBandwidth !== null ? precomputedBandwidth : computedBandwidth;
+            const diskReadMbps = precomputedDiskReadMbps !== null
+                ? precomputedDiskReadMbps
+                : (() => {
+                    const bytes = numberOrNull(sample?.disk_read_bytes_per_sec);
+                    return bytes !== null ? bytes / 1000000 : null;
+                })();
+            const diskWriteMbps = precomputedDiskWriteMbps !== null
+                ? precomputedDiskWriteMbps
+                : (() => {
+                    const bytes = numberOrNull(sample?.disk_write_bytes_per_sec);
+                    return bytes !== null ? bytes / 1000000 : null;
+                })();
 
             const precomputedSipRtt = numberOrNull(sample?.sip_rtt_avg_ms);
             const contacts = Array.isArray(sample?.extra?.contacts) ? sample.extra.contacts : [];
@@ -729,6 +771,8 @@ export const DeviceDetail = () => {
             const row: Record<string, any> = {
                 ...sample,
                 bandwidth_mbps: bandwidthMbps,
+                disk_read_mbps: diskReadMbps,
+                disk_write_mbps: diskWriteMbps,
                 sip_rtt_avg_ms: sipRttValue,
                 sip_registration_percent: sipRegistrationValue,
                 _sip_endpoints: Array.from(endpointNames),
@@ -955,6 +999,9 @@ export const DeviceDetail = () => {
                             </div>
                             <h4 className="text-slate-400 text-sm font-medium mb-1">Storage</h4>
                             <p className="text-2xl font-bold text-white">{formatWithUnit(diskPct, '%', 2, '0.00%')}</p>
+                            <p className="text-[10px] text-slate-500 mt-1">
+                                I/O R: {formatWithUnit(latestDiskReadMbps, ' MB/s', 2, '--')} | W: {formatWithUnit(latestDiskWriteMbps, ' MB/s', 2, '--')}
+                            </p>
                         </div>
                         <div className="card">
                             <div className="flex justify-between items-center mb-4">
@@ -973,7 +1020,7 @@ export const DeviceDetail = () => {
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 relative">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 relative">
                         {isOffline && (
                             <div className="absolute inset-x-0 inset-y-0 z-10 bg-slate-950/40 backdrop-blur-[1px] rounded-[32px] pointer-events-none" />
                         )}
@@ -1045,6 +1092,65 @@ export const DeviceDetail = () => {
                                     />
                                     <Area type="monotone" dataKey="memory_usage" stroke="#10b981" fillOpacity={1} fill="url(#colorMem)" strokeWidth={3} />
                                 </AreaChart>
+                            </ResponsiveContainer>
+                        </div>
+                        <div className="card h-80">
+                            <h3 className="text-lg font-bold text-white mb-6">Disk Utilization (%)</h3>
+                            <ResponsiveContainer width="100%" height="100%">
+                                <AreaChart data={realtimeSystemSeries}>
+                                    <defs>
+                                        <linearGradient id="colorDisk" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3} />
+                                            <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
+                                        </linearGradient>
+                                    </defs>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" />
+                                    <XAxis
+                                        dataKey="timestamp"
+                                        stroke="#64748b"
+                                        fontSize={10}
+                                        tickLine={false}
+                                        axisLine={false}
+                                        tickFormatter={(val) => new Date(val).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    />
+                                    <YAxis
+                                        stroke="#64748b"
+                                        fontSize={12}
+                                        tickLine={false}
+                                        axisLine={false}
+                                        tickFormatter={(value) => `${formatDecimal(value, 0, '0')}%`}
+                                    />
+                                    <Tooltip
+                                        contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
+                                        itemStyle={{ color: '#f59e0b' }}
+                                        formatter={(value: any) => [formatWithUnit(value, '%', 2, '--'), 'Disk']}
+                                    />
+                                    <Area type="monotone" dataKey="disk_usage" stroke="#f59e0b" fillOpacity={1} fill="url(#colorDisk)" strokeWidth={3} />
+                                </AreaChart>
+                            </ResponsiveContainer>
+                        </div>
+                        <div className="card h-80">
+                            <h3 className="text-lg font-bold text-white mb-6">Disk I/O (MB/s)</h3>
+                            <ResponsiveContainer width="100%" height="100%">
+                                <LineChart data={realtimeSystemSeries}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" />
+                                    <XAxis
+                                        dataKey="timestamp"
+                                        stroke="#64748b"
+                                        fontSize={10}
+                                        tickLine={false}
+                                        axisLine={false}
+                                        tickFormatter={(val) => new Date(val).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    />
+                                    <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                                    <Tooltip
+                                        contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
+                                        formatter={(value: any, name: any) => [formatWithUnit(value, ' MB/s', 2, '--'), String(name || 'value')]}
+                                    />
+                                    <Legend wrapperStyle={{ fontSize: '10px' }} />
+                                    <Line type="monotone" dataKey="disk_read_mbps" name="Read" stroke="#38bdf8" strokeWidth={2} dot={false} />
+                                    <Line type="monotone" dataKey="disk_write_mbps" name="Write" stroke="#f97316" strokeWidth={2} dot={false} />
+                                </LineChart>
                             </ResponsiveContainer>
                         </div>
                     </div>
@@ -1174,6 +1280,40 @@ export const DeviceDetail = () => {
                                                         formatter={(value: any) => [formatWithUnit(value, '%', 2, '--'), 'Memory']}
                                                     />
                                                     <Line type="monotone" dataKey="memory_usage" stroke="#10b981" strokeWidth={2} dot={false} />
+                                                </LineChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                        <div className="h-72 border border-white/10 rounded-2xl p-4 bg-white/[0.02]">
+                                            <h4 className="text-sm font-bold text-white mb-3">Disk Utilization (%)</h4>
+                                            <ResponsiveContainer width="100%" height="90%">
+                                                <LineChart data={historicalSeries}>
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" />
+                                                    <XAxis dataKey="timestamp" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} tickFormatter={historyTickFormatter} />
+                                                    <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                                                    <Tooltip
+                                                        contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
+                                                        labelFormatter={(value) => new Date(String(value)).toLocaleString()}
+                                                        formatter={(value: any) => [formatWithUnit(value, '%', 2, '--'), 'Disk']}
+                                                    />
+                                                    <Line type="monotone" dataKey="disk_usage" stroke="#f59e0b" strokeWidth={2} dot={false} />
+                                                </LineChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                        <div className="h-72 border border-white/10 rounded-2xl p-4 bg-white/[0.02]">
+                                            <h4 className="text-sm font-bold text-white mb-3">Disk I/O (MB/s)</h4>
+                                            <ResponsiveContainer width="100%" height="90%">
+                                                <LineChart data={historicalSeries}>
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" />
+                                                    <XAxis dataKey="timestamp" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} tickFormatter={historyTickFormatter} />
+                                                    <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                                                    <Tooltip
+                                                        contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
+                                                        labelFormatter={(value) => new Date(String(value)).toLocaleString()}
+                                                        formatter={(value: any, name: any) => [formatWithUnit(value, ' MB/s', 2, '--'), String(name || 'value')]}
+                                                    />
+                                                    <Legend wrapperStyle={{ fontSize: '10px' }} />
+                                                    <Line type="monotone" dataKey="disk_read_mbps" name="Read" stroke="#38bdf8" strokeWidth={2} dot={false} />
+                                                    <Line type="monotone" dataKey="disk_write_mbps" name="Write" stroke="#f97316" strokeWidth={2} dot={false} />
                                                 </LineChart>
                                             </ResponsiveContainer>
                                         </div>

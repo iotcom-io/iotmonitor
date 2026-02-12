@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import app from './app';
 import mongoose from 'mongoose';
 import { createServer } from 'http';
@@ -8,6 +9,7 @@ import { startHourlyReports } from './services/scheduledReports';
 import { startSyntheticRunner } from './services/SyntheticRunner';
 import { startLicenseMonitoring } from './services/licenseMonitoring';
 import { seedMonitoringTemplates, seedDefaultNotificationChannel } from './seedMonitoring';
+import './services/mqtt';
 
 if (!process.env.JWT_SECRET) {
     console.error('JWT_SECRET environment variable is required');
