@@ -29,9 +29,35 @@ const normalizePayload = (raw: any) => {
         if (payload.config.slack_webhook_url !== undefined) payload.config.slack_webhook_url = String(payload.config.slack_webhook_url || '').trim();
         if (payload.config.slack_channel !== undefined) payload.config.slack_channel = String(payload.config.slack_channel || '').trim();
         if (payload.config.slack_group_name !== undefined) payload.config.slack_group_name = String(payload.config.slack_group_name || '').trim();
+        if (payload.config.smtp_host !== undefined) payload.config.smtp_host = String(payload.config.smtp_host || '').trim();
+        if (payload.config.smtp_port !== undefined) payload.config.smtp_port = Number(payload.config.smtp_port) || 0;
+        if (payload.config.smtp_secure !== undefined) payload.config.smtp_secure = Boolean(payload.config.smtp_secure);
+        if (payload.config.smtp_user !== undefined) payload.config.smtp_user = String(payload.config.smtp_user || '').trim();
+        if (payload.config.smtp_pass !== undefined) payload.config.smtp_pass = String(payload.config.smtp_pass || '').trim();
+        if (payload.config.email_from !== undefined) payload.config.email_from = String(payload.config.email_from || '').trim();
+        if (payload.config.email_subject_prefix !== undefined) payload.config.email_subject_prefix = String(payload.config.email_subject_prefix || '').trim();
         if (payload.config.webhook_url !== undefined) payload.config.webhook_url = String(payload.config.webhook_url || '').trim();
+        if (payload.config.webhook_method !== undefined) payload.config.webhook_method = String(payload.config.webhook_method || 'POST').trim().toUpperCase();
+        if (payload.config.webhook_headers !== undefined && payload.config.webhook_headers && typeof payload.config.webhook_headers === 'object') {
+            const normalizedHeaders: Record<string, string> = {};
+            for (const [key, value] of Object.entries(payload.config.webhook_headers)) {
+                const nk = String(key || '').trim();
+                const nv = String(value || '').trim();
+                if (nk && nv) normalizedHeaders[nk] = nv;
+            }
+            payload.config.webhook_headers = normalizedHeaders;
+        }
+        if (payload.config.webhook_payload_template !== undefined) payload.config.webhook_payload_template = String(payload.config.webhook_payload_template || '').trim();
         if (payload.config.email_addresses !== undefined) payload.config.email_addresses = normalizeStringArray(payload.config.email_addresses);
         if (payload.config.phone_numbers !== undefined) payload.config.phone_numbers = normalizeStringArray(payload.config.phone_numbers);
+        if (payload.config.whatsapp_api_url !== undefined) payload.config.whatsapp_api_url = String(payload.config.whatsapp_api_url || '').trim();
+        if (payload.config.whatsapp_api_token !== undefined) payload.config.whatsapp_api_token = String(payload.config.whatsapp_api_token || '').trim();
+        if (payload.config.whatsapp_to_numbers !== undefined) payload.config.whatsapp_to_numbers = normalizeStringArray(payload.config.whatsapp_to_numbers);
+        if (payload.config.whatsapp_payload_template !== undefined) payload.config.whatsapp_payload_template = String(payload.config.whatsapp_payload_template || '').trim();
+        if (payload.config.call_api_url !== undefined) payload.config.call_api_url = String(payload.config.call_api_url || '').trim();
+        if (payload.config.call_api_token !== undefined) payload.config.call_api_token = String(payload.config.call_api_token || '').trim();
+        if (payload.config.call_to_numbers !== undefined) payload.config.call_to_numbers = normalizeStringArray(payload.config.call_to_numbers);
+        if (payload.config.call_payload_template !== undefined) payload.config.call_payload_template = String(payload.config.call_payload_template || '').trim();
     }
 
     return payload;

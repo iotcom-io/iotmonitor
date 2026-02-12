@@ -8,6 +8,7 @@ import { sanitizePermissionOverrides, toAuthUserContext } from '../lib/rbac';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '12h';
 if (!JWT_SECRET) {
     throw new Error('JWT_SECRET environment variable is required');
 }
@@ -85,7 +86,7 @@ router.post('/login', async (req, res) => {
         const token = jwt.sign(
             { id: user._id, role: user.role },
             JWT_SECRET,
-            { expiresIn: '1d' }
+            { expiresIn: JWT_EXPIRES_IN as any }
         );
 
         const authUser = toAuthUserContext(user);

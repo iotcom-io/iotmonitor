@@ -3,6 +3,7 @@ import AlertTracking from '../models/AlertTracking';
 import Device from '../models/Device';
 import MonitoringCheck from '../models/MonitoringCheck';
 import SystemSettings from '../models/SystemSettings';
+import Incident from '../models/Incident';
 import { sendNotification, sendRecoveryNotification } from './notifications';
 const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Asia/Kolkata';
 
@@ -111,6 +112,126 @@ const formatDuration = (durationSeconds: number) => {
 };
 
 const normalizeTarget = (value?: string) => String(value || '').trim().toLowerCase();
+
+const toIncidentSeverity = (severity: 'info' | 'warning' | 'critical'): 'warning' | 'critical' => {
+    return severity === 'critical' ? 'critical' : 'warning';
+};
+
+const buildIncidentSummary = (params: {
+    alert_type: string;
+    specific_service?: string;
+    specific_endpoint?: string;
+}) => {
+    const alertType = String(params.alert_type || '').trim();
+    const service = String(params.specific_service || '').trim();
+    const endpoint = String(params.specific_endpoint || '').trim();
+
+    const parts: string[] = [];
+    if (alertType === 'offline') {
+        parts.push('Device Offline');
+    } else if (alertType === 'service_down') {
+        parts.push('Service Down');
+    } else if (alertType === 'rule_violation') {
+        parts.push('Threshold Breach');
+    } else if (alertType === 'sip_issue') {
+        parts.push('SIP Issue');
+    } else if (alertType === 'high_latency') {
+        parts.push('High Latency');
+    } else if (alertType === 'ip_change') {
+        parts.push('IP Change');
+    } else {
+        parts.push(alertType.replace(/_/g, ' '));
+    }
+
+    if (service) parts.push(service);
+    if (endpoint) parts.push(endpoint);
+    return parts.join(' | ');
+};
+
+const ensureDeviceIncidentOpen = async (params: {
+    alert: any;
+    device_name: string;
+    severity: 'info' | 'warning' | 'critical';
+}) => {
+    const { alert, device_name, severity } = params;
+    const summary = buildIncidentSummary({
+        alert_type: alert.alert_type,
+        specific_service: alert.specific_service,
+        specific_endpoint: alert.specific_endpoint,
+    });
+    const now = new Date();
+
+    let incident = await Incident.findOne({
+        target_type: 'device',
+        target_id: alert.device_id,
+        summary,
+        status: 'open',
+    });
+
+    if (!incident) {
+        incident = await Incident.create({
+            target_type: 'device',
+            target_id: alert.device_id,
+            target_name: device_name,
+            severity: toIncidentSeverity(severity),
+            status: 'open',
+            started_at: alert.first_triggered || now,
+            summary,
+            updates: [{
+                at: now,
+                message: `Alert opened (${severity.toUpperCase()})`,
+            }],
+        });
+        return incident;
+    }
+
+    const nextSeverity = toIncidentSeverity(severity);
+    if (incident.severity !== nextSeverity) {
+        incident.severity = nextSeverity;
+        incident.updates.push({
+            at: now,
+            message: `Severity updated to ${nextSeverity.toUpperCase()}`,
+        } as any);
+        await incident.save();
+    }
+    return incident;
+};
+
+const resolveDeviceIncident = async (params: {
+    alert: any;
+    device_name: string;
+    details?: any;
+}) => {
+    const { alert, device_name, details } = params;
+    const summary = buildIncidentSummary({
+        alert_type: alert.alert_type,
+        specific_service: alert.specific_service,
+        specific_endpoint: alert.specific_endpoint,
+    });
+
+    const incident = await Incident.findOne({
+        target_type: 'device',
+        target_id: alert.device_id,
+        summary,
+        status: 'open',
+    }).sort({ started_at: -1 });
+
+    if (!incident) return null;
+
+    const now = new Date();
+    incident.status = 'resolved';
+    incident.resolved_at = now;
+    const reason = details?.resolution_reason
+        ? String(details.resolution_reason)
+        : 'Alert recovered';
+    incident.target_name = device_name;
+    incident.updates.push({
+        at: now,
+        message: reason,
+    } as any);
+    await incident.save();
+    return incident;
+};
 
 const hasMatchingEnabledCheck = async (
     deviceId: string,
@@ -221,6 +342,16 @@ export async function triggerAlert(params: TriggerAlertParams) {
                 await existingAlert.save();
             }
 
+            try {
+                await ensureDeviceIncidentOpen({
+                    alert: existingAlert,
+                    device_name,
+                    severity: existingAlert.severity as any,
+                });
+            } catch (incidentErr) {
+                console.error('Failed to sync incident for existing alert:', incidentErr);
+            }
+
             return existingAlert;
         }
 
@@ -242,6 +373,16 @@ export async function triggerAlert(params: TriggerAlertParams) {
 
         await alert.save();
         await sendNotification(alert, device_name);
+
+        try {
+            await ensureDeviceIncidentOpen({
+                alert,
+                device_name,
+                severity,
+            });
+        } catch (incidentErr) {
+            console.error('Failed to create incident for new alert:', incidentErr);
+        }
 
         alert.state = 'throttling';
         await alert.save();
@@ -288,6 +429,12 @@ export async function resolveAlert(params: ResolveAlertParams) {
 
         await sendRecoveryNotification(alert, device_name);
 
+        try {
+            await resolveDeviceIncident({ alert, device_name, details: alert.details });
+        } catch (incidentErr) {
+            console.error('Failed to resolve incident for alert:', incidentErr);
+        }
+
         console.log(`Alert resolved for device ${device_name}: ${alert_type} (duration: ${duration_minutes} min)`);
         return alert;
     } catch (error) {
@@ -315,6 +462,11 @@ export async function resolveAllActiveAlertsForDevice(deviceId: string, deviceNa
                 duration_seconds: Math.floor(durationMs / 1000),
             };
             await alert.save();
+            try {
+                await resolveDeviceIncident({ alert, device_name: deviceName, details: alert.details });
+            } catch (incidentErr) {
+                console.error('Failed to resolve incident while silently resolving alert:', incidentErr);
+            }
             continue;
         }
 
@@ -361,6 +513,11 @@ export async function resolveOfflineRecoveryBundle(
             duration_seconds: durationSeconds,
         };
         await alert.save();
+        try {
+            await resolveDeviceIncident({ alert, device_name: deviceName, details: alert.details });
+        } catch (incidentErr) {
+            console.error('Failed to resolve incident in offline recovery bundle:', incidentErr);
+        }
 
         if (alert.alert_type === 'offline') {
             offlineDurationSeconds = Math.max(offlineDurationSeconds, durationSeconds);
@@ -421,6 +578,11 @@ export async function processThrottledAlerts() {
                         duration_seconds: Math.floor(durationMs / 1000),
                     };
                     await alert.save();
+                    try {
+                        await resolveDeviceIncident({ alert, device_name: deviceDoc.name, details: alert.details });
+                    } catch (incidentErr) {
+                        console.error('Failed to resolve incident while auto-resolving paused alert:', incidentErr);
+                    }
                 } else {
                     await resolveAlert({
                         device_id: alert.device_id,
@@ -478,7 +640,7 @@ export async function normalizeAlertDeviceIds() {
             const currentId = String(alert.device_id || '');
             if (!currentId) continue;
 
-            const byDeviceId = await Device.findOne({ device_id: currentId }).select({ _id: 1, device_id: 1, status: 1 });
+            const byDeviceId = await Device.findOne({ device_id: currentId }).select({ _id: 1, device_id: 1, name: 1, status: 1 });
             if (byDeviceId) {
                 if (alert.alert_type === 'offline' && byDeviceId.status === 'online') {
                     const now = new Date();
@@ -492,12 +654,17 @@ export async function normalizeAlertDeviceIds() {
                         duration_seconds: Math.floor(durationMs / 1000),
                     };
                     await alert.save();
+                    try {
+                        await resolveDeviceIncident({ alert, device_name: String(byDeviceId.name || byDeviceId.device_id), details: alert.details });
+                    } catch (incidentErr) {
+                        console.error('Failed to resolve incident during startup normalization:', incidentErr);
+                    }
                 }
                 continue;
             }
 
             if (!mongoose.Types.ObjectId.isValid(currentId)) continue;
-            const byObjectId = await Device.findById(currentId).select({ _id: 1, device_id: 1, status: 1 });
+            const byObjectId = await Device.findById(currentId).select({ _id: 1, device_id: 1, name: 1, status: 1 });
             if (!byObjectId) continue;
 
             alert.device_id = byObjectId.device_id;
@@ -514,14 +681,39 @@ export async function normalizeAlertDeviceIds() {
                 };
             }
             await alert.save();
+            if (alert.state === 'resolved') {
+                try {
+                    await resolveDeviceIncident({ alert, device_name: String(byObjectId.name || byObjectId.device_id), details: alert.details });
+                } catch (incidentErr) {
+                    console.error('Failed to resolve incident while normalizing ObjectId device alerts:', incidentErr);
+                }
+            }
         }
     } catch (error) {
         console.error('Error normalizing alert device IDs:', error);
     }
 }
 
+export async function backfillActiveAlertIncidents() {
+    try {
+        const activeAlerts = await AlertTracking.find({ state: { $ne: 'resolved' } });
+        for (const alert of activeAlerts) {
+            const device = await findDeviceForAlert(alert.device_id);
+            const deviceName = String(device?.name || alert.device_id || 'Unknown Device');
+            await ensureDeviceIncidentOpen({
+                alert,
+                device_name: deviceName,
+                severity: (alert.severity || 'warning') as any,
+            });
+        }
+    } catch (error) {
+        console.error('Error backfilling incidents from active alerts:', error);
+    }
+}
+
 export function startThrottlingService() {
     console.log('Starting notification throttling service...');
     normalizeAlertDeviceIds();
+    backfillActiveAlertIncidents();
     setInterval(processThrottledAlerts, 60000);
 }

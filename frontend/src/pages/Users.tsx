@@ -8,6 +8,27 @@ const ROLE_OPTIONS = [
     { value: 'viewer', label: 'Viewer' },
 ];
 
+const ROLE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
+    admin: [
+        'devices.view', 'devices.create', 'devices.update', 'devices.delete', 'devices.assign', 'devices.build_agent',
+        'monitoring.view', 'monitoring.create', 'monitoring.update', 'monitoring.delete', 'monitoring.pause_resume',
+        'synthetics.view', 'synthetics.create', 'synthetics.update', 'synthetics.delete', 'synthetics.run',
+        'alerts.view', 'incidents.view', 'incidents.resolve', 'settings.view', 'settings.update', 'users.view', 'users.manage',
+        'remote_terminal.run', 'licenses.view', 'licenses.manage',
+    ],
+    operator: [
+        'devices.view', 'devices.create', 'devices.update', 'devices.build_agent',
+        'monitoring.view', 'monitoring.create', 'monitoring.update', 'monitoring.delete', 'monitoring.pause_resume',
+        'synthetics.view', 'synthetics.create', 'synthetics.update', 'synthetics.delete', 'synthetics.run',
+        'alerts.view', 'incidents.view', 'incidents.resolve', 'settings.view',
+        'remote_terminal.run', 'licenses.view', 'licenses.manage',
+    ],
+    viewer: [
+        'devices.view', 'monitoring.view', 'synthetics.view',
+        'alerts.view', 'incidents.view', 'settings.view', 'licenses.view',
+    ],
+};
+
 const PERMISSION_GROUPS: Array<{ title: string; keys: string[] }> = [
     { title: 'Devices', keys: ['devices.view', 'devices.create', 'devices.update', 'devices.delete', 'devices.assign', 'devices.build_agent'] },
     { title: 'Monitoring', keys: ['monitoring.view', 'monitoring.create', 'monitoring.update', 'monitoring.delete', 'monitoring.pause_resume'] },
@@ -28,6 +49,16 @@ const blankForm = {
     assigned_synthetic_ids: [] as string[],
 };
 
+const toRoleDefaults = (role: string) => {
+    const enabled = new Set(ROLE_DEFAULT_PERMISSIONS[role] || []);
+    return PERMISSION_GROUPS
+        .flatMap((group) => group.keys)
+        .reduce((acc: Record<string, boolean>, permission) => {
+            acc[permission] = enabled.has(permission);
+            return acc;
+        }, {});
+};
+
 const UserModal = ({
     open,
     onClose,
@@ -42,7 +73,7 @@ const UserModal = ({
     useEffect(() => {
         if (!open) return;
         if (!initial) {
-            setForm(blankForm);
+            setForm({ ...blankForm, permissions: toRoleDefaults(blankForm.role) });
             return;
         }
         setForm({
@@ -74,6 +105,14 @@ const UserModal = ({
             else current.add(value);
             return { ...prev, [field]: Array.from(current) };
         });
+    };
+
+    const applyRoleDefaults = (role: string) => {
+        setForm((prev: any) => ({
+            ...prev,
+            role,
+            permissions: toRoleDefaults(role),
+        }));
     };
 
     const save = async () => {
@@ -130,9 +169,16 @@ const UserModal = ({
                 <div className="grid md:grid-cols-3 gap-3">
                     <div className="space-y-2">
                         <label className="text-sm text-slate-400">Role</label>
-                        <select className="input-field" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
+                        <select className="input-field" value={form.role} onChange={(e) => applyRoleDefaults(e.target.value)}>
                             {ROLE_OPTIONS.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
                         </select>
+                        <button
+                            type="button"
+                            className="mt-2 text-xs text-primary-300 hover:text-primary-200"
+                            onClick={() => applyRoleDefaults(form.role)}
+                        >
+                            Apply Role Default Permissions
+                        </button>
                     </div>
                     <div className="space-y-2">
                         <label className="text-sm text-slate-400">{form.id ? 'New Password (optional)' : 'Password'}</label>
@@ -328,4 +374,3 @@ export const Users = () => {
         </div>
     );
 };
-

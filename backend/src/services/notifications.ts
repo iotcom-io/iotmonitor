@@ -1,4 +1,5 @@
-﻿import axios from 'axios';
+import axios from 'axios';
+import nodemailer from 'nodemailer';
 import { IAlertTracking } from '../models/AlertTracking';
 import NotificationChannel from '../models/NotificationChannel';
 
@@ -291,6 +292,12 @@ async function sendToChannel(channel: any, message: any, _alert: IAlertTracking 
         case 'sms':
             await sendToSMS(channel, message);
             break;
+        case 'whatsapp':
+            await sendToWhatsApp(channel, message);
+            break;
+        case 'call_api':
+            await sendToCallApi(channel, message);
+            break;
         default:
             console.log(`Unknown channel type: ${channel.type}`);
     }
@@ -328,8 +335,42 @@ async function sendToSlack(channel: any, message: any) {
  * Send to Email
  */
 async function sendToEmail(channel: any, message: any) {
-    // TODO: Implement email sending
-    console.log(`Email notification to ${channel.config.email_addresses?.join(', ')}: ${message.text}`);
+    const recipients = Array.isArray(channel.config?.email_addresses) ? channel.config.email_addresses : [];
+    if (recipients.length === 0) {
+        console.error('Email recipients are not configured');
+        return;
+    }
+
+    const host = channel.config?.smtp_host || process.env.SMTP_HOST;
+    const port = Number(channel.config?.smtp_port || process.env.SMTP_PORT || 587);
+    const secure = Boolean(channel.config?.smtp_secure) || port === 465;
+    const user = channel.config?.smtp_user || process.env.SMTP_USER;
+    const pass = channel.config?.smtp_pass || process.env.SMTP_PASS;
+    const from = channel.config?.email_from || user;
+
+    if (!host || !from) {
+        console.error('SMTP host/from is not configured for email channel');
+        return;
+    }
+
+    const transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure,
+        auth: user ? { user, pass } : undefined,
+    });
+
+    const subjectPrefix = channel.config?.email_subject_prefix || '[IoTMonitor]';
+    const subject = `${subjectPrefix} ${(message.severity || 'info').toUpperCase()} Notification`;
+
+    await transporter.sendMail({
+        from,
+        to: recipients.join(', '),
+        subject,
+        text: String(message.text || ''),
+    });
+
+    console.log(`Sent email notification to ${recipients.join(', ')}`);
 }
 
 /**
@@ -341,11 +382,25 @@ async function sendToWebhook(channel: any, message: any) {
         return;
     }
 
-    await axios.post(channel.config.webhook_url, {
+    const payload = {
         channel: channel.name,
         message: message.text,
         severity: message.severity,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        template: channel.config?.webhook_payload_template || undefined,
+    };
+
+    const method = String(channel.config?.webhook_method || 'POST').toUpperCase();
+    const headers = channel.config?.webhook_headers && typeof channel.config.webhook_headers === 'object'
+        ? channel.config.webhook_headers
+        : undefined;
+
+    await axios({
+        method: method as any,
+        url: channel.config.webhook_url,
+        headers,
+        data: method === 'GET' ? undefined : payload,
+        params: method === 'GET' ? payload : undefined,
     });
 
     console.log(`Sent notification to webhook: ${channel.name}`);
@@ -357,6 +412,54 @@ async function sendToWebhook(channel: any, message: any) {
 async function sendToSMS(channel: any, message: any) {
     // TODO: Implement SMS sending
     console.log(`SMS notification to ${channel.config.phone_numbers?.join(', ')}: ${message.text}`);
+}
+
+async function sendToWhatsApp(channel: any, message: any) {
+    const url = channel.config?.whatsapp_api_url;
+    const recipients = Array.isArray(channel.config?.whatsapp_to_numbers) ? channel.config.whatsapp_to_numbers : [];
+    if (!url || recipients.length === 0) {
+        console.error('WhatsApp API URL or recipients not configured');
+        return;
+    }
+
+    const token = channel.config?.whatsapp_api_token;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers.Authorization = `Bearer ${token}`;
+
+    await axios.post(url, {
+        to: recipients,
+        message: String(message.text || ''),
+        template: channel.config?.whatsapp_payload_template || undefined,
+        severity: message.severity,
+        channel: channel.name,
+        timestamp: new Date().toISOString(),
+    }, { headers });
+
+    console.log(`Sent notification to WhatsApp channel: ${channel.name}`);
+}
+
+async function sendToCallApi(channel: any, message: any) {
+    const url = channel.config?.call_api_url;
+    const recipients = Array.isArray(channel.config?.call_to_numbers) ? channel.config.call_to_numbers : [];
+    if (!url || recipients.length === 0) {
+        console.error('Call API URL or recipients not configured');
+        return;
+    }
+
+    const token = channel.config?.call_api_token;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers.Authorization = `Bearer ${token}`;
+
+    await axios.post(url, {
+        to: recipients,
+        message: String(message.text || ''),
+        template: channel.config?.call_payload_template || undefined,
+        severity: message.severity,
+        channel: channel.name,
+        timestamp: new Date().toISOString(),
+    }, { headers });
+
+    console.log(`Sent notification to Call API channel: ${channel.name}`);
 }
 
 /**

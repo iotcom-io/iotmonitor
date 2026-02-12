@@ -32,6 +32,7 @@ function App() {
     const token = useAuthStore(state => state.token);
     const user = useAuthStore(state => state.user);
     const setAuth = useAuthStore(state => state.setAuth);
+    const logout = useAuthStore(state => state.logout);
     const [sidebarCollapsed, setSidebarCollapsed] = React.useState<boolean>(() => {
         if (typeof window === 'undefined') return false;
         return window.localStorage.getItem('iotmonitor.sidebar.collapsed') === '1';
@@ -70,6 +71,39 @@ function App() {
         document.documentElement.setAttribute('data-theme', theme);
     }, [theme]);
 
+    React.useEffect(() => {
+        if (!token) return;
+
+        const decodeExpiryMs = () => {
+            try {
+                const payload = token.split('.')[1];
+                if (!payload) return null;
+                const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+                const decoded = JSON.parse(atob(normalized));
+                const expSeconds = Number(decoded?.exp || 0);
+                if (!Number.isFinite(expSeconds) || expSeconds <= 0) return null;
+                return expSeconds * 1000;
+            } catch {
+                return null;
+            }
+        };
+
+        const expiryMs = decodeExpiryMs();
+        if (!expiryMs) return;
+
+        const now = Date.now();
+        if (expiryMs <= now) {
+            logout();
+            return;
+        }
+
+        const timer = window.setTimeout(() => {
+            logout();
+        }, expiryMs - now);
+
+        return () => window.clearTimeout(timer);
+    }, [token, logout]);
+
     return (
         <Router>
             <div className="flex bg-dark-bg min-h-screen text-slate-200">
@@ -92,7 +126,7 @@ function App() {
                     </>
                 )}
                 <main className={token
-                    ? `flex-1 ${sidebarCollapsed ? 'md:ml-20' : 'md:ml-64'} p-4 md:p-8 transition-all duration-300 flex flex-col min-h-screen`
+                    ? `flex-1 ${sidebarCollapsed ? 'md:ml-20' : 'md:ml-64'} p-4 md:p-6 transition-all duration-300 flex flex-col min-h-screen`
                     : "flex-1 flex flex-col min-h-screen"}
                 >
                     {token && (

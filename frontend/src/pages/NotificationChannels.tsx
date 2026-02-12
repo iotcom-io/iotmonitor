@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import api from '../lib/axios';
 import { Bell, Plus, RefreshCw, TestTube2, Trash2, Pencil, Circle, Star } from 'lucide-react';
 
-type ChannelType = 'slack' | 'email' | 'webhook' | 'sms';
+type ChannelType = 'slack' | 'email' | 'webhook' | 'sms' | 'whatsapp' | 'call_api';
 
 type NotificationChannel = {
     _id: string;
@@ -16,8 +16,26 @@ type NotificationChannel = {
         slack_channel?: string;
         slack_group_name?: string;
         email_addresses?: string[];
+        smtp_host?: string;
+        smtp_port?: number;
+        smtp_secure?: boolean;
+        smtp_user?: string;
+        smtp_pass?: string;
+        email_from?: string;
+        email_subject_prefix?: string;
         webhook_url?: string;
+        webhook_method?: 'POST' | 'PUT' | 'PATCH' | 'GET';
+        webhook_headers?: Record<string, string>;
+        webhook_payload_template?: string;
         phone_numbers?: string[];
+        whatsapp_api_url?: string;
+        whatsapp_api_token?: string;
+        whatsapp_to_numbers?: string[];
+        whatsapp_payload_template?: string;
+        call_api_url?: string;
+        call_api_token?: string;
+        call_to_numbers?: string[];
+        call_payload_template?: string;
     };
     alert_types: string[];
     severity_levels: string[];
@@ -25,7 +43,7 @@ type NotificationChannel = {
     updated_at: string;
 };
 
-const ALL_ALERT_TYPES = ['offline', 'online', 'service_down', 'sip_issue', 'high_latency', 'threshold', 'synthetic', 'ssl', 'license'];
+const ALL_ALERT_TYPES = ['offline', 'online', 'service_down', 'sip_issue', 'high_latency', 'threshold', 'rule_violation', 'synthetic', 'ssl', 'license'];
 const ALL_SEVERITY_LEVELS = ['info', 'warning', 'critical'];
 
 const blankForm = {
@@ -38,9 +56,27 @@ const blankForm = {
     slack_channel: '',
     slack_group_name: '',
     email_addresses_text: '',
+    smtp_host: '',
+    smtp_port: '587',
+    smtp_secure: false,
+    smtp_user: '',
+    smtp_pass: '',
+    email_from: '',
+    email_subject_prefix: '[IoTMonitor]',
     webhook_url: '',
+    webhook_method: 'POST',
+    webhook_headers_text: '',
+    webhook_payload_template: '',
     phone_numbers_text: '',
-    alert_types: ['offline', 'online', 'service_down', 'threshold'],
+    whatsapp_api_url: '',
+    whatsapp_api_token: '',
+    whatsapp_to_numbers_text: '',
+    whatsapp_payload_template: '',
+    call_api_url: '',
+    call_api_token: '',
+    call_to_numbers_text: '',
+    call_payload_template: '',
+    alert_types: ['offline', 'online', 'service_down', 'rule_violation'],
     severity_levels: ['warning', 'critical'],
 };
 
@@ -53,10 +89,33 @@ const parseCsvList = (value: string) => {
     ));
 };
 
+const parseHeaders = (value: string) => {
+    const headers: Record<string, string> = {};
+    String(value || '')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .forEach((line) => {
+            const idx = line.indexOf(':');
+            if (idx <= 0) return;
+            const key = line.slice(0, idx).trim();
+            const val = line.slice(idx + 1).trim();
+            if (key && val) headers[key] = val;
+        });
+    return headers;
+};
+
+const headersToText = (headers?: Record<string, string>) => {
+    if (!headers || typeof headers !== 'object') return '';
+    return Object.entries(headers).map(([k, v]) => `${k}: ${v}`).join('\n');
+};
+
 const channelTypeLabel = (type: ChannelType) => {
     if (type === 'slack') return 'Slack';
     if (type === 'email') return 'Email';
     if (type === 'webhook') return 'Webhook';
+    if (type === 'whatsapp') return 'WhatsApp API';
+    if (type === 'call_api') return 'Call API';
     return 'SMS';
 };
 
@@ -69,6 +128,12 @@ const channelSummary = (channel: NotificationChannel) => {
     }
     if (channel.type === 'webhook') {
         return channel.config.webhook_url || 'Webhook configured';
+    }
+    if (channel.type === 'whatsapp') {
+        return `${(channel.config.whatsapp_to_numbers || []).length} WhatsApp recipient(s)`;
+    }
+    if (channel.type === 'call_api') {
+        return `${(channel.config.call_to_numbers || []).length} call recipient(s)`;
     }
     return `${(channel.config.phone_numbers || []).length} phone recipient(s)`;
 };
@@ -112,6 +177,7 @@ const NotificationChannels: React.FC = () => {
     const openEditModal = (channel: NotificationChannel) => {
         setEditingChannel(channel);
         setFormData({
+            ...blankForm,
             name: channel.name,
             description: channel.description || '',
             type: channel.type,
@@ -121,8 +187,26 @@ const NotificationChannels: React.FC = () => {
             slack_channel: channel.config.slack_channel || '',
             slack_group_name: channel.config.slack_group_name || '',
             email_addresses_text: (channel.config.email_addresses || []).join(', '),
+            smtp_host: channel.config.smtp_host || '',
+            smtp_port: String(channel.config.smtp_port || 587),
+            smtp_secure: Boolean(channel.config.smtp_secure),
+            smtp_user: channel.config.smtp_user || '',
+            smtp_pass: channel.config.smtp_pass || '',
+            email_from: channel.config.email_from || '',
+            email_subject_prefix: channel.config.email_subject_prefix || '[IoTMonitor]',
             webhook_url: channel.config.webhook_url || '',
+            webhook_method: channel.config.webhook_method || 'POST',
+            webhook_headers_text: headersToText(channel.config.webhook_headers),
+            webhook_payload_template: channel.config.webhook_payload_template || '',
             phone_numbers_text: (channel.config.phone_numbers || []).join(', '),
+            whatsapp_api_url: channel.config.whatsapp_api_url || '',
+            whatsapp_api_token: channel.config.whatsapp_api_token || '',
+            whatsapp_to_numbers_text: (channel.config.whatsapp_to_numbers || []).join(', '),
+            whatsapp_payload_template: channel.config.whatsapp_payload_template || '',
+            call_api_url: channel.config.call_api_url || '',
+            call_api_token: channel.config.call_api_token || '',
+            call_to_numbers_text: (channel.config.call_to_numbers || []).join(', '),
+            call_payload_template: channel.config.call_payload_template || '',
             alert_types: Array.isArray(channel.alert_types) ? channel.alert_types : [],
             severity_levels: Array.isArray(channel.severity_levels) ? channel.severity_levels : [],
         });
@@ -161,10 +245,34 @@ const NotificationChannels: React.FC = () => {
         } else if (formData.type === 'email') {
             payload.config = {
                 email_addresses: parseCsvList(formData.email_addresses_text),
+                smtp_host: formData.smtp_host.trim(),
+                smtp_port: Number(formData.smtp_port) || 587,
+                smtp_secure: Boolean(formData.smtp_secure),
+                smtp_user: formData.smtp_user.trim(),
+                smtp_pass: formData.smtp_pass,
+                email_from: formData.email_from.trim(),
+                email_subject_prefix: formData.email_subject_prefix.trim(),
             };
         } else if (formData.type === 'webhook') {
             payload.config = {
                 webhook_url: formData.webhook_url.trim(),
+                webhook_method: formData.webhook_method,
+                webhook_headers: parseHeaders(formData.webhook_headers_text),
+                webhook_payload_template: formData.webhook_payload_template.trim(),
+            };
+        } else if (formData.type === 'whatsapp') {
+            payload.config = {
+                whatsapp_api_url: formData.whatsapp_api_url.trim(),
+                whatsapp_api_token: formData.whatsapp_api_token.trim(),
+                whatsapp_to_numbers: parseCsvList(formData.whatsapp_to_numbers_text),
+                whatsapp_payload_template: formData.whatsapp_payload_template.trim(),
+            };
+        } else if (formData.type === 'call_api') {
+            payload.config = {
+                call_api_url: formData.call_api_url.trim(),
+                call_api_token: formData.call_api_token.trim(),
+                call_to_numbers: parseCsvList(formData.call_to_numbers_text),
+                call_payload_template: formData.call_payload_template.trim(),
             };
         } else {
             payload.config = {
@@ -186,8 +294,23 @@ const NotificationChannels: React.FC = () => {
         if (formData.type === 'email' && parseCsvList(formData.email_addresses_text).length === 0) {
             return 'At least one email address is required for Email channels.';
         }
+        if (formData.type === 'email' && !formData.smtp_host.trim()) {
+            return 'SMTP host is required for Email channels.';
+        }
         if (formData.type === 'webhook' && !formData.webhook_url.trim()) {
             return 'Webhook URL is required for Webhook channels.';
+        }
+        if (formData.type === 'whatsapp' && !formData.whatsapp_api_url.trim()) {
+            return 'WhatsApp API URL is required.';
+        }
+        if (formData.type === 'whatsapp' && parseCsvList(formData.whatsapp_to_numbers_text).length === 0) {
+            return 'At least one WhatsApp number is required.';
+        }
+        if (formData.type === 'call_api' && !formData.call_api_url.trim()) {
+            return 'Call API URL is required.';
+        }
+        if (formData.type === 'call_api' && parseCsvList(formData.call_to_numbers_text).length === 0) {
+            return 'At least one call destination number is required.';
         }
         if (formData.type === 'sms' && parseCsvList(formData.phone_numbers_text).length === 0) {
             return 'At least one phone number is required for SMS channels.';
@@ -387,6 +510,8 @@ const NotificationChannels: React.FC = () => {
                                         <option value="email">Email</option>
                                         <option value="webhook">Webhook</option>
                                         <option value="sms">SMS</option>
+                                        <option value="whatsapp">WhatsApp API</option>
+                                        <option value="call_api">Call API</option>
                                     </select>
                                 </div>
                             </div>
@@ -414,16 +539,75 @@ const NotificationChannels: React.FC = () => {
                             )}
 
                             {formData.type === 'email' && (
-                                <div className="space-y-2">
-                                    <label className="text-sm text-slate-400">Email Recipients (comma separated)</label>
-                                    <textarea className="input-field min-h-[100px]" value={formData.email_addresses_text} onChange={(e) => setFormData({ ...formData, email_addresses_text: e.target.value })} placeholder="ops@example.com, oncall@example.com" />
+                                <div className="space-y-3">
+                                    <div className="grid md:grid-cols-2 gap-3">
+                                        <div className="space-y-2">
+                                            <label className="text-sm text-slate-400">Email Recipients (comma separated)</label>
+                                            <textarea className="input-field min-h-[90px]" value={formData.email_addresses_text} onChange={(e) => setFormData({ ...formData, email_addresses_text: e.target.value })} placeholder="ops@example.com, oncall@example.com" />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-sm text-slate-400">SMTP Host</label>
+                                            <input className="input-field" value={formData.smtp_host} onChange={(e) => setFormData({ ...formData, smtp_host: e.target.value })} placeholder="smtp.example.com" />
+                                        </div>
+                                    </div>
+                                    <div className="grid md:grid-cols-2 gap-3">
+                                        <div className="space-y-2">
+                                            <label className="text-sm text-slate-400">SMTP Port</label>
+                                            <input className="input-field" value={formData.smtp_port} onChange={(e) => setFormData({ ...formData, smtp_port: e.target.value })} placeholder="587" />
+                                        </div>
+                                        <label className="flex items-center gap-2 text-sm text-slate-300 mt-7">
+                                            <input type="checkbox" checked={Boolean(formData.smtp_secure)} onChange={(e) => setFormData({ ...formData, smtp_secure: e.target.checked })} />
+                                            Use Secure SMTP (TLS/SSL)
+                                        </label>
+                                    </div>
+                                    <div className="grid md:grid-cols-2 gap-3">
+                                        <div className="space-y-2">
+                                            <label className="text-sm text-slate-400">SMTP Username</label>
+                                            <input className="input-field" value={formData.smtp_user} onChange={(e) => setFormData({ ...formData, smtp_user: e.target.value })} />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-sm text-slate-400">SMTP Password</label>
+                                            <input type="password" className="input-field" value={formData.smtp_pass} onChange={(e) => setFormData({ ...formData, smtp_pass: e.target.value })} />
+                                        </div>
+                                    </div>
+                                    <div className="grid md:grid-cols-2 gap-3">
+                                        <div className="space-y-2">
+                                            <label className="text-sm text-slate-400">From Address</label>
+                                            <input className="input-field" value={formData.email_from} onChange={(e) => setFormData({ ...formData, email_from: e.target.value })} placeholder="alerts@example.com" />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-sm text-slate-400">Subject Prefix</label>
+                                            <input className="input-field" value={formData.email_subject_prefix} onChange={(e) => setFormData({ ...formData, email_subject_prefix: e.target.value })} placeholder="[IoTMonitor]" />
+                                        </div>
+                                    </div>
                                 </div>
                             )}
 
                             {formData.type === 'webhook' && (
-                                <div className="space-y-2">
-                                    <label className="text-sm text-slate-400">Webhook URL</label>
-                                    <input className="input-field" value={formData.webhook_url} onChange={(e) => setFormData({ ...formData, webhook_url: e.target.value })} />
+                                <div className="space-y-3">
+                                    <div className="grid md:grid-cols-3 gap-3">
+                                        <div className="space-y-2 md:col-span-2">
+                                            <label className="text-sm text-slate-400">Webhook URL</label>
+                                            <input className="input-field" value={formData.webhook_url} onChange={(e) => setFormData({ ...formData, webhook_url: e.target.value })} />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-sm text-slate-400">Method</label>
+                                            <select className="input-field" value={formData.webhook_method} onChange={(e) => setFormData({ ...formData, webhook_method: e.target.value })}>
+                                                <option value="POST">POST</option>
+                                                <option value="PUT">PUT</option>
+                                                <option value="PATCH">PATCH</option>
+                                                <option value="GET">GET</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-sm text-slate-400">Headers (one per line: Key: Value)</label>
+                                        <textarea className="input-field min-h-[90px]" value={formData.webhook_headers_text} onChange={(e) => setFormData({ ...formData, webhook_headers_text: e.target.value })} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-sm text-slate-400">Payload Template (optional)</label>
+                                        <textarea className="input-field min-h-[90px]" value={formData.webhook_payload_template} onChange={(e) => setFormData({ ...formData, webhook_payload_template: e.target.value })} placeholder='{"message":"{{message}}","severity":"{{severity}}"}' />
+                                    </div>
                                 </div>
                             )}
 
@@ -431,6 +615,48 @@ const NotificationChannels: React.FC = () => {
                                 <div className="space-y-2">
                                     <label className="text-sm text-slate-400">Phone Numbers (comma separated)</label>
                                     <textarea className="input-field min-h-[100px]" value={formData.phone_numbers_text} onChange={(e) => setFormData({ ...formData, phone_numbers_text: e.target.value })} placeholder="+12025550123, +12025550124" />
+                                </div>
+                            )}
+
+                            {formData.type === 'whatsapp' && (
+                                <div className="space-y-3">
+                                    <div className="space-y-2">
+                                        <label className="text-sm text-slate-400">WhatsApp API URL</label>
+                                        <input className="input-field" value={formData.whatsapp_api_url} onChange={(e) => setFormData({ ...formData, whatsapp_api_url: e.target.value })} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-sm text-slate-400">API Token (optional)</label>
+                                        <input type="password" className="input-field" value={formData.whatsapp_api_token} onChange={(e) => setFormData({ ...formData, whatsapp_api_token: e.target.value })} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-sm text-slate-400">Recipient Numbers (comma separated)</label>
+                                        <textarea className="input-field min-h-[90px]" value={formData.whatsapp_to_numbers_text} onChange={(e) => setFormData({ ...formData, whatsapp_to_numbers_text: e.target.value })} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-sm text-slate-400">Payload Template (optional)</label>
+                                        <textarea className="input-field min-h-[90px]" value={formData.whatsapp_payload_template} onChange={(e) => setFormData({ ...formData, whatsapp_payload_template: e.target.value })} />
+                                    </div>
+                                </div>
+                            )}
+
+                            {formData.type === 'call_api' && (
+                                <div className="space-y-3">
+                                    <div className="space-y-2">
+                                        <label className="text-sm text-slate-400">Call API URL</label>
+                                        <input className="input-field" value={formData.call_api_url} onChange={(e) => setFormData({ ...formData, call_api_url: e.target.value })} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-sm text-slate-400">API Token (optional)</label>
+                                        <input type="password" className="input-field" value={formData.call_api_token} onChange={(e) => setFormData({ ...formData, call_api_token: e.target.value })} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-sm text-slate-400">Destination Numbers (comma separated)</label>
+                                        <textarea className="input-field min-h-[90px]" value={formData.call_to_numbers_text} onChange={(e) => setFormData({ ...formData, call_to_numbers_text: e.target.value })} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-sm text-slate-400">Payload Template (optional)</label>
+                                        <textarea className="input-field min-h-[90px]" value={formData.call_payload_template} onChange={(e) => setFormData({ ...formData, call_payload_template: e.target.value })} />
+                                    </div>
                                 </div>
                             )}
 

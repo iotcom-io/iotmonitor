@@ -48,6 +48,27 @@ const compactDetails = (details: any) => {
     if (!details || typeof details !== 'object') return '--';
 
     const lines: string[] = [];
+    if (details.value !== undefined) {
+        const numeric = Number(details.value);
+        const unit = String(details.unit || '').trim();
+        if (Number.isFinite(numeric)) {
+            const suffix = unit === '%' ? '%' : unit ? ` ${unit}` : '';
+            lines.push(`value: ${numeric.toFixed(2)}${suffix}`);
+        } else {
+            lines.push(`value: ${String(details.value)}`);
+        }
+    }
+    if (details.threshold !== undefined) {
+        const numeric = Number(details.threshold);
+        const unit = String(details.unit || '').trim();
+        if (Number.isFinite(numeric)) {
+            const suffix = unit === '%' ? '%' : unit ? ` ${unit}` : '';
+            lines.push(`threshold: ${numeric.toFixed(2)}${suffix}`);
+        } else {
+            lines.push(`threshold: ${String(details.threshold)}`);
+        }
+    }
+
     if (Array.isArray(details.top_cpu_processes) && details.top_cpu_processes.length > 0) {
         const top = details.top_cpu_processes.slice(0, 2).map((proc: any) => {
             const name = String(proc?.name || 'unknown');
@@ -59,7 +80,7 @@ const compactDetails = (details: any) => {
     }
 
     Object.entries(details)
-        .filter(([key]) => key !== 'top_cpu_processes')
+        .filter(([key]) => !['top_cpu_processes', 'value', 'threshold', 'unit'].includes(key))
         .slice(0, 3)
         .forEach(([key, value]) => {
             lines.push(`${key}: ${typeof value === 'object' ? JSON.stringify(value) : String(value)}`);
