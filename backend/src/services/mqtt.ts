@@ -2,6 +2,7 @@ import mqtt from 'mqtt';
 import Device from '../models/Device';
 import { updateDeviceHeartbeat } from './offlineDetection';
 import { checkServiceHealth, checkSIPEndpoints } from './serviceMonitoring';
+import { setMqttBrokerConnected } from './mqttState';
 
 const MQTT_URL = process.env.MQTT_URL || 'mqtt://localhost:1883';
 const MQTT_USERNAME = process.env.MQTT_USERNAME;
@@ -49,11 +50,32 @@ const notifyIPChange = async (device: any, type: 'public' | 'local', previousVal
 };
 
 client.on('connect', () => {
-    console.log('Connected to MQTT Broker');
+    setMqttBrokerConnected(true);
+    const authInfo = MQTT_USERNAME ? `user=${MQTT_USERNAME}` : 'user=<none>';
+    console.log(`[MQTT] Connected to broker ${MQTT_URL} (${authInfo})`);
     mqttConnectedAt = Date.now();
     client.subscribe('iotmonitor/device/+/status');
     client.subscribe('iotmonitor/device/+/metrics/+');
     client.subscribe('iotmonitor/device/+/responses');
+});
+
+client.on('reconnect', () => {
+    console.warn('[MQTT] Reconnecting to broker...');
+});
+
+client.on('offline', () => {
+    setMqttBrokerConnected(false);
+    console.warn('[MQTT] Client went offline');
+});
+
+client.on('close', () => {
+    setMqttBrokerConnected(false);
+    console.warn('[MQTT] Connection closed');
+});
+
+client.on('error', (err) => {
+    setMqttBrokerConnected(false);
+    console.error('[MQTT] Connection error:', err?.message || err);
 });
 
 client.on('message', async (topic, message, packet) => {

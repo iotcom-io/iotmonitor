@@ -1,6 +1,7 @@
 import Device from '../models/Device';
 import SystemSettings from '../models/SystemSettings';
 import { triggerAlert, resolveAlert, resolveOfflineRecoveryBundle } from './notificationThrottling';
+import { isMqttBrokerConnected } from './mqttState';
 
 const SERVICE_DOWN_GRACE_MS = 120000;
 const OFFLINE_DETECTION_STARTUP_GRACE_MS = Math.max(
@@ -29,6 +30,11 @@ const getEnabledModules = (device: any): ModuleName[] => {
  */
 export async function checkOfflineDevices() {
     try {
+        if (!isMqttBrokerConnected()) {
+            console.warn('[OFFLINE] Skipping offline detection because MQTT broker is disconnected');
+            return;
+        }
+
         const devices = await Device.find({ monitoring_enabled: true, monitoring_paused: { $ne: true } });
         const settings = await SystemSettings.findOne();
         const globalMultiplier = settings?.default_offline_threshold_multiplier || 4;

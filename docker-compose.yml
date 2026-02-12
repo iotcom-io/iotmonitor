@@ -66,8 +66,6 @@ services:
       # External infra defaults (override in backend/.env or shell env).
       MONGODB_URI: ${MONGODB_URI:-mongodb://host.docker.internal:27017/iotmonitor}
       MQTT_URL: ${MQTT_URL:-mqtt://monitoring.iotcom.io:1883}
-      MQTT_USERNAME: ${MQTT_USERNAME:-}
-      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
     depends_on:
       redis:
         condition: service_healthy
