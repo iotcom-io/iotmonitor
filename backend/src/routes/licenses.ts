@@ -1,3 +1,39 @@
+// Mark license/subscription as renewed and set next renewal date
+router.post('/:id/mark-renewed', authorizePermission('licenses.manage'), async (req: AuthRequest, res) => {
+    try {
+        const license = await LicenseAsset.findOne({ _id: req.params.id, ...getAccessQuery(req.user) });
+        if (!license) return res.status(404).json({ message: 'License not found' });
+
+        // Calculate next renewal date
+        let nextRenewal = new Date(license.renewal_date);
+        switch (license.billing_cycle) {
+            case 'monthly':
+                nextRenewal.setMonth(nextRenewal.getMonth() + 1);
+                break;
+            case 'quarterly':
+                nextRenewal.setMonth(nextRenewal.getMonth() + 3);
+                break;
+            case 'yearly':
+                nextRenewal.setFullYear(nextRenewal.getFullYear() + 1);
+                break;
+            default:
+                // For custom or unknown, just add 1 year as fallback
+                nextRenewal.setFullYear(nextRenewal.getFullYear() + 1);
+        }
+
+        license.renewal_date = nextRenewal;
+        license.status = 'active';
+        await license.save();
+
+        res.json({
+            ok: true,
+            license,
+            message: 'License marked as renewed. Next renewal set.'
+        });
+    } catch (error: any) {
+        res.status(400).json({ message: error.message || 'Failed to mark as renewed' });
+    }
+});
 import { Router } from 'express';
 import { z } from 'zod';
 import LicenseAsset from '../models/LicenseAsset';

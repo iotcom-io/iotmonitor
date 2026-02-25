@@ -357,25 +357,25 @@ export const DeviceDetail = () => {
             payload: terminalInput,
             timestamp: new Date()
         }]);
-        setTerminalInput('');
-    };
-
-    useEffect(() => {
-        const socketInstance = io(import.meta.env.VITE_API_URL || undefined, {
-            transports: ['websocket'],
-            auth: { token }
-        });
-        setSocket(socketInstance);
-
-        socketInstance.on('connect', () => {
-            console.log('[TERMINAL] Connected to backend');
-        });
-
-        socketInstance.on(`terminal:output:${id}`, (response: any) => {
-            setTerminalOutputs(prev => [...prev.slice(-49), {
-                ...response,
-                timestamp: new Date()
-            }]);
+            setModalInput('');
+            setConfirmModal({
+                isOpen: true,
+                title: 'Caution: Privileged Command',
+                message: message || 'This command may reboot or restart the device/server. Please confirm before proceeding.',
+                type: 'danger',
+                requireInput,
+                inputLabel,
+                expectedInput,
+                onConfirm: () => {
+                    if (requireInput && modalInput !== expectedInput) return;
+                    socketInstance.emit('terminal:command', {
+                        device_id: id,
+                        command
+                    });
+                    setIsTerminalLoading(true);
+                    setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                }
+            });
             setIsTerminalLoading(false);
         });
 
@@ -916,70 +916,70 @@ export const DeviceDetail = () => {
                                 </div>
                             </div>
                             <div className="flex items-center gap-3 text-slate-500 text-xs font-mono">
-                                <span className="flex items-center gap-1.5">
-                                    <span className="text-[10px] font-bold text-slate-600 uppercase tracking-widest">ID:</span>
-                                    {id}
-                                </span>
-                                <span className="w-1 h-1 bg-slate-800 rounded-full" />
-                                <span className="flex items-center gap-1.5">
-                                    <span className="text-[10px] font-bold text-slate-600 uppercase tracking-widest">Host:</span>
-                                    {device.hostname || '—'}
-                                </span>
-                                <span className="w-1 h-1 bg-slate-800 rounded-full" />
-                                <span className="flex items-center gap-1.5">
-                                    <span className="text-[10px] font-bold text-slate-600 uppercase tracking-widest">Uptime:</span>
-                                    {formatDurationFromSeconds(currentUptimeSeconds)}
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-
-                    {latest && (
-                        <div className="flex items-center gap-2 px-4 py-2 bg-white/[0.03] border border-white/5 rounded-2xl">
-                            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                                Live updates active • {new Date(latest.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                            </span>
-                            <div className="flex gap-2 ml-6">
-                                <button
-                                    className="px-4 py-2 rounded-lg bg-red-600 text-white font-bold text-xs uppercase tracking-widest hover:bg-red-500 transition-all"
-                                    onClick={() => setConfirmModal({
-                                        isOpen: true,
-                                        title: 'Reboot Device',
-                                        message: 'This will reboot the device/server. Type REBOOT to confirm.',
-                                        type: 'danger',
-                                        requireInput: true,
-                                        inputLabel: 'Type REBOOT to confirm',
-                                        expectedInput: 'REBOOT',
-                                        inputValue: '',
-                                        onConfirm: () => {
-                                            if (confirmModal.inputValue !== 'REBOOT') return;
-                                            if (socket) {
-                                                socket.emit('terminal:command', {
-                                                    device_id: id,
-                                                    command: 'systemctl reboot'
-                                                });
-                                                setIsTerminalLoading(true);
-                                            }
-                                        }
-                                    })}
-                                >
-                                    Reboot Device
-                                </button>
-                                <button
-                                    className="px-4 py-2 rounded-lg bg-blue-600 text-white font-bold text-xs uppercase tracking-widest hover:bg-blue-500 transition-all"
-                                    onClick={() => setConfirmModal({
-                                        isOpen: true,
-                                        title: 'Initiate Remote',
-                                        message: 'This will restart the remote service and show its status. Confirm to proceed.',
-                                        type: 'warning',
-                                        requireInput: false,
-                                        onConfirm: () => {
-                                            if (socket) {
-                                                socket.emit('terminal:command', {
-                                                    device_id: id,
-                                                    command: 'systemctl restart remote'
-                                                });
+                                <div className="flex gap-2 ml-6">
+                                    <button
+                                        className="px-4 py-2 rounded-lg bg-primary-600 text-white font-bold text-xs uppercase tracking-widest hover:bg-primary-500 transition-all border border-primary-500/20 shadow-lg"
+                                        style={{ minWidth: 120 }}
+                                        onClick={() => {
+                                            setModalInput('');
+                                            setConfirmModal({
+                                                isOpen: true,
+                                                title: 'Reboot Device',
+                                                message: 'This will reboot the device/server. Type REBOOT to confirm.',
+                                                type: 'danger',
+                                                requireInput: true,
+                                                inputLabel: 'Type REBOOT to confirm',
+                                                expectedInput: 'REBOOT',
+                                                onConfirm: () => {
+                                                    if (modalInput !== 'REBOOT') return;
+                                                    if (socket) {
+                                                        socket.emit('terminal:command', {
+                                                            device_id: id,
+                                                            command: 'systemctl reboot'
+                                                        });
+                                                        setIsTerminalLoading(true);
+                                                        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                                                    }
+                                                }
+                                            });
+                                        }}
+                                    >
+                                        Reboot Device
+                                    </button>
+                                    <button
+                                        className="px-4 py-2 rounded-lg bg-primary-600 text-white font-bold text-xs uppercase tracking-widest hover:bg-primary-500 transition-all border border-primary-500/20 shadow-lg"
+                                        style={{ minWidth: 120 }}
+                                        onClick={() => {
+                                            setModalInput('');
+                                            setConfirmModal({
+                                                isOpen: true,
+                                                title: 'Initiate Remote',
+                                                message: 'This will restart the remote service and show its status. Confirm to proceed.',
+                                                type: 'warning',
+                                                requireInput: false,
+                                                onConfirm: () => {
+                                                    if (socket) {
+                                                        socket.emit('terminal:command', {
+                                                            device_id: id,
+                                                            command: 'systemctl restart remote'
+                                                        });
+                                                        setIsTerminalLoading(true);
+                                                        setTimeout(() => {
+                                                            socket.emit('terminal:command', {
+                                                                device_id: id,
+                                                                command: 'systemctl status remote'
+                                                            });
+                                                            setIsTerminalLoading(true);
+                                                        }, 2000);
+                                                        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                                                    }
+                                                }
+                                            });
+                                        }}
+                                    >
+                                        Initiate Remote
+                                    </button>
+                                </div>
                                                 setIsTerminalLoading(true);
                                                 // After restart, show status
                                                 setTimeout(() => {
@@ -1122,7 +1122,7 @@ export const DeviceDetail = () => {
                         {isOffline && (
                             <div className="absolute inset-x-0 inset-y-0 z-10 bg-slate-950/40 backdrop-blur-[1px] rounded-[32px] pointer-events-none" />
                         )}
-                        <div className="card h-80">
+                        <div className="card h-80 min-w-[320px] min-h-[320px]">
                             <h3 className="text-lg font-bold text-white mb-6">CPU Performance (%)</h3>
                             <ResponsiveContainer width="100%" height="100%">
                                 <AreaChart data={realtimeSystemSeries}>
@@ -1157,7 +1157,7 @@ export const DeviceDetail = () => {
                                 </AreaChart>
                             </ResponsiveContainer>
                         </div>
-                        <div className="card h-80">
+                        <div className="card h-80 min-w-[320px] min-h-[320px]">
                             <h3 className="text-lg font-bold text-white mb-6">Memory Usage (%)</h3>
                             <ResponsiveContainer width="100%" height="100%">
                                 <AreaChart data={realtimeSystemSeries}>
@@ -1192,7 +1192,7 @@ export const DeviceDetail = () => {
                                 </AreaChart>
                             </ResponsiveContainer>
                         </div>
-                        <div className="card h-80">
+                        <div className="card h-80 min-w-[320px] min-h-[320px]">
                             <h3 className="text-lg font-bold text-white mb-6">Disk Utilization (%)</h3>
                             <ResponsiveContainer width="100%" height="100%">
                                 <AreaChart data={realtimeSystemSeries}>
@@ -1227,7 +1227,7 @@ export const DeviceDetail = () => {
                                 </AreaChart>
                             </ResponsiveContainer>
                         </div>
-                        <div className="card h-80">
+                        <div className="card h-80 min-w-[320px] min-h-[320px]">
                             <h3 className="text-lg font-bold text-white mb-6">Disk I/O (MB/s)</h3>
                             <ResponsiveContainer width="100%" height="100%">
                                 <LineChart data={realtimeSystemSeries}>
@@ -1349,7 +1349,7 @@ export const DeviceDetail = () => {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 {enabledModules.includes('system') && (
                                     <div className="space-y-6 md:space-y-0 md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        <div className="h-72 border border-white/10 rounded-2xl p-4 bg-white/[0.02]">
+                                        <div className="h-72 min-w-[320px] min-h-[320px] border border-white/10 rounded-2xl p-4 bg-white/[0.02]">
                                             <h4 className="text-sm font-bold text-white mb-3">CPU Usage (%)</h4>
                                             <ResponsiveContainer width="100%" height="90%">
                                                 <LineChart data={historicalSeries}>
@@ -1365,7 +1365,7 @@ export const DeviceDetail = () => {
                                                 </LineChart>
                                             </ResponsiveContainer>
                                         </div>
-                                        <div className="h-72 border border-white/10 rounded-2xl p-4 bg-white/[0.02]">
+                                        <div className="h-72 min-w-[320px] min-h-[320px] border border-white/10 rounded-2xl p-4 bg-white/[0.02]">
                                             <h4 className="text-sm font-bold text-white mb-3">Memory Usage (%)</h4>
                                             <ResponsiveContainer width="100%" height="90%">
                                                 <LineChart data={historicalSeries}>
@@ -1381,7 +1381,7 @@ export const DeviceDetail = () => {
                                                 </LineChart>
                                             </ResponsiveContainer>
                                         </div>
-                                        <div className="h-72 border border-white/10 rounded-2xl p-4 bg-white/[0.02]">
+                                        <div className="h-72 min-w-[320px] min-h-[320px] border border-white/10 rounded-2xl p-4 bg-white/[0.02]">
                                             <h4 className="text-sm font-bold text-white mb-3">Disk Utilization (%)</h4>
                                             <ResponsiveContainer width="100%" height="90%">
                                                 <LineChart data={historicalSeries}>
@@ -1397,7 +1397,7 @@ export const DeviceDetail = () => {
                                                 </LineChart>
                                             </ResponsiveContainer>
                                         </div>
-                                        <div className="h-72 border border-white/10 rounded-2xl p-4 bg-white/[0.02]">
+                                        <div className="h-72 min-w-[320px] min-h-[320px] border border-white/10 rounded-2xl p-4 bg-white/[0.02]">
                                             <h4 className="text-sm font-bold text-white mb-3">Disk I/O (MB/s)</h4>
                                             <ResponsiveContainer width="100%" height="90%">
                                                 <LineChart data={historicalSeries}>
@@ -2651,21 +2651,23 @@ export const DeviceDetail = () => {
             <ConfirmationModal
                 {...confirmModal}
                 onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
-                {...(confirmModal.requireInput ? {
-                    children: (
-                        <div className="mt-4">
-                            <label className="block text-xs text-slate-400 mb-2">{confirmModal.inputLabel}</label>
-                            <input
-                                type="text"
-                                value={confirmModal.inputValue || ''}
-                                onChange={e => setConfirmModal(prev => ({ ...prev, inputValue: e.target.value }))}
-                                className="w-full px-4 py-2 rounded-lg bg-slate-800 text-white border border-white/10 focus:border-primary-500 outline-none"
-                                autoFocus
-                            />
-                        </div>
-                    )
-                } : {})}
-            />
+                confirmLabel="Confirm"
+                cancelLabel="Cancel"
+                onConfirm={confirmModal.onConfirm}
+            >
+                {confirmModal.requireInput && (
+                    <div className="mt-4">
+                        <label className="block text-xs text-slate-400 mb-2">{confirmModal.inputLabel}</label>
+                        <input
+                            type="text"
+                            value={modalInput}
+                            onChange={e => setModalInput(e.target.value)}
+                            className="w-full px-4 py-2 rounded-lg bg-slate-800 text-white border border-white/10 focus:border-primary-500 outline-none"
+                            autoFocus
+                        />
+                    </div>
+                )}
+            </ConfirmationModal>
         </div>
     );
 };

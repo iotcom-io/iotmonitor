@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { ConfirmationModal } from '../components/ConfirmationModal';
 import api from '../lib/axios';
 import { KeyRound, Plus, RefreshCw, Edit3, Trash2, X, Download } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
@@ -245,6 +246,8 @@ export const Licenses = () => {
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState<any>(null);
     const [notificationChannels, setNotificationChannels] = useState<NotificationChannelOption[]>([]);
+    const [renewModal, setRenewModal] = useState<{ open: boolean, row?: any }>({ open: false });
+    const [renewing, setRenewing] = useState(false);
     const [exporting, setExporting] = useState(false);
 
     const fetchData = async () => {
@@ -338,6 +341,17 @@ export const Licenses = () => {
         }
     };
 
+    const handleMarkRenewed = async (row: any) => {
+        setRenewing(true);
+        try {
+            await api.post(`/licenses/${row._id}/mark-renewed`);
+            fetchData();
+        } finally {
+            setRenewing(false);
+            setRenewModal({ open: false });
+        }
+    };
+
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -415,6 +429,26 @@ export const Licenses = () => {
                                         <div className="flex gap-2">
                                             <button className="icon-btn" onClick={() => { setEditing(row); setModalOpen(true); }}><Edit3 size={14} /></button>
                                             <button className="icon-btn text-red-400" onClick={() => remove(row._id)}><Trash2 size={14} /></button>
+                                            {['expired', 'critical', 'warning'].includes(row.computed_state) && row.status !== 'paused' && (
+                                                <button
+                                                    className="icon-btn text-emerald-400"
+                                                    title="Mark as Renewed"
+                                                    onClick={() => setRenewModal({ open: true, row })}
+                                                    disabled={renewing}
+                                                >
+                                                    <RefreshCw size={14} />
+                                                </button>
+                                            )}
+                                                    <ConfirmationModal
+                                                        isOpen={renewModal.open}
+                                                        title="Mark as Renewed"
+                                                        message={`Mark '${renewModal.row?.name}' as renewed? This will set the next renewal date based on its plan.`}
+                                                        type="info"
+                                                        confirmLabel={renewing ? 'Renewing...' : 'Confirm'}
+                                                        cancelLabel="Cancel"
+                                                        onClose={() => setRenewModal({ open: false })}
+                                                        onConfirm={() => renewModal.row && handleMarkRenewed(renewModal.row)}
+                                                    />
                                         </div>
                                     </td>
                                 </tr>
