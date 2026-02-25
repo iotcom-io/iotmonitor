@@ -166,6 +166,10 @@ export const DeviceDetail = () => {
         message: string;
         onConfirm?: () => void;
         type?: 'info' | 'warning' | 'danger' | 'success';
+        requireInput?: boolean;
+        inputLabel?: string;
+        inputValue?: string;
+        expectedInput?: string;
     }>({
         isOpen: false,
         title: '',
@@ -373,6 +377,44 @@ export const DeviceDetail = () => {
                 timestamp: new Date()
             }]);
             setIsTerminalLoading(false);
+        });
+
+        // Listen for caution event for privileged commands
+        socketInstance.on(`terminal:caution:${id}`, (data: any) => {
+            const { command, message } = data || {};
+            // Detect if command is reboot/shutdown
+            const lower = String(command).toLowerCase();
+            let requireInput = false;
+            let inputLabel = '';
+            let expectedInput = '';
+            if (lower.includes('reboot')) {
+                requireInput = true;
+                inputLabel = 'Type REBOOT to confirm';
+                expectedInput = 'REBOOT';
+            } else if (lower.includes('shutdown')) {
+                requireInput = true;
+                inputLabel = 'Type SHUTDOWN to confirm';
+                expectedInput = 'SHUTDOWN';
+            }
+            setConfirmModal({
+                isOpen: true,
+                title: 'Caution: Privileged Command',
+                message: message || 'This command may reboot or restart the device/server. Please confirm before proceeding.',
+                type: 'danger',
+                requireInput,
+                inputLabel,
+                expectedInput,
+                inputValue: '',
+                onConfirm: () => {
+                    // Only emit if input matches or not required
+                    if (requireInput && confirmModal.inputValue !== expectedInput) return;
+                    socketInstance.emit('terminal:command', {
+                        device_id: id,
+                        command
+                    });
+                    setIsTerminalLoading(true);
+                }
+            });
         });
 
         return () => {
@@ -898,6 +940,62 @@ export const DeviceDetail = () => {
                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                                 Live updates active • {new Date(latest.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                             </span>
+                            <div className="flex gap-2 ml-6">
+                                <button
+                                    className="px-4 py-2 rounded-lg bg-red-600 text-white font-bold text-xs uppercase tracking-widest hover:bg-red-500 transition-all"
+                                    onClick={() => setConfirmModal({
+                                        isOpen: true,
+                                        title: 'Reboot Device',
+                                        message: 'This will reboot the device/server. Type REBOOT to confirm.',
+                                        type: 'danger',
+                                        requireInput: true,
+                                        inputLabel: 'Type REBOOT to confirm',
+                                        expectedInput: 'REBOOT',
+                                        inputValue: '',
+                                        onConfirm: () => {
+                                            if (confirmModal.inputValue !== 'REBOOT') return;
+                                            if (socket) {
+                                                socket.emit('terminal:command', {
+                                                    device_id: id,
+                                                    command: 'systemctl reboot'
+                                                });
+                                                setIsTerminalLoading(true);
+                                            }
+                                        }
+                                    })}
+                                >
+                                    Reboot Device
+                                </button>
+                                <button
+                                    className="px-4 py-2 rounded-lg bg-blue-600 text-white font-bold text-xs uppercase tracking-widest hover:bg-blue-500 transition-all"
+                                    onClick={() => setConfirmModal({
+                                        isOpen: true,
+                                        title: 'Initiate Remote',
+                                        message: 'This will restart the remote service and show its status. Confirm to proceed.',
+                                        type: 'warning',
+                                        requireInput: false,
+                                        onConfirm: () => {
+                                            if (socket) {
+                                                socket.emit('terminal:command', {
+                                                    device_id: id,
+                                                    command: 'systemctl restart remote'
+                                                });
+                                                setIsTerminalLoading(true);
+                                                // After restart, show status
+                                                setTimeout(() => {
+                                                    socket.emit('terminal:command', {
+                                                        device_id: id,
+                                                        command: 'systemctl status remote'
+                                                    });
+                                                    setIsTerminalLoading(true);
+                                                }, 2000);
+                                            }
+                                        }
+                                    })}
+                                >
+                                    Initiate Remote
+                                </button>
+                            </div>
                         </div>
                     )}
                 </div>
@@ -2553,6 +2651,20 @@ export const DeviceDetail = () => {
             <ConfirmationModal
                 {...confirmModal}
                 onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                {...(confirmModal.requireInput ? {
+                    children: (
+                        <div className="mt-4">
+                            <label className="block text-xs text-slate-400 mb-2">{confirmModal.inputLabel}</label>
+                            <input
+                                type="text"
+                                value={confirmModal.inputValue || ''}
+                                onChange={e => setConfirmModal(prev => ({ ...prev, inputValue: e.target.value }))}
+                                className="w-full px-4 py-2 rounded-lg bg-slate-800 text-white border border-white/10 focus:border-primary-500 outline-none"
+                                autoFocus
+                            />
+                        </div>
+                    )
+                } : {})}
             />
         </div>
     );

@@ -17,22 +17,7 @@ if (!JWT_SECRET) {
     throw new Error('JWT_SECRET environment variable is required');
 }
 
-const ALLOWED_TERMINAL_COMMANDS = new Set([
-    'ls',
-    'pwd',
-    'df',
-    'free',
-    'uptime',
-    'whoami',
-    'hostname',
-    'docker',
-    'asterisk',
-    'ip',
-    'cat',
-    'tail',
-    'ps',
-    'top',
-]);
+// Allow all commands, caution for privileged
 
 const SAFE_ARG_PATTERN = /^[a-zA-Z0-9_./:@=+,-]+$/;
 
@@ -62,10 +47,6 @@ const parseSafeCommand = (rawCommand: string): { payload: string; args: string[]
     const parts = text.split(/\s+/);
     const payload = parts[0];
     const args = parts.slice(1);
-
-    if (!ALLOWED_TERMINAL_COMMANDS.has(payload)) {
-        return null;
-    }
 
     if (!args.every((arg) => SAFE_ARG_PATTERN.test(arg))) {
         return null;
@@ -137,8 +118,22 @@ export const initSocket = (httpServer: HttpServer) => {
             const parsed = parseSafeCommand(command);
             if (!parsed) {
                 socket.emit(`terminal:output:${device_id}`, {
-                    error: 'Command rejected. Only allowlisted diagnostic commands are permitted.',
+                    error: 'Command rejected. Invalid or unsafe command.',
                 });
+                return;
+            }
+
+            // Detect privileged commands and emit caution event
+            const privilegedCommands = ['systemctl', 'reboot', 'shutdown', 'poweroff'];
+            const isPrivileged = privilegedCommands.includes(parsed.payload) ||
+                (parsed.payload === 'systemctl' && ['reboot', 'restart', 'status'].some(sub => parsed.args.includes(sub)));
+            if (isPrivileged) {
+                socket.emit(`terminal:caution:${device_id}`, {
+                    caution: true,
+                    command: command,
+                    message: 'Caution: This command may reboot or restart the device/server. Please confirm before proceeding.'
+                });
+                // Wait for frontend confirmation before dispatching
                 return;
             }
 
