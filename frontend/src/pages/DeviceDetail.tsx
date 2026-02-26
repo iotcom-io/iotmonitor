@@ -980,34 +980,9 @@ export const DeviceDetail = () => {
                                         Initiate Remote
                                     </button>
                                 </div>
-                                                setIsTerminalLoading(true);
-                                                // After restart, show status
-                                                setTimeout(() => {
-                                                    socket.emit('terminal:command', {
-                                                        device_id: id,
-                                                        command: 'systemctl status remote'
-                                                    });
-                                                    setIsTerminalLoading(true);
-                                                }, 2000);
-                                            }
-                                        }
-                                    })}
-                                >
-                                    Initiate Remote
-                                </button>
                             </div>
-                        </div>
-                    )}
-                </div>
-
-                <div className="flex gap-2 p-1 bg-dark-surface/50 border border-dark-border rounded-xl w-full">
-                    {visibleTabs.map(tab => {
-                        const { criticalCount, warningCount } = getTabAlerts(tab.id);
-                        const hasAlert = (criticalCount > 0 || warningCount > 0) && tab.id !== 'checks';
-                        const alertColor = criticalCount > 0 ? 'bg-red-500' : 'bg-amber-500';
-
-                        return (
-                            <button
+                        )}
+                    </div>
                                 key={tab.id}
                                 onClick={() => setActiveTab(tab.id)}
                                 className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium transition-all relative ${activeTab === tab.id
