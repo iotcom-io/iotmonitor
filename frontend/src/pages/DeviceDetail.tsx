@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
+// ...existing code...
+// Add modalInput state
+    const [modalInput, setModalInput] = useState('');
 import { useNavigate, useParams } from 'react-router-dom';
 import {
     Activity, Cpu, HardDrive, Wifi, MemoryStick as Memory,
@@ -343,6 +346,7 @@ export const DeviceDetail = () => {
 
     const handleExecuteCommand = (e?: React.FormEvent) => {
         if (e) e.preventDefault();
+        if (e) e.preventDefault();
         if (!canRunRemoteTerminal) return;
         if (!terminalInput.trim() || !socket) return;
 
@@ -357,30 +361,11 @@ export const DeviceDetail = () => {
             payload: terminalInput,
             timestamp: new Date()
         }]);
-            setModalInput('');
-            setConfirmModal({
-                isOpen: true,
-                title: 'Caution: Privileged Command',
-                message: message || 'This command may reboot or restart the device/server. Please confirm before proceeding.',
-                type: 'danger',
-                requireInput,
-                inputLabel,
-                expectedInput,
-                onConfirm: () => {
-                    if (requireInput && modalInput !== expectedInput) return;
-                    socketInstance.emit('terminal:command', {
-                        device_id: id,
-                        command
-                    });
-                    setIsTerminalLoading(true);
-                    setConfirmModal(prev => ({ ...prev, isOpen: false }));
-                }
-            });
-            setIsTerminalLoading(false);
-        });
-
-        // Listen for caution event for privileged commands
-        socketInstance.on(`terminal:caution:${id}`, (data: any) => {
+        // ...existing code...
+    // Listen for caution event for privileged commands
+    useEffect(() => {
+        if (!socket) return;
+        socket.on(`terminal:caution:${id}`, (data: any) => {
             const { command, message } = data || {};
             // Detect if command is reboot/shutdown
             const lower = String(command).toLowerCase();
@@ -408,7 +393,7 @@ export const DeviceDetail = () => {
                 onConfirm: () => {
                     // Only emit if input matches or not required
                     if (requireInput && confirmModal.inputValue !== expectedInput) return;
-                    socketInstance.emit('terminal:command', {
+                    socket.emit('terminal:command', {
                         device_id: id,
                         command
                     });
@@ -418,9 +403,9 @@ export const DeviceDetail = () => {
         });
 
         return () => {
-            socketInstance.disconnect();
+            if (socket) socket.off(`terminal:caution:${id}`);
         };
-    }, [id, token]);
+    }, [id, token, socket]);
 
     const handleSaveCheck = async (ruleData: any | any[]) => {
         try {
@@ -981,10 +966,13 @@ export const DeviceDetail = () => {
                                     </button>
                                 </div>
                             </div>
-                        )}
+                        )
                     </div>
+                </div> {/* Close .flex.items-center.gap-5 */}
+            </div> {/* Close .flex.flex-col.md\:flex-row.md\:items-end.justify-between.gap-4 */}
+        </div> {/* Close .sticky.top-0... */}
 
-            {activeTab === 'metrics' && (
+        {activeTab === 'metrics' && (
                 <>
                     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6 relative">
                         {isOffline && (
@@ -2596,26 +2584,26 @@ export const DeviceDetail = () => {
                 canAssignUsers={canAssignMonitoringRules && canViewUsers}
             />
 
+            {confirmModal.requireInput && (
+                <div className="mt-4">
+                    <label className="block text-xs text-slate-400 mb-2">{confirmModal.inputLabel}</label>
+                    <input
+                        type="text"
+                        value={modalInput}
+                        onChange={e => setModalInput(e.target.value)}
+                        className="w-full px-4 py-2 rounded-lg bg-slate-800 text-white border border-white/10 focus:border-primary-500 outline-none"
+                        autoFocus
+                    />
+                </div>
+            )}
             <ConfirmationModal
                 {...confirmModal}
                 onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
                 confirmLabel="Confirm"
                 cancelLabel="Cancel"
                 onConfirm={confirmModal.onConfirm}
-            >
-                {confirmModal.requireInput && (
-                    <div className="mt-4">
-                        <label className="block text-xs text-slate-400 mb-2">{confirmModal.inputLabel}</label>
-                        <input
-                            type="text"
-                            value={modalInput}
-                            onChange={e => setModalInput(e.target.value)}
-                            className="w-full px-4 py-2 rounded-lg bg-slate-800 text-white border border-white/10 focus:border-primary-500 outline-none"
-                            autoFocus
-                        />
-                    </div>
-                )}
-            </ConfirmationModal>
+            />
         </div>
     );
-};
+}
+}
