@@ -983,33 +983,6 @@ export const DeviceDetail = () => {
                             </div>
                         )}
                     </div>
-                                key={tab.id}
-                                onClick={() => setActiveTab(tab.id)}
-                                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium transition-all relative ${activeTab === tab.id
-                                    ? "bg-primary-600 text-white shadow-lg shadow-primary-500/20"
-                                    : "text-slate-400 hover:text-slate-100 hover:bg-white/5"
-                                    }`}
-                            >
-                                <tab.icon size={18} />
-                                <span className="relative">
-                                    <span className="hidden xl:inline">{tab.label}</span>
-                                    <span className="xl:hidden">{tab.label.split(' ')[0]}</span>
-                                    {hasAlert && (
-                                        <span className={clsx(
-                                            "absolute -top-1 -right-4 flex items-center justify-center min-w-[14px] h-[14px] px-1 rounded-full text-[8px] font-black text-white",
-                                            alertColor,
-                                            criticalCount > 0 && "animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.5)]",
-                                            warningCount > 0 && criticalCount === 0 && "shadow-[0_0_8px_rgba(245,158,11,0.5)]"
-                                        )}>
-                                            {criticalCount + warningCount}
-                                        </span>
-                                    )}
-                                </span>
-                            </button>
-                        );
-                    })}
-                </div>
-            </div>
 
             {activeTab === 'metrics' && (
                 <>
