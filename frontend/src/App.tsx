@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Menu, X, Moon, Sun } from 'lucide-react';
 import { useAuthStore } from './store/useAuthStore';
 import { Sidebar } from './components/layout/Sidebar';
@@ -26,6 +26,49 @@ const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
 const PermissionRoute = ({ permission, children }: { permission: PermissionKey, children: React.ReactNode }) => {
     const user = useAuthStore(state => state.user);
     return hasPermission(permission, user) ? <>{children}</> : <Navigate to="/" replace />;
+};
+
+const AppTopBar = ({
+    token,
+    mobileSidebarOpen,
+    onToggleMobile,
+    theme,
+    onToggleTheme,
+}: {
+    token: string | null;
+    mobileSidebarOpen: boolean;
+    onToggleMobile: () => void;
+    theme: 'dark' | 'light';
+    onToggleTheme: () => void;
+}) => {
+    const location = useLocation();
+    const hideTopBar = /^\/devices\/[^/]+$/.test(location.pathname);
+    if (!token || hideTopBar) return null;
+
+    return (
+        <div className="mb-4 flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+            <div className="flex items-center gap-2">
+                <button
+                    type="button"
+                    className="icon-btn md:hidden"
+                    onClick={onToggleMobile}
+                    aria-label="Toggle sidebar"
+                >
+                    {mobileSidebarOpen ? <X size={18} /> : <Menu size={18} />}
+                </button>
+                <span className="text-sm font-semibold text-slate-200">IoTMonitor</span>
+            </div>
+            <button
+                type="button"
+                className="icon-btn"
+                onClick={onToggleTheme}
+                aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+                title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+            >
+                {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+            </button>
+        </div>
+    );
 };
 
 function App() {
@@ -129,30 +172,13 @@ function App() {
                     ? `flex-1 ${sidebarCollapsed ? 'md:ml-20' : 'md:ml-64'} p-4 md:p-6 transition-all duration-300 flex flex-col min-h-screen`
                     : "flex-1 flex flex-col min-h-screen"}
                 >
-                    {token && (
-                        <div className="mb-4 flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2">
-                            <div className="flex items-center gap-2">
-                                <button
-                                    type="button"
-                                    className="icon-btn md:hidden"
-                                    onClick={() => setMobileSidebarOpen((prev) => !prev)}
-                                    aria-label="Toggle sidebar"
-                                >
-                                    {mobileSidebarOpen ? <X size={18} /> : <Menu size={18} />}
-                                </button>
-                                <span className="text-sm font-semibold text-slate-200">IoTMonitor</span>
-                            </div>
-                            <button
-                                type="button"
-                                className="icon-btn"
-                                onClick={() => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))}
-                                aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-                                title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-                            >
-                                {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-                            </button>
-                        </div>
-                    )}
+                    <AppTopBar
+                        token={token}
+                        mobileSidebarOpen={mobileSidebarOpen}
+                        onToggleMobile={() => setMobileSidebarOpen((prev) => !prev)}
+                        theme={theme}
+                        onToggleTheme={() => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))}
+                    />
                     <div className="flex-1">
                         <Routes>
                             <Route path="/login" element={!token ? <Login /> : <Navigate to="/" />} />

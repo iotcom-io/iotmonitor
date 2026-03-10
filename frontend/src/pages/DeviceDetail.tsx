@@ -166,7 +166,7 @@ export const DeviceDetail = () => {
         isOpen: boolean;
         title: string;
         message: string;
-        onConfirm?: () => void;
+        onConfirm?: () => void | boolean | Promise<void | boolean>;
         type?: 'info' | 'warning' | 'danger' | 'success';
         requireInput?: boolean;
         inputLabel?: string;
@@ -177,6 +177,73 @@ export const DeviceDetail = () => {
         title: '',
         message: ''
     });
+
+    const socketDeviceId = device?.device_id || id;
+
+    const pushTerminalCommand = (command: string) => {
+        setTerminalOutputs((prev) => [...prev.slice(-99), {
+            type: 'command',
+            payload: command,
+            timestamp: new Date().toISOString(),
+        }]);
+    };
+
+    const emitTerminalCommand = (command: string, confirmed = false) => {
+        if (!socket || !socketDeviceId) return false;
+        setIsTerminalLoading(true);
+        pushTerminalCommand(command);
+        socket.emit('terminal:command', {
+            device_id: socketDeviceId,
+            command,
+            confirmed,
+        });
+        return true;
+    };
+
+    useEffect(() => {
+        if (!token || !socketDeviceId || !canRunRemoteTerminal) return;
+
+        const baseUrl = (import.meta.env.VITE_API_URL || window.location.origin).replace(/\/api\/?$/, '');
+        const nextSocket = io(baseUrl, {
+            auth: { token },
+            transports: ['websocket', 'polling'],
+        });
+
+        const outputEvent = `terminal:output:${socketDeviceId}`;
+        const onOutput = (payload: any) => {
+            setIsTerminalLoading(false);
+            setTerminalOutputs((prev) => [...prev.slice(-99), {
+                type: 'output',
+                ...(payload || {}),
+                timestamp: new Date().toISOString(),
+            }]);
+        };
+
+        const onConnectError = (err: any) => {
+            setIsTerminalLoading(false);
+            setTerminalOutputs((prev) => [...prev.slice(-99), {
+                type: 'output',
+                error: err?.message || 'Socket connection failed',
+                timestamp: new Date().toISOString(),
+            }]);
+        };
+
+        nextSocket.on(outputEvent, onOutput);
+        nextSocket.on('connect_error', onConnectError);
+        setSocket(nextSocket);
+
+        return () => {
+            nextSocket.off(outputEvent, onOutput);
+            nextSocket.off('connect_error', onConnectError);
+            nextSocket.disconnect();
+            setSocket(null);
+        };
+    }, [token, socketDeviceId, canRunRemoteTerminal]);
+
+    useEffect(() => {
+        const terminalEnd = document.getElementById('terminal-end');
+        if (terminalEnd) terminalEnd.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }, [terminalOutputs, isTerminalLoading]);
 
     useEffect(() => {
         fetchData();
@@ -346,19 +413,11 @@ export const DeviceDetail = () => {
     const handleExecuteCommand = (e?: React.FormEvent) => {
         if (e) e.preventDefault();
         if (!canRunRemoteTerminal) return;
-        if (!terminalInput.trim() || !socket) return;
-
-        setIsTerminalLoading(true);
-        socket.emit('terminal:command', {
-            device_id: id,
-            command: terminalInput
-        });
-
-        setTerminalOutputs(prev => [...prev.slice(-49), {
-            type: 'command',
-            payload: terminalInput,
-            timestamp: new Date()
-        }]);
+        const command = terminalInput.trim();
+        if (!command) return;
+        if (emitTerminalCommand(command)) {
+            setTerminalInput('');
+        }
     };
 
     // Listen for caution event for privileged commands
@@ -368,8 +427,8 @@ export const DeviceDetail = () => {
 
     // Listen for caution event for privileged commands
     useEffect(() => {
-        if (!socket) return;
-        const cautionEvent = `terminal:caution:${id}`;
+        if (!socket || !socketDeviceId) return;
+        const cautionEvent = `terminal:caution:${socketDeviceId}`;
         const cautionHandler = (data: any) => {
             const { command, message } = data || {};
             const lower = String(command || '').toLowerCase();
@@ -397,12 +456,7 @@ export const DeviceDetail = () => {
                 expectedInput,
                 onConfirm: () => {
                     if (requireInput && modalInputRef.current !== expectedInput) return false;
-                    socket.emit('terminal:command', {
-                        device_id: id,
-                        command,
-                        confirmed: true
-                    });
-                    setIsTerminalLoading(true);
+                    emitTerminalCommand(command, true);
                 }
             });
         };
@@ -411,7 +465,7 @@ export const DeviceDetail = () => {
         return () => {
             socket.off(cautionEvent, cautionHandler);
         };
-    }, [id, socket]);
+    }, [socket, socketDeviceId]);
 
     const handleSaveCheck = async (ruleData: any | any[]) => {
         try {
@@ -927,15 +981,8 @@ useEffect(() => {
                                     inputLabel: 'Type REBOOT to confirm',
                                     expectedInput: 'REBOOT',
                                     onConfirm: () => {
-                                        if (modalInput !== 'REBOOT') return false;
-                                        if (socket) {
-                                            socket.emit('terminal:command', {
-                                                device_id: id,
-                                                command: 'systemctl reboot',
-                                                confirmed: true
-                                            });
-                                            setIsTerminalLoading(true);
-                                        }
+                                        if (modalInputRef.current !== 'REBOOT') return false;
+                                        emitTerminalCommand('systemctl reboot', true);
                                     }
                                 });
                             }}
@@ -954,22 +1001,11 @@ useEffect(() => {
                                     type: 'warning',
                                     requireInput: false,
                                     onConfirm: () => {
-                                        if (socket) {
-                                            socket.emit('terminal:command', {
-                                                device_id: id,
-                                                command: 'systemctl restart remote',
-                                                confirmed: true
-                                            });
-                                            setIsTerminalLoading(true);
-                                            setTimeout(() => {
-                                                socket.emit('terminal:command', {
-                                                    device_id: id,
-                                                    command: 'systemctl status remote',
-                                                    confirmed: true
-                                                });
-                                                setIsTerminalLoading(true);
-                                            }, 2000);
-                                        }
+                                        const dispatched = emitTerminalCommand('systemctl restart remote', true);
+                                        if (!dispatched) return false;
+                                        window.setTimeout(() => {
+                                            emitTerminalCommand('systemctl status remote', true);
+                                        }, 2000);
                                     }
                                 });
                             }}
