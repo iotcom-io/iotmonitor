@@ -13,6 +13,10 @@ interface ConfirmationModalProps {
     cancelLabel?: string;
     isDangerous?: boolean;
     type?: 'info' | 'warning' | 'danger' | 'success';
+    requireInput?: boolean;
+    inputLabel?: string;
+    inputValue?: string;
+    onInputChange?: (value: string) => void;
 }
 
 export const ConfirmationModal = ({
@@ -25,7 +29,11 @@ export const ConfirmationModal = ({
     confirmLabel = 'Confirm',
     cancelLabel = 'Cancel',
     isDangerous = false,
-    type = 'info'
+    type = 'info',
+    requireInput = false,
+    inputLabel,
+    inputValue = '',
+    onInputChange,
 }: ConfirmationModalProps) => {
     if (!isOpen) return null;
     const modalType = isDangerous ? 'danger' : type;
@@ -95,6 +103,21 @@ export const ConfirmationModal = ({
                     <p className="text-slate-400 font-medium leading-relaxed">
                         {message}
                     </p>
+
+                    {requireInput && (
+                        <div className="space-y-2">
+                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest">
+                                {inputLabel || 'Type to confirm'}
+                            </label>
+                            <input
+                                type="text"
+                                value={inputValue}
+                                onChange={(e) => onInputChange?.(e.target.value)}
+                                className="w-full px-4 py-2.5 rounded-xl bg-black/30 text-white border border-white/10 focus:border-primary-500 outline-none"
+                                autoFocus
+                            />
+                        </div>
+                    )}
 
                     <div className="flex gap-3">
                         <button

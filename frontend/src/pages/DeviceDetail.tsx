@@ -188,10 +188,18 @@ export const DeviceDetail = () => {
         }]);
     };
 
-    const emitTerminalCommand = (command: string, confirmed = false) => {
+    const pushTerminalError = (error: string) => {
+        setTerminalOutputs((prev) => [...prev.slice(-99), {
+            type: 'output',
+            error,
+            timestamp: new Date().toISOString(),
+        }]);
+    };
+
+    const emitTerminalCommand = (command: string, confirmed = false, logCommand = true) => {
         if (!socket || !socketDeviceId) return false;
         setIsTerminalLoading(true);
-        pushTerminalCommand(command);
+        if (logCommand) pushTerminalCommand(command);
         socket.emit('terminal:command', {
             device_id: socketDeviceId,
             command,
@@ -417,6 +425,8 @@ export const DeviceDetail = () => {
         if (!command) return;
         if (emitTerminalCommand(command)) {
             setTerminalInput('');
+        } else {
+            pushTerminalError('Remote terminal is not connected yet. Please retry in a moment.');
         }
     };
 
@@ -456,7 +466,7 @@ export const DeviceDetail = () => {
                 expectedInput,
                 onConfirm: () => {
                     if (requireInput && modalInputRef.current !== expectedInput) return false;
-                    emitTerminalCommand(command, true);
+                    emitTerminalCommand(command, true, false);
                 }
             });
         };
@@ -966,10 +976,12 @@ useEffect(() => {
                             </div>
                         </div>
                     </div>
-                    <div className="flex gap-2 ml-6">
+                    {canRunRemoteTerminal && (
+                        <div className="flex gap-2 ml-6">
                         <button
-                            className="px-4 py-2 rounded-lg bg-primary-600 text-white font-bold text-xs uppercase tracking-widest hover:bg-primary-500 transition-all border border-primary-500/20 shadow-lg"
+                            className="px-4 py-2 rounded-lg bg-primary-600 text-white font-bold text-xs uppercase tracking-widest hover:bg-primary-500 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-primary-600 transition-all border border-primary-500/20 shadow-lg"
                             style={{ minWidth: 120 }}
+                            disabled={!socket || isOffline}
                             onClick={() => {
                                 setModalInput('');
                                 setConfirmModal({
@@ -990,8 +1002,9 @@ useEffect(() => {
                             Reboot Device
                         </button>
                         <button
-                            className="px-4 py-2 rounded-lg bg-primary-600 text-white font-bold text-xs uppercase tracking-widest hover:bg-primary-500 transition-all border border-primary-500/20 shadow-lg"
+                            className="px-4 py-2 rounded-lg bg-primary-600 text-white font-bold text-xs uppercase tracking-widest hover:bg-primary-500 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-primary-600 transition-all border border-primary-500/20 shadow-lg"
                             style={{ minWidth: 120 }}
+                            disabled={!socket || isOffline}
                             onClick={() => {
                                 setModalInput('');
                                 setConfirmModal({
@@ -1012,7 +1025,8 @@ useEffect(() => {
                         >
                             Initiate Remote
                         </button>
-                    </div>
+                        </div>
+                    )}
                 </div>
 
                 <div className="flex gap-2 p-1 bg-dark-surface border border-dark-border rounded-xl w-fit max-w-full overflow-x-auto">
@@ -2648,28 +2662,20 @@ useEffect(() => {
                 latestMetrics={latestForRuleModal}
                 enabledModules={enabledModules}
                 availableDockerTargets={availableDockerTargets}
+                existingChecks={checks}
                 assignableUsers={assignableUsers}
                 canAssignUsers={canAssignMonitoringRules && canViewUsers}
             />
-
-            {confirmModal.requireInput && (
-                <div className="mt-4">
-                    <label className="block text-xs text-slate-400 mb-2">{confirmModal.inputLabel}</label>
-                    <input
-                        type="text"
-                        value={modalInput}
-                        onChange={e => setModalInput(e.target.value)}
-                        className="w-full px-4 py-2 rounded-lg bg-slate-800 text-white border border-white/10 focus:border-primary-500 outline-none"
-                        autoFocus
-                    />
-                </div>
-            )}
             <ConfirmationModal
                 {...confirmModal}
                 onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
                 confirmLabel="Confirm"
                 cancelLabel="Cancel"
                 onConfirm={confirmModal.onConfirm}
+                requireInput={confirmModal.requireInput}
+                inputLabel={confirmModal.inputLabel}
+                inputValue={modalInput}
+                onInputChange={setModalInput}
             />
         </div>
     );

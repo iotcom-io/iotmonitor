@@ -28,6 +28,7 @@ interface ResolveAlertParams {
     specific_service?: string;
     specific_endpoint?: string;
     details?: any;
+    silent?: boolean;
 }
 
 const severityRank: Record<string, number> = {
@@ -115,6 +116,12 @@ const normalizeTarget = (value?: string) => String(value || '').trim().toLowerCa
 
 const toIncidentSeverity = (severity: 'info' | 'warning' | 'critical'): 'warning' | 'critical' => {
     return severity === 'critical' ? 'critical' : 'warning';
+};
+
+const isWithinRecoverySuppression = (device: any) => {
+    const until = device?.notification_suppressed_until ? new Date(device.notification_suppressed_until) : null;
+    if (!until || Number.isNaN(until.getTime())) return false;
+    return until.getTime() > Date.now();
 };
 
 const buildIncidentSummary = (params: {
@@ -306,6 +313,11 @@ export async function triggerAlert(params: TriggerAlertParams) {
             return null;
         }
 
+        // During post-recovery stabilization, suppress non-offline alert chatter.
+        if (device && alert_type !== 'offline' && isWithinRecoverySuppression(device)) {
+            return null;
+        }
+
         if (device && alert_type !== 'offline') {
             const monitored = await isAlertStillMonitored(
                 {
@@ -404,6 +416,7 @@ export async function resolveAlert(params: ResolveAlertParams) {
             specific_service,
             specific_endpoint,
             details = {},
+            silent = false,
         } = params;
 
         const alert = await AlertTracking.findOne({
@@ -427,7 +440,12 @@ export async function resolveAlert(params: ResolveAlertParams) {
         alert.details = { ...alert.details, ...details, duration_minutes, duration_seconds };
         await alert.save();
 
-        await sendRecoveryNotification(alert, device_name);
+        if (!silent) {
+            const device = await findDeviceForAlert(device_id);
+            if (!(device && alert_type !== 'offline' && isWithinRecoverySuppression(device))) {
+                await sendRecoveryNotification(alert, device_name);
+            }
+        }
 
         try {
             await resolveDeviceIncident({ alert, device_name, details: alert.details });
@@ -530,7 +548,6 @@ export async function resolveOfflineRecoveryBundle(
     const { NotificationService } = await import('./NotificationService');
     const settings = await SystemSettings.findOne();
     const recoveryTime = now.toLocaleString('en-US', { timeZone: APP_TIMEZONE });
-
     let message = `RESOLVED\n\n`;
     message += `Device: ${deviceName}\n`;
     message += `Status: Device Back Online\n`;
@@ -538,10 +555,7 @@ export async function resolveOfflineRecoveryBundle(
     if (offlineDurationSeconds > 0) {
         message += `Offline Duration: ${formatDuration(offlineDurationSeconds)}\n`;
     }
-    if (restoredServices.size > 0) {
-        message += `Services Restored: ${Array.from(restoredServices).sort().join(', ')}\n`;
-    }
-    message += `Resolved Alerts: ${activeAlerts.length}`;
+    message += `Info: Detailed service summary will be sent after stabilization window.`;
 
     await NotificationService.send({
         subject: `Device Recovery: ${deviceName}`,

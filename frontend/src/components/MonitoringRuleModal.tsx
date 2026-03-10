@@ -31,6 +31,7 @@ interface MonitoringRuleModalProps {
     initialData?: any;
     enabledModules?: ModuleName[];
     availableDockerTargets?: string[];
+    existingChecks?: any[];
     assignableUsers?: { id: string; name?: string; email?: string; is_active?: boolean }[];
     canAssignUsers?: boolean;
     latestMetrics?: {
@@ -62,6 +63,7 @@ export const MonitoringRuleModal = ({
     latestMetrics,
     enabledModules,
     availableDockerTargets,
+    existingChecks = [],
     assignableUsers = [],
     canAssignUsers = false,
 }: MonitoringRuleModalProps) => {
@@ -104,7 +106,7 @@ export const MonitoringRuleModal = ({
     const [customDockerTarget, setCustomDockerTarget] = useState('');
 
     // Track which types have been modified in this session
-    const [modifiedTypes, setModifiedTypes] = useState<Set<string>>(new Set<string>(initialData ? [initialData.check_type] : []));
+    const [modifiedTypes, setModifiedTypes] = useState<Set<string>>(new Set<string>([prepData(initialData).check_type]));
 
     interface SessionConfig {
         thresholds: any;
@@ -117,6 +119,55 @@ export const MonitoringRuleModal = ({
 
     // Store customizations per type to prevent loss when switching tabs
     const [sessionConfigs, setSessionConfigs] = useState<Record<string, SessionConfig>>({});
+
+    const sipEndpointTargets = React.useMemo(() => {
+        const names = new Set<string>();
+        names.add('System-wide');
+
+        latestMetrics?.extra?.registrations?.forEach((entry: any) => {
+            const target = String(entry?.name || '').trim();
+            if (target) names.add(target);
+        });
+        latestMetrics?.extra?.contacts?.forEach((entry: any) => {
+            const target = String(entry?.aor || '').trim();
+            if (target) names.add(target);
+        });
+        existingChecks
+            .filter((check) => ['sip_rtt', 'sip_registration'].includes(check?.check_type))
+            .forEach((check) => {
+                const target = String(check?.target || '').trim();
+                if (target) names.add(target);
+            });
+        (formData?.targets || []).forEach((target: string) => {
+            const normalized = String(target || '').trim();
+            if (normalized) names.add(normalized);
+        });
+
+        return Array.from(names).sort((a, b) => {
+            if (a === 'System-wide') return -1;
+            if (b === 'System-wide') return 1;
+            return a.localeCompare(b);
+        });
+    }, [existingChecks, formData?.targets, latestMetrics]);
+
+    const interfaceTargets = React.useMemo(() => {
+        const names = new Set<string>();
+        latestMetrics?.extra?.interfaces?.forEach((entry: any) => {
+            const target = String(entry?.name || '').trim();
+            if (target) names.add(target);
+        });
+        existingChecks
+            .filter((check) => ['bandwidth', 'utilization'].includes(check?.check_type))
+            .forEach((check) => {
+                const target = String(check?.target || '').trim();
+                if (target) names.add(target);
+            });
+        (formData?.targets || []).forEach((target: string) => {
+            const normalized = String(target || '').trim();
+            if (normalized) names.add(normalized);
+        });
+        return Array.from(names).sort((a, b) => a.localeCompare(b));
+    }, [existingChecks, formData?.targets, latestMetrics]);
 
     const dockerContainerTargets = React.useMemo(() => {
         const rawDocker = latestMetrics?.extra?.docker as any;
@@ -159,29 +210,21 @@ export const MonitoringRuleModal = ({
     React.useEffect(() => {
         const prepped = prepData(initialData);
         if (isOpen) {
-            setFormData(prepped);
-            if (prepped) {
-                const initialTargets = Array.isArray(prepped.target) ? prepped.target : (prepped.target ? [prepped.target] : []);
-                const config: SessionConfig = {
-                    thresholds: prepped.thresholds,
-                    targets: initialTargets,
-                    notification_frequency: prepped.notification_frequency || 15,
-                    notify: prepped.notify || { channels: ['slack'] },
-                    assigned_user_ids: Array.isArray(prepped.assigned_user_ids) ? prepped.assigned_user_ids : [],
-                };
-                setSessionConfigs({ [prepped.check_type]: config });
-                setModifiedTypes(new Set<string>([prepped.check_type]));
-
-                // Update formData with targets array for the multi-select UI
-                setFormData({
-                    ...prepped,
-                    targets: initialTargets,
-                    assigned_user_ids: config.assigned_user_ids,
-                });
-            } else {
-                setModifiedTypes(new Set<string>());
-                setSessionConfigs({});
-            }
+            const initialTargets = Array.isArray(prepped.target) ? prepped.target : (prepped.target ? [prepped.target] : []);
+            const config: SessionConfig = {
+                thresholds: prepped.thresholds,
+                targets: initialTargets,
+                notification_frequency: prepped.notification_frequency || 15,
+                notify: prepped.notify || { channels: ['slack'] },
+                assigned_user_ids: Array.isArray(prepped.assigned_user_ids) ? prepped.assigned_user_ids : [],
+            };
+            setSessionConfigs({ [prepped.check_type]: config });
+            setModifiedTypes(new Set<string>([prepped.check_type]));
+            setFormData({
+                ...prepped,
+                targets: initialTargets,
+                assigned_user_ids: config.assigned_user_ids,
+            });
         }
     }, [initialData, isOpen]);
 
@@ -242,35 +285,38 @@ export const MonitoringRuleModal = ({
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
 
-        // Collect all rules from modified types
+        // Save only the active rule type from this form session.
         const rulesToSave: any[] = [];
+        const typeId = formData.check_type;
+        const config = sessionConfigs[typeId] || {
+            thresholds: formData.thresholds,
+            targets: Array.isArray(formData.targets) ? formData.targets : [],
+            notification_frequency: formData.notification_frequency,
+            notify: formData.notify,
+            assigned_user_ids: formData.assigned_user_ids || [],
+        };
 
-        modifiedTypes.forEach(typeId => {
-            const config = sessionConfigs[typeId];
-            if (!config) return;
+        const targets = (config.targets && config.targets.length > 0)
+            ? config.targets
+            : [formData.target || 'System-wide'];
 
-            const targets = (config.targets && config.targets.length > 0)
-                ? config.targets
-                : [config.target || 'System-wide'];
+        targets.forEach((target: string, index: number) => {
+            const rule = {
+                check_type: typeId,
+                target,
+                thresholds: config.thresholds,
+                notification_frequency: config.notification_frequency,
+                notify: config.notify,
+                assigned_user_ids: config.assigned_user_ids || [],
+                enabled: initialData?.enabled ?? true,
+            };
 
-            targets.forEach((target: string) => {
-                const rule = {
-                    check_type: typeId,
-                    target,
-                    thresholds: config.thresholds,
-                    notification_frequency: config.notification_frequency,
-                    notify: config.notify,
-                    assigned_user_ids: config.assigned_user_ids || [],
-                    enabled: true
-                };
+            // In edit mode, always update the currently edited rule with the first selected target.
+            if (initialData && index === 0) {
+                (rule as any)._id = initialData._id;
+            }
 
-                // If editing, preserve the ID only for the EXACT matching target
-                if (initialData && initialData.check_type === typeId && initialData.target === target) {
-                    (rule as any)._id = initialData._id;
-                }
-
-                rulesToSave.push(rule);
-            });
+            rulesToSave.push(rule);
         });
 
         if (rulesToSave.length === 0) {
@@ -359,75 +405,48 @@ export const MonitoringRuleModal = ({
                                         >
                                             System-wide
                                         </button>
-                                        {(() => {
-                                            const seen = new Set(['System-wide']);
-                                            const buttons: React.ReactNode[] = [];
-
-                                            latestMetrics?.extra?.registrations?.forEach((r: any) => {
-                                                if (seen.has(r.name)) return;
-                                                seen.add(r.name);
-                                                buttons.push(
-                                                    <button
-                                                        key={r.name}
-                                                        type="button"
-                                                        onClick={() => {
-                                                            const current = formData.targets?.filter((t: string) => t !== 'System-wide') || [];
-                                                            const next = current.includes(r.name) ? current.filter((t: string) => t !== r.name) : [...current, r.name];
-                                                            updateField({ targets: next });
-                                                        }}
-                                                        className={clsx(
-                                                            "px-3 py-1.5 rounded-lg border text-xs font-bold transition-all",
-                                                            formData.targets?.includes(r.name) ? "bg-primary-500/20 border-primary-500 text-primary-400" : "bg-white/5 border-white/10 text-slate-500"
-                                                        )}
-                                                    >
-                                                        {r.name}
-                                                    </button>
-                                                );
-                                            });
-
-                                            latestMetrics?.extra?.contacts?.forEach((c: any) => {
-                                                if (seen.has(c.aor)) return;
-                                                seen.add(c.aor);
-                                                buttons.push(
-                                                    <button
-                                                        key={c.aor}
-                                                        type="button"
-                                                        onClick={() => {
-                                                            const current = formData.targets?.filter((t: string) => t !== 'System-wide') || [];
-                                                            const next = current.includes(c.aor) ? current.filter((t: string) => t !== c.aor) : [...current, c.aor];
-                                                            updateField({ targets: next });
-                                                        }}
-                                                        className={clsx(
-                                                            "px-3 py-1.5 rounded-lg border text-xs font-bold transition-all",
-                                                            formData.targets?.includes(c.aor) ? "bg-primary-500/20 border-primary-500 text-primary-400" : "bg-white/5 border-white/10 text-slate-500"
-                                                        )}
-                                                    >
-                                                        {c.aor}
-                                                    </button>
-                                                );
-                                            });
-
-                                            return buttons;
-                                        })()}
+                                        {sipEndpointTargets
+                                            .filter((target) => target !== 'System-wide')
+                                            .map((target) => (
+                                                <button
+                                                    key={target}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        const current = formData.targets?.filter((t: string) => t !== 'System-wide') || [];
+                                                        const next = current.includes(target) ? current.filter((t: string) => t !== target) : [...current, target];
+                                                        updateField({ targets: next });
+                                                    }}
+                                                    className={clsx(
+                                                        "px-3 py-1.5 rounded-lg border text-xs font-bold transition-all",
+                                                        formData.targets?.includes(target) ? "bg-primary-500/20 border-primary-500 text-primary-400" : "bg-white/5 border-white/10 text-slate-500"
+                                                    )}
+                                                >
+                                                    {target}
+                                                </button>
+                                            ))}
                                     </>
                                 ) : formData.check_type === 'bandwidth' || formData.check_type === 'utilization' ? (
-                                    latestMetrics?.extra?.interfaces?.map((i: any) => (
-                                        <button
-                                            key={i.name}
-                                            type="button"
-                                            onClick={() => {
-                                                const current = formData.targets || [];
-                                                const next = current.includes(i.name) ? current.filter((t: string) => t !== i.name) : [...current, i.name];
-                                                updateField({ targets: next });
-                                            }}
-                                            className={clsx(
-                                                "px-3 py-1.5 rounded-lg border text-xs font-bold transition-all",
-                                                formData.targets?.includes(i.name) ? "bg-primary-500/20 border-primary-500 text-primary-400" : "bg-white/5 border-white/10 text-slate-500"
-                                            )}
-                                        >
-                                            {i.name}
-                                        </button>
-                                    ))
+                                    interfaceTargets.length > 0 ? (
+                                        interfaceTargets.map((target: string) => (
+                                            <button
+                                                key={target}
+                                                type="button"
+                                                onClick={() => {
+                                                    const current = formData.targets || [];
+                                                    const next = current.includes(target) ? current.filter((t: string) => t !== target) : [...current, target];
+                                                    updateField({ targets: next });
+                                                }}
+                                                className={clsx(
+                                                    "px-3 py-1.5 rounded-lg border text-xs font-bold transition-all",
+                                                    formData.targets?.includes(target) ? "bg-primary-500/20 border-primary-500 text-primary-400" : "bg-white/5 border-white/10 text-slate-500"
+                                                )}
+                                            >
+                                                {target}
+                                            </button>
+                                        ))
+                                    ) : (
+                                        <span className="text-xs text-slate-500 italic">No interfaces discovered yet from telemetry.</span>
+                                    )
                                 ) : formData.check_type === 'container_status' ? (
                                     <>
                                         {dockerContainerTargets.length > 0 ? (

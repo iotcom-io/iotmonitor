@@ -20,6 +20,9 @@ export interface IDevice extends Document {
     monitoring_paused: boolean;
     monitoring_paused_at?: Date;
     pause_window_online_at?: Date;
+    online_recovered_at?: Date;
+    notification_suppressed_until?: Date;
+    online_summary_sent_at?: Date;
     enabled_modules?: ('system' | 'docker' | 'asterisk' | 'network')[];
     probe_config?: {
         ping_host?: string;
@@ -81,6 +84,9 @@ const DeviceSchema: Schema = new Schema({
     monitoring_paused: { type: Boolean, default: false },
     monitoring_paused_at: { type: Date },
     pause_window_online_at: { type: Date },
+    online_recovered_at: { type: Date },
+    notification_suppressed_until: { type: Date },
+    online_summary_sent_at: { type: Date },
     enabled_modules: [{ type: String, enum: ['system', 'docker', 'asterisk', 'network'] }],
     probe_config: {
         ping_host: { type: String }

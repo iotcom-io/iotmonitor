@@ -1,5 +1,6 @@
 import Device from '../models/Device';
 import SystemSettings from '../models/SystemSettings';
+import MonitoringCheck from '../models/MonitoringCheck';
 import { triggerAlert, resolveAlert, resolveOfflineRecoveryBundle } from './notificationThrottling';
 import { isMqttBrokerConnected } from './mqttState';
 
@@ -11,6 +12,63 @@ const OFFLINE_DETECTION_STARTUP_GRACE_MS = Math.max(
 const MODULES = ['system', 'docker', 'asterisk', 'network'] as const;
 type ModuleName = typeof MODULES[number];
 let offlineServiceStartedAt = Date.now();
+const RECOVERY_SUMMARY_DELAY_MS = Math.max(
+    0,
+    (Number(process.env.RECOVERY_SUMMARY_DELAY_SECONDS || 120) || 120) * 1000
+);
+
+const formatDurationMinutes = (minutes: number) => {
+    if (minutes <= 1) return '1 minute';
+    return `${minutes} minutes`;
+};
+
+const sendRecoveryStabilitySummary = async (device: any) => {
+    const now = new Date();
+    const checks = await MonitoringCheck.find({
+        device_id: device.device_id,
+        enabled: true,
+    }).select({ check_type: 1, target: 1, last_state: 1, last_value: 1, last_evaluated_at: 1 });
+
+    const statusCounts = checks.reduce((acc: any, check: any) => {
+        const state = String(check.last_state || 'unknown').toLowerCase();
+        if (state === 'ok') acc.ok += 1;
+        else if (state === 'warning') acc.warning += 1;
+        else if (state === 'critical') acc.critical += 1;
+        else acc.unknown += 1;
+        return acc;
+    }, { ok: 0, warning: 0, critical: 0, unknown: 0 });
+
+    const degraded = checks
+        .filter((check: any) => ['warning', 'critical'].includes(String(check.last_state || '').toLowerCase()))
+        .slice(0, 8)
+        .map((check: any) => `- ${check.check_type} | ${check.target || 'System-wide'} | ${String(check.last_state).toUpperCase()}`);
+
+    const settings = await SystemSettings.findOne();
+    const { NotificationService } = await import('./NotificationService');
+    let message = `RECOVERY SUMMARY\n\n`;
+    message += `Device: ${device.name}\n`;
+    message += `Status: Stable online for ${formatDurationMinutes(Math.max(1, Math.round(RECOVERY_SUMMARY_DELAY_MS / 60000)))}\n`;
+    message += `Time: ${now.toLocaleString('en-US', { timeZone: process.env.APP_TIMEZONE || 'Asia/Kolkata' })}\n`;
+    message += `Checks: ${checks.length} total | OK ${statusCounts.ok} | Warning ${statusCounts.warning} | Critical ${statusCounts.critical} | Unknown ${statusCounts.unknown}\n`;
+
+    if (degraded.length > 0) {
+        message += `\nCurrent non-OK checks:\n${degraded.join('\n')}`;
+    } else {
+        message += `\nAll monitored checks are healthy.`;
+    }
+
+    await NotificationService.send({
+        subject: `Device Stable Summary: ${device.name}`,
+        message,
+        channels: ['slack'],
+        recipients: { slackWebhook: settings?.notification_slack_webhook || device.notification_slack_webhook },
+    });
+
+    await Device.findOneAndUpdate(
+        { device_id: device.device_id },
+        { $set: { online_summary_sent_at: now } }
+    );
+};
 
 const getEnabledModules = (device: any): ModuleName[] => {
     const modulesConfig = device.config?.modules;
@@ -59,6 +117,9 @@ export async function checkOfflineDevices() {
                     await Device.findOneAndUpdate({ device_id: device.device_id }, {
                         status: 'offline',
                         consecutive_missed_messages: Math.floor(timeSinceLastMessage / expectedInterval),
+                        online_recovered_at: null,
+                        notification_suppressed_until: null,
+                        online_summary_sent_at: null,
                     });
 
                     await triggerAlert({
@@ -79,6 +140,18 @@ export async function checkOfflineDevices() {
                     });
                 }
                 continue;
+            }
+
+            if (
+                device.status === 'online' &&
+                device.online_recovered_at &&
+                device.notification_suppressed_until &&
+                !device.online_summary_sent_at
+            ) {
+                const suppressUntil = new Date(device.notification_suppressed_until);
+                if (!Number.isNaN(suppressUntil.getTime()) && now.getTime() >= suppressUntil.getTime()) {
+                    await sendRecoveryStabilitySummary(device);
+                }
             }
 
             if (device.status === 'online') {
@@ -144,6 +217,9 @@ export async function updateDeviceHeartbeat(deviceId: string) {
 
         if ((oldStatus === 'offline' || oldStatus === 'not_monitored') && !device.monitoring_paused) {
             updateData.status = 'online';
+            updateData.online_recovered_at = now;
+            updateData.notification_suppressed_until = new Date(now.getTime() + RECOVERY_SUMMARY_DELAY_MS);
+            updateData.online_summary_sent_at = null;
 
             // Grace window: initialize module success timestamps to now.
             // This prevents immediate false service_down alerts after recovery.
