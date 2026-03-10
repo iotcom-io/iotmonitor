@@ -1,7 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
-// ...existing code...
-// Add modalInput state
-    const [modalInput, setModalInput] = useState('');
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
     Activity, Cpu, HardDrive, Wifi, MemoryStick as Memory,
@@ -160,6 +157,8 @@ export const DeviceDetail = () => {
     const [terminalInput, setTerminalInput] = useState('');
     const [terminalOutputs, setTerminalOutputs] = useState<any[]>([]);
     const [isTerminalLoading, setIsTerminalLoading] = useState(false);
+    const [modalInput, setModalInput] = useState('');
+    const modalInputRef = useRef('');
     const [socket, setSocket] = useState<any>(null);
 
     // Confirmation Modal State
@@ -346,7 +345,6 @@ export const DeviceDetail = () => {
 
     const handleExecuteCommand = (e?: React.FormEvent) => {
         if (e) e.preventDefault();
-        if (e) e.preventDefault();
         if (!canRunRemoteTerminal) return;
         if (!terminalInput.trim() || !socket) return;
 
@@ -361,14 +359,20 @@ export const DeviceDetail = () => {
             payload: terminalInput,
             timestamp: new Date()
         }]);
-        // ...existing code...
+    };
+
+    // Listen for caution event for privileged commands
+    useEffect(() => {
+        modalInputRef.current = modalInput;
+    }, [modalInput]);
+
     // Listen for caution event for privileged commands
     useEffect(() => {
         if (!socket) return;
-        socket.on(`terminal:caution:${id}`, (data: any) => {
+        const cautionEvent = `terminal:caution:${id}`;
+        const cautionHandler = (data: any) => {
             const { command, message } = data || {};
-            // Detect if command is reboot/shutdown
-            const lower = String(command).toLowerCase();
+            const lower = String(command || '').toLowerCase();
             let requireInput = false;
             let inputLabel = '';
             let expectedInput = '';
@@ -381,6 +385,8 @@ export const DeviceDetail = () => {
                 inputLabel = 'Type SHUTDOWN to confirm';
                 expectedInput = 'SHUTDOWN';
             }
+
+            setModalInput('');
             setConfirmModal({
                 isOpen: true,
                 title: 'Caution: Privileged Command',
@@ -389,23 +395,23 @@ export const DeviceDetail = () => {
                 requireInput,
                 inputLabel,
                 expectedInput,
-                inputValue: '',
                 onConfirm: () => {
-                    // Only emit if input matches or not required
-                    if (requireInput && confirmModal.inputValue !== expectedInput) return;
+                    if (requireInput && modalInputRef.current !== expectedInput) return false;
                     socket.emit('terminal:command', {
                         device_id: id,
-                        command
+                        command,
+                        confirmed: true
                     });
                     setIsTerminalLoading(true);
                 }
             });
-        });
-
-        return () => {
-            if (socket) socket.off(`terminal:caution:${id}`);
         };
-    }, [id, token, socket]);
+
+        socket.on(cautionEvent, cautionHandler);
+        return () => {
+            socket.off(cautionEvent, cautionHandler);
+        };
+    }, [id, socket]);
 
     const handleSaveCheck = async (ruleData: any | any[]) => {
         try {
@@ -491,28 +497,28 @@ export const DeviceDetail = () => {
         [tabs, enabledModules]
     );
 
-    const assignableUsersById = useMemo(() => {
-        const map = new Map<string, any>();
-        assignableUsers.forEach((entry) => {
-            if (entry?.id) map.set(entry.id, entry);
-        });
-        return map;
-    }, [assignableUsers]);
+const assignableUsersById = useMemo(() => {
+    const map = new Map<string, any>();
+    assignableUsers.forEach((entry) => {
+        if (entry?.id) map.set(entry.id, entry);
+    });
+    return map;
+}, [assignableUsers]);
 
-    const getAssigneeLabel = (userId: string) => {
-        const userEntry = assignableUsersById.get(userId);
-        if (!userEntry) return userId;
-        const name = String(userEntry.name || '').trim();
-        if (name) return name;
-        return userEntry.email || userId;
-    };
+const getAssigneeLabel = (userId: string) => {
+    const userEntry = assignableUsersById.get(userId);
+    if (!userEntry) return userId;
+    const name = String(userEntry.name || '').trim();
+    if (name) return name;
+    return userEntry.email || userId;
+};
 
-    useEffect(() => {
-        if (visibleTabs.length === 0) return;
-        if (!visibleTabs.some((tab) => tab.id === activeTab)) {
-            setActiveTab(visibleTabs[0].id);
-        }
-    }, [activeTab, visibleTabs]);
+useEffect(() => {
+    if (visibleTabs.length === 0) return;
+    if (!visibleTabs.some((tab) => tab.id === activeTab)) {
+        setActiveTab(visibleTabs[0].id);
+    }
+}, [activeTab, visibleTabs]);
 
     const formatGB = (bytes?: number) => bytes ? (bytes / (1024 ** 3)).toFixed(2) : '0.00';
     const formatBps = (bps?: number) => {
@@ -916,11 +922,12 @@ export const DeviceDetail = () => {
                                                 inputLabel: 'Type REBOOT to confirm',
                                                 expectedInput: 'REBOOT',
                                                 onConfirm: () => {
-                                                    if (modalInput !== 'REBOOT') return;
+                                                    if (modalInput !== 'REBOOT') return false;
                                                     if (socket) {
                                                         socket.emit('terminal:command', {
                                                             device_id: id,
-                                                            command: 'systemctl reboot'
+                                                            command: 'systemctl reboot',
+                                                            confirmed: true
                                                         });
                                                         setIsTerminalLoading(true);
                                                         setConfirmModal(prev => ({ ...prev, isOpen: false }));
@@ -946,13 +953,15 @@ export const DeviceDetail = () => {
                                                     if (socket) {
                                                         socket.emit('terminal:command', {
                                                             device_id: id,
-                                                            command: 'systemctl restart remote'
+                                                            command: 'systemctl restart remote',
+                                                            confirmed: true
                                                         });
                                                         setIsTerminalLoading(true);
                                                         setTimeout(() => {
                                                             socket.emit('terminal:command', {
                                                                 device_id: id,
-                                                                command: 'systemctl status remote'
+                                                                command: 'systemctl status remote',
+                                                                confirmed: true
                                                             });
                                                             setIsTerminalLoading(true);
                                                         }, 2000);
@@ -2605,5 +2614,4 @@ export const DeviceDetail = () => {
             />
         </div>
     );
-}
-}
+};

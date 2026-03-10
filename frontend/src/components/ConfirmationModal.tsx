@@ -6,7 +6,7 @@ interface ConfirmationModalProps {
     isOpen: boolean;
     onClose?: () => void;
     onCancel?: () => void;
-    onConfirm?: () => void;
+    onConfirm?: () => void | boolean | Promise<void | boolean>;
     title: string;
     message: string;
     confirmLabel?: string;
@@ -105,8 +105,9 @@ export const ConfirmationModal = ({
                         </button>
                         {onConfirm && (
                             <button
-                                onClick={() => {
-                                    onConfirm();
+                                onClick={async () => {
+                                    const result = await onConfirm();
+                                    if (result === false) return;
                                     onClose();
                                 }}
                                 className={clsx(

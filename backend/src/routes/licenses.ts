@@ -1,3 +1,12 @@
+import { Router } from 'express';
+import { z } from 'zod';
+import LicenseAsset from '../models/LicenseAsset';
+import { authenticate, AuthRequest, authorizePermission } from '../middleware/auth';
+import { hasPermission } from '../lib/rbac';
+
+const router = Router();
+router.use(authenticate);
+
 // Mark license/subscription as renewed and set next renewal date
 router.post('/:id/mark-renewed', authorizePermission('licenses.manage'), async (req: AuthRequest, res) => {
     try {
@@ -34,14 +43,6 @@ router.post('/:id/mark-renewed', authorizePermission('licenses.manage'), async (
         res.status(400).json({ message: error.message || 'Failed to mark as renewed' });
     }
 });
-import { Router } from 'express';
-import { z } from 'zod';
-import LicenseAsset from '../models/LicenseAsset';
-import { authenticate, AuthRequest, authorizePermission } from '../middleware/auth';
-import { hasPermission } from '../lib/rbac';
-
-const router = Router();
-router.use(authenticate);
 
 const schema = z.object({
     name: z.string().trim().min(1),

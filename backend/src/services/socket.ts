@@ -10,6 +10,7 @@ let io: Server;
 interface TerminalCommandData {
     device_id: string;
     command: string;
+    confirmed?: boolean;
 }
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -102,7 +103,7 @@ export const initSocket = (httpServer: HttpServer) => {
         console.log('Socket client connected:', socket.id, user.role);
 
         socket.on('terminal:command', async (data: TerminalCommandData) => {
-            const { device_id, command } = data || {};
+            const { device_id, command, confirmed } = data || {};
             if (!device_id || !command) return;
 
             if (!hasPermission(user, 'remote_terminal.run')) {
@@ -127,7 +128,7 @@ export const initSocket = (httpServer: HttpServer) => {
             const privilegedCommands = ['systemctl', 'reboot', 'shutdown', 'poweroff'];
             const isPrivileged = privilegedCommands.includes(parsed.payload) ||
                 (parsed.payload === 'systemctl' && ['reboot', 'restart', 'status'].some(sub => parsed.args.includes(sub)));
-            if (isPrivileged) {
+            if (isPrivileged && !confirmed) {
                 socket.emit(`terminal:caution:${device_id}`, {
                     caution: true,
                     command: command,
