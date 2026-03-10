@@ -15,6 +15,7 @@ import { Alerts } from './pages/Alerts';
 import { Users } from './pages/Users';
 import { Licenses } from './pages/Licenses';
 import NotificationChannels from './pages/NotificationChannels';
+import { Analytics } from './pages/Analytics';
 import { hasPermission, PermissionKey } from './lib/permissions';
 import api from './lib/axios';
 
@@ -196,6 +197,7 @@ function App() {
                             <Route path="/agent-builder" element={<PrivateRoute><PermissionRoute permission="devices.build_agent"><AgentBuilder /></PermissionRoute></PrivateRoute>} />
                             <Route path="/alerts" element={<PrivateRoute><PermissionRoute permission="alerts.view"><Alerts /></PermissionRoute></PrivateRoute>} />
                             <Route path="/incidents" element={<PrivateRoute><PermissionRoute permission="incidents.view"><Incidents /></PermissionRoute></PrivateRoute>} />
+                            <Route path="/analytics" element={<PrivateRoute><PermissionRoute permission="monitoring.view"><Analytics /></PermissionRoute></PrivateRoute>} />
                             <Route path="/notification-channels" element={<PrivateRoute><PermissionRoute permission="settings.view"><NotificationChannels /></PermissionRoute></PrivateRoute>} />
                             <Route path="/settings" element={<PrivateRoute><PermissionRoute permission="settings.view"><Settings /></PermissionRoute></PrivateRoute>} />
                             <Route path="/web-monitoring" element={<PrivateRoute><PermissionRoute permission="synthetics.view"><Synthetics /></PermissionRoute></PrivateRoute>} />

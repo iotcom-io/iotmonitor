@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Server, ShieldCheck, Settings, LogOut, Terminal, Bell, Globe, FileText, KeyRound, Users, ChevronLeft, ChevronRight } from 'lucide-react';
+import { LayoutDashboard, Server, ShieldCheck, Settings, LogOut, Terminal, Bell, Globe, FileText, KeyRound, Users, ChevronLeft, ChevronRight, BrainCircuit } from 'lucide-react';
 import { useAuthStore } from '../../store/useAuthStore';
 import { Link, useLocation } from 'react-router-dom';
 import { clsx } from 'clsx';
@@ -131,6 +131,16 @@ export const Sidebar = ({
                         label="Agent Builder"
                         to="/agent-builder"
                         active={location.pathname === '/agent-builder'}
+                        collapsed={collapsed}
+                        onNavigate={handleNavigate}
+                    />
+                )}
+                {hasPermission('monitoring.view', user) && (
+                    <SidebarItem
+                        icon={BrainCircuit}
+                        label="AI Analytics"
+                        to="/analytics"
+                        active={location.pathname === '/analytics'}
                         collapsed={collapsed}
                         onNavigate={handleNavigate}
                     />

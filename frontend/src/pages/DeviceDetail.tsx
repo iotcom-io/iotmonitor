@@ -177,6 +177,8 @@ export const DeviceDetail = () => {
         title: '',
         message: ''
     });
+    const [deviceAnalytics, setDeviceAnalytics] = useState<any>(null);
+    const [analyticsLoading, setAnalyticsLoading] = useState(false);
 
     const socketDeviceId = device?.device_id || id;
 
@@ -258,6 +260,29 @@ export const DeviceDetail = () => {
         const interval = setInterval(fetchData, 5000); // 5s refresh
         return () => clearInterval(interval);
     }, [id]);
+
+    useEffect(() => {
+        if (!id) return;
+        if (activeTab !== 'metrics') return;
+        let isMounted = true;
+        setAnalyticsLoading(true);
+        api.get(`/analytics/devices/${id}`, { params: { window_days: 7 } })
+            .then((res) => {
+                if (!isMounted) return;
+                setDeviceAnalytics(res.data || null);
+            })
+            .catch((error) => {
+                console.error('Failed to fetch device analytics', error);
+                if (isMounted) setDeviceAnalytics(null);
+            })
+            .finally(() => {
+                if (isMounted) setAnalyticsLoading(false);
+            });
+
+        return () => {
+            isMounted = false;
+        };
+    }, [activeTab, id]);
 
     useEffect(() => {
         if (!canAssignMonitoringRules || !canViewUsers) {
@@ -1134,6 +1159,41 @@ useEffect(() => {
                                 {avgLatency !== null ? `${formatDecimal(avgLatency, 2)}ms` : '—'}
                             </p>
                         </div>
+                    </div>
+
+                    <div className="card">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-lg font-bold text-white">AI Insight Snapshot</h3>
+                            <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Last 7 days + 1h forecast</span>
+                        </div>
+                        {analyticsLoading ? (
+                            <p className="text-sm text-slate-500">Loading analytics...</p>
+                        ) : deviceAnalytics ? (
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div className="p-4 rounded-xl bg-white/5 border border-white/10">
+                                    <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Risk</p>
+                                    <p className="text-2xl font-black text-white mt-1">{Number(deviceAnalytics?.risk?.score || 0).toFixed(1)}</p>
+                                    <p className="text-xs text-slate-400 mt-1">Band: {String(deviceAnalytics?.risk?.band || 'ok').toUpperCase()}</p>
+                                </div>
+                                <div className="p-4 rounded-xl bg-white/5 border border-white/10">
+                                    <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Forecast (1h)</p>
+                                    <p className="text-xs text-slate-300 mt-1">CPU {Number(deviceAnalytics?.forecast?.cpu_forecast_pct || 0).toFixed(1)}%</p>
+                                    <p className="text-xs text-slate-300">RAM {Number(deviceAnalytics?.forecast?.memory_forecast_pct || 0).toFixed(1)}%</p>
+                                    <p className="text-xs text-slate-300">Disk {Number(deviceAnalytics?.forecast?.disk_forecast_pct || 0).toFixed(1)}%</p>
+                                </div>
+                                <div className="p-4 rounded-xl bg-white/5 border border-white/10">
+                                    <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Top Cause Frequency</p>
+                                    {(deviceAnalytics?.reliability?.top_causes || []).slice(0, 3).map((cause: any) => (
+                                        <p key={cause.service} className="text-xs text-slate-300 mt-1">{cause.service}: {cause.count}</p>
+                                    ))}
+                                    {(!deviceAnalytics?.reliability?.top_causes || deviceAnalytics.reliability.top_causes.length === 0) && (
+                                        <p className="text-xs text-slate-500 mt-1">No dominant cause detected.</p>
+                                    )}
+                                </div>
+                            </div>
+                        ) : (
+                            <p className="text-sm text-slate-500">Analytics data unavailable for this device.</p>
+                        )}
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8 relative">
