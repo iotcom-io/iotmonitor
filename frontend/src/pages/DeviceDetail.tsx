@@ -888,7 +888,7 @@ useEffect(() => {
                         >
                             <ArrowLeft size={20} className="group-hover:-translate-x-1 transition-transform" />
                         </button>
-                        <div className="space-y-1.5">
+                        <div className="space-y-2">
                             <div className="flex items-center gap-4">
                                 <h2 className="text-3xl font-black text-white tracking-tighter uppercase leading-none">{device.name}</h2>
                                 <div className="flex items-center gap-2">
@@ -906,80 +906,103 @@ useEffect(() => {
                                     )}
                                 </div>
                             </div>
-                            <div className="flex items-center gap-3 text-slate-500 text-xs font-mono">
-                                <div className="flex gap-2 ml-6">
-                                    <button
-                                        className="px-4 py-2 rounded-lg bg-primary-600 text-white font-bold text-xs uppercase tracking-widest hover:bg-primary-500 transition-all border border-primary-500/20 shadow-lg"
-                                        style={{ minWidth: 120 }}
-                                        onClick={() => {
-                                            setModalInput('');
-                                            setConfirmModal({
-                                                isOpen: true,
-                                                title: 'Reboot Device',
-                                                message: 'This will reboot the device/server. Type REBOOT to confirm.',
-                                                type: 'danger',
-                                                requireInput: true,
-                                                inputLabel: 'Type REBOOT to confirm',
-                                                expectedInput: 'REBOOT',
-                                                onConfirm: () => {
-                                                    if (modalInput !== 'REBOOT') return false;
-                                                    if (socket) {
-                                                        socket.emit('terminal:command', {
-                                                            device_id: id,
-                                                            command: 'systemctl reboot',
-                                                            confirmed: true
-                                                        });
-                                                        setIsTerminalLoading(true);
-                                                        setConfirmModal(prev => ({ ...prev, isOpen: false }));
-                                                    }
-                                                }
-                                            });
-                                        }}
-                                    >
-                                        Reboot Device
-                                    </button>
-                                    <button
-                                        className="px-4 py-2 rounded-lg bg-primary-600 text-white font-bold text-xs uppercase tracking-widest hover:bg-primary-500 transition-all border border-primary-500/20 shadow-lg"
-                                        style={{ minWidth: 120 }}
-                                        onClick={() => {
-                                            setModalInput('');
-                                            setConfirmModal({
-                                                isOpen: true,
-                                                title: 'Initiate Remote',
-                                                message: 'This will restart the remote service and show its status. Confirm to proceed.',
-                                                type: 'warning',
-                                                requireInput: false,
-                                                onConfirm: () => {
-                                                    if (socket) {
-                                                        socket.emit('terminal:command', {
-                                                            device_id: id,
-                                                            command: 'systemctl restart remote',
-                                                            confirmed: true
-                                                        });
-                                                        setIsTerminalLoading(true);
-                                                        setTimeout(() => {
-                                                            socket.emit('terminal:command', {
-                                                                device_id: id,
-                                                                command: 'systemctl status remote',
-                                                                confirmed: true
-                                                            });
-                                                            setIsTerminalLoading(true);
-                                                        }, 2000);
-                                                        setConfirmModal(prev => ({ ...prev, isOpen: false }));
-                                                    }
-                                                }
-                                            });
-                                        }}
-                                    >
-                                        Initiate Remote
-                                    </button>
-                                </div>
+                            <div className="text-slate-500 text-xs font-mono">
+                                {id}
+                                {device.hostname ? ` | ${device.hostname}` : ''}
                             </div>
-                        )
+                        </div>
                     </div>
-                </div> {/* Close .flex.items-center.gap-5 */}
-            </div> {/* Close .flex.flex-col.md\:flex-row.md\:items-end.justify-between.gap-4 */}
-        </div> {/* Close .sticky.top-0... */}
+                    <div className="flex gap-2 ml-6">
+                        <button
+                            className="px-4 py-2 rounded-lg bg-primary-600 text-white font-bold text-xs uppercase tracking-widest hover:bg-primary-500 transition-all border border-primary-500/20 shadow-lg"
+                            style={{ minWidth: 120 }}
+                            onClick={() => {
+                                setModalInput('');
+                                setConfirmModal({
+                                    isOpen: true,
+                                    title: 'Reboot Device',
+                                    message: 'This will reboot the device/server. Type REBOOT to confirm.',
+                                    type: 'danger',
+                                    requireInput: true,
+                                    inputLabel: 'Type REBOOT to confirm',
+                                    expectedInput: 'REBOOT',
+                                    onConfirm: () => {
+                                        if (modalInput !== 'REBOOT') return false;
+                                        if (socket) {
+                                            socket.emit('terminal:command', {
+                                                device_id: id,
+                                                command: 'systemctl reboot',
+                                                confirmed: true
+                                            });
+                                            setIsTerminalLoading(true);
+                                        }
+                                    }
+                                });
+                            }}
+                        >
+                            Reboot Device
+                        </button>
+                        <button
+                            className="px-4 py-2 rounded-lg bg-primary-600 text-white font-bold text-xs uppercase tracking-widest hover:bg-primary-500 transition-all border border-primary-500/20 shadow-lg"
+                            style={{ minWidth: 120 }}
+                            onClick={() => {
+                                setModalInput('');
+                                setConfirmModal({
+                                    isOpen: true,
+                                    title: 'Initiate Remote',
+                                    message: 'This will restart the remote service and show its status. Confirm to proceed.',
+                                    type: 'warning',
+                                    requireInput: false,
+                                    onConfirm: () => {
+                                        if (socket) {
+                                            socket.emit('terminal:command', {
+                                                device_id: id,
+                                                command: 'systemctl restart remote',
+                                                confirmed: true
+                                            });
+                                            setIsTerminalLoading(true);
+                                            setTimeout(() => {
+                                                socket.emit('terminal:command', {
+                                                    device_id: id,
+                                                    command: 'systemctl status remote',
+                                                    confirmed: true
+                                                });
+                                                setIsTerminalLoading(true);
+                                            }, 2000);
+                                        }
+                                    }
+                                });
+                            }}
+                        >
+                            Initiate Remote
+                        </button>
+                    </div>
+                </div>
+
+                <div className="flex gap-2 p-1 bg-dark-surface border border-dark-border rounded-xl w-fit max-w-full overflow-x-auto">
+                    {visibleTabs.map((tab: any) => {
+                        const alerts = getTabAlerts(tab.id);
+                        return (
+                            <button
+                                key={tab.id}
+                                onClick={() => setActiveTab(tab.id)}
+                                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all whitespace-nowrap ${activeTab === tab.id
+                                    ? "bg-primary-600 text-white shadow-lg shadow-primary-500/20"
+                                    : "text-slate-400 hover:text-slate-100 hover:bg-white/5"
+                                    }`}
+                            >
+                                <tab.icon size={18} />
+                                {tab.label}
+                                {(alerts.criticalCount > 0 || alerts.warningCount > 0) && (
+                                    <span className="ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/20 text-red-300">
+                                        {alerts.criticalCount > 0 ? alerts.criticalCount : alerts.warningCount}
+                                    </span>
+                                )}
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
 
         {activeTab === 'metrics' && (
                 <>
