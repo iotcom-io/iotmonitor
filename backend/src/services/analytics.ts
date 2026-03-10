@@ -75,6 +75,79 @@ const getRiskBand = (value: number) => {
 
 const hoursToMs = (hours: number) => hours * 60 * 60 * 1000;
 const daysToMs = (days: number) => days * 24 * 60 * 60 * 1000;
+const SERVICE_THRESHOLDS: Record<'cpu' | 'memory' | 'disk', number> = {
+    cpu: 85,
+    memory: 90,
+    disk: 90,
+};
+
+const remediationLibrary: Record<string, string[]> = {
+    device_offline: [
+        'Validate power/network path and last heartbeat source.',
+        'Check agent service status and MQTT connectivity on the affected node.',
+    ],
+    service_down: [
+        'Inspect service unit logs and restart counters.',
+        'Add dependency checks to catch upstream failures early.',
+    ],
+    threshold_breach: [
+        'Tune capacity thresholds per environment baseline.',
+        'Correlate breach windows with deployments/cron jobs.',
+    ],
+    sip_issue: [
+        'Validate SIP registration expiry/auth and provider reachability.',
+        'Check RTP/signaling packet loss and latency trends.',
+    ],
+    api_latency: [
+        'Inspect upstream latency and database slow queries.',
+        'Add cache and timeout budget controls for peak windows.',
+    ],
+    ssl_issue: [
+        'Automate certificate renewal and add renewal lead-time alerts.',
+        'Track CA/API renewal failures in a dedicated runbook.',
+    ],
+    license_risk: [
+        'Prioritize renewal workflow for critical/expired items.',
+        'Add owner escalation and procurement SLA reminders.',
+    ],
+    synthetic_failure: [
+        'Validate DNS/ingress/load-balancer health for monitor targets.',
+        'Track monitor failures against deployment change timeline.',
+    ],
+    latency_issue: [
+        'Inspect interface drops/errors and packet path hops.',
+        'Set adaptive latency thresholds by route/provider.',
+    ],
+    ip_change: [
+        'Validate static routing/DNS records after IP changes.',
+        'Alert dependent services with new endpoint metadata.',
+    ],
+    other_issue: [
+        'Review incident summaries and standardize issue taxonomy.',
+    ],
+};
+
+const formatDayKey = (value: Date) => value.toISOString().slice(0, 10);
+
+export const classifyIncident = (incident: any) => {
+    const targetType = String(incident?.target_type || '').toLowerCase();
+    const summary = String(incident?.summary || '').toLowerCase();
+
+    if (targetType === 'license') return { key: 'license_risk', label: 'License / Subscription Risk' };
+    if (targetType === 'synthetic') {
+        if (summary.includes('ssl')) return { key: 'ssl_issue', label: 'SSL Issue' };
+        if (summary.includes('latency') || summary.includes('response')) return { key: 'api_latency', label: 'API / Website Latency' };
+        return { key: 'synthetic_failure', label: 'Synthetic Monitor Failure' };
+    }
+
+    if (summary.includes('offline')) return { key: 'device_offline', label: 'Device Offline' };
+    if (summary.includes('service down')) return { key: 'service_down', label: 'Service Down' };
+    if (summary.includes('threshold breach')) return { key: 'threshold_breach', label: 'Threshold Breach' };
+    if (summary.includes('sip')) return { key: 'sip_issue', label: 'SIP Issue' };
+    if (summary.includes('latency')) return { key: 'latency_issue', label: 'Latency Issue' };
+    if (summary.includes('ip change')) return { key: 'ip_change', label: 'IP Change' };
+    return { key: 'other_issue', label: 'Other Issue' };
+};
 
 export const buildAnalyticsOverview = async (windowDays = 7) => {
     const now = Date.now();
@@ -159,22 +232,35 @@ export const buildAnalyticsOverview = async (windowDays = 7) => {
     const openIncidents = incidents.filter((incident: any) => incident.status === 'open');
     const criticalIncidents = incidents.filter((incident: any) => incident.severity === 'critical');
 
-    const alertTypeCounts = new Map<string, number>();
-    alerts.forEach((alert: any) => {
-        const key = `${alert.alert_type}${alert.specific_service ? `:${alert.specific_service}` : ''}`;
-        alertTypeCounts.set(key, (alertTypeCounts.get(key) || 0) + 1);
+    const incidentTypeCounts = new Map<string, { key: string; label: string; count: number }>();
+    incidents.forEach((incident: any) => {
+        const issue = classifyIncident(incident);
+        const existing = incidentTypeCounts.get(issue.key);
+        if (existing) {
+            existing.count += 1;
+        } else {
+            incidentTypeCounts.set(issue.key, { ...issue, count: 1 });
+        }
     });
 
-    const topAlertHotspots = Array.from(alertTypeCounts.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 10)
-        .map(([key, count]) => ({ key, count }));
+    const topIssueTypes = Array.from(incidentTypeCounts.values())
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 12);
 
     const topOffenders = devices.map((device: any) => {
         const did = String(device.device_id);
         const deviceIncidents = incidents.filter((incident: any) => incident.target_type === 'device' && String(incident.target_id) === did);
         const deviceAlerts = alerts.filter((alert: any) => String(alert.device_id) === did);
         const rows = telemetryByDevice.get(did) || [];
+        const issueBreakdownMap = new Map<string, { key: string; label: string; count: number }>();
+        deviceIncidents.forEach((incident: any) => {
+            const issue = classifyIncident(incident);
+            const existing = issueBreakdownMap.get(issue.key);
+            if (existing) existing.count += 1;
+            else issueBreakdownMap.set(issue.key, { ...issue, count: 1 });
+        });
+        const issueBreakdown = Array.from(issueBreakdownMap.values()).sort((a, b) => b.count - a.count);
+        const topIssue = issueBreakdown[0] || null;
 
         const cpuSeries = extractSeries(rows, 'cpu_usage');
         const memSeries = extractSeries(rows, 'memory_usage');
@@ -222,6 +308,21 @@ export const buildAnalyticsOverview = async (windowDays = 7) => {
             forecast_breaches: breachFlags,
             risk_score: riskScore,
             risk_band: getRiskBand(riskScore),
+            top_issue_key: topIssue?.key || null,
+            top_issue_label: topIssue?.label || null,
+            issue_breakdown: issueBreakdown,
+            recent_incidents: deviceIncidents
+                .sort((a: any, b: any) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())
+                .slice(0, 5)
+                .map((incident: any) => ({
+                    id: String(incident._id),
+                    summary: incident.summary,
+                    severity: incident.severity,
+                    status: incident.status,
+                    started_at: incident.started_at,
+                    resolved_at: incident.resolved_at,
+                    issue: classifyIncident(incident),
+                })),
         };
     }).sort((a, b) => b.risk_score - a.risk_score);
 
@@ -293,7 +394,7 @@ export const buildAnalyticsOverview = async (windowDays = 7) => {
         };
     })();
 
-    const forecasts = topOffenders.slice(0, 20).map((offender) => {
+    const forecastRows = topOffenders.slice(0, 20).map((offender) => {
         const rows = telemetryByDevice.get(offender.device_id) || [];
         const cpuSeries = extractSeries(rows, 'cpu_usage');
         const memSeries = extractSeries(rows, 'memory_usage');
@@ -308,6 +409,26 @@ export const buildAnalyticsOverview = async (windowDays = 7) => {
             breach_flags: offender.forecast_breaches,
         };
     });
+
+    const topForecastRisks = forecastRows
+        .filter((row) => Array.isArray(row.breach_flags) && row.breach_flags.length > 0)
+        .map((row) => {
+            const serviceScores = [
+                { service: 'cpu', value: row.cpu_forecast_pct, threshold: SERVICE_THRESHOLDS.cpu },
+                { service: 'memory', value: row.memory_forecast_pct, threshold: SERVICE_THRESHOLDS.memory },
+                { service: 'disk', value: row.disk_forecast_pct, threshold: SERVICE_THRESHOLDS.disk },
+            ];
+            const topService = serviceScores.sort((a, b) => (b.value - b.threshold) - (a.value - a.threshold))[0];
+            return {
+                ...row,
+                top_service: topService.service,
+                top_service_value: round(topService.value),
+                top_service_threshold: topService.threshold,
+                breach_gap: round(topService.value - topService.threshold),
+            };
+        })
+        .sort((a, b) => b.breach_gap - a.breach_gap)
+        .slice(0, 5);
 
     const recommendations: string[] = [];
     if (topOffenders.some((offender) => offender.forecast_breaches.includes('disk'))) {
@@ -340,8 +461,8 @@ export const buildAnalyticsOverview = async (windowDays = 7) => {
             notification_noise_ratio: round(alerts.length / Math.max(1, incidents.length), 2),
         },
         top_offenders: topOffenders.slice(0, 10),
-        alert_hotspots: topAlertHotspots,
-        forecasts,
+        issue_hotspots: topIssueTypes,
+        top_forecast_risks: topForecastRisks,
         synthetic_summary: syntheticSummary,
         license_summary: licenseSummary,
         recommendations,
@@ -400,6 +521,12 @@ export const buildDeviceAnalytics = async (deviceId: string, windowDays = 7) => 
         return acc;
     }, {});
 
+    const issueFrequency = incidents.reduce((acc: Record<string, number>, incident: any) => {
+        const issue = classifyIncident(incident);
+        acc[issue.label] = (acc[issue.label] || 0) + 1;
+        return acc;
+    }, {});
+
     const topCauses = Object.entries(serviceFrequency)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 8)
@@ -440,6 +567,22 @@ export const buildDeviceAnalytics = async (deviceId: string, windowDays = 7) => 
             critical_incidents: incidents.filter((incident: any) => incident.severity === 'critical').length,
             alerts_total: alerts.length,
             top_causes: topCauses,
+            top_issue_types: Object.entries(issueFrequency)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 8)
+                .map(([issue, count]) => ({ issue, count })),
+            recent_incidents: incidents
+                .sort((a: any, b: any) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())
+                .slice(0, 10)
+                .map((incident: any) => ({
+                    id: String(incident._id),
+                    summary: incident.summary,
+                    severity: incident.severity,
+                    status: incident.status,
+                    started_at: incident.started_at,
+                    resolved_at: incident.resolved_at,
+                    issue: classifyIncident(incident),
+                })),
         },
         forecast: {
             horizon_minutes: 60,
@@ -458,5 +601,208 @@ export const buildDeviceAnalytics = async (deviceId: string, windowDays = 7) => 
             band: getRiskBand(riskScore),
         },
         remediation_hints: remediationHints,
+    };
+};
+
+const buildForecastForDevice = (device: any, telemetryRows: any[], service: 'cpu' | 'memory' | 'disk' | 'all') => {
+    const horizonMinutes = 60;
+    const horizonMs = hoursToMs(1);
+    const cpuSeries = extractSeries(telemetryRows, 'cpu_usage');
+    const memorySeries = extractSeries(telemetryRows, 'memory_usage');
+    const diskSeries = extractSeries(telemetryRows, 'disk_usage');
+
+    const cpuForecast = round(linearRegressionForecast(cpuSeries, horizonMs) || 0);
+    const memoryForecast = round(linearRegressionForecast(memorySeries, horizonMs) || 0);
+    const diskForecast = round(linearRegressionForecast(diskSeries, horizonMs) || 0);
+
+    const breaches = [
+        { service: 'cpu', value: cpuForecast, threshold: SERVICE_THRESHOLDS.cpu },
+        { service: 'memory', value: memoryForecast, threshold: SERVICE_THRESHOLDS.memory },
+        { service: 'disk', value: diskForecast, threshold: SERVICE_THRESHOLDS.disk },
+    ].filter((entry) => entry.value >= entry.threshold);
+
+    const filteredBreaches = service === 'all' ? breaches : breaches.filter((entry) => entry.service === service);
+    const topBreach = filteredBreaches
+        .sort((a, b) => (b.value - b.threshold) - (a.value - a.threshold))[0] || null;
+
+    return {
+        device_id: String(device.device_id),
+        name: device.name,
+        horizon_minutes: horizonMinutes,
+        cpu_forecast_pct: cpuForecast,
+        memory_forecast_pct: memoryForecast,
+        disk_forecast_pct: diskForecast,
+        breaches: filteredBreaches,
+        top_breach: topBreach,
+    };
+};
+
+export const buildForecastExplorer = async (params: {
+    windowDays?: number;
+    deviceId?: string;
+    service?: 'cpu' | 'memory' | 'disk' | 'all';
+}) => {
+    const windowDays = Math.max(1, Math.min(30, Number(params.windowDays || 7)));
+    const service = (params.service || 'all');
+    const deviceId = params.deviceId ? String(params.deviceId) : '';
+    const telemetrySince = new Date(Date.now() - hoursToMs(24));
+
+    const deviceQuery: any = { monitoring_enabled: true };
+    if (deviceId) deviceQuery.device_id = deviceId;
+    const devices = await Device.find(deviceQuery).select({ device_id: 1, name: 1, status: 1 });
+    const ids = devices.map((device: any) => String(device.device_id));
+
+    const telemetryRows = await Telemetry.find({
+        device_id: { $in: ids },
+        timestamp: { $gte: telemetrySince },
+    }).select({ device_id: 1, timestamp: 1, cpu_usage: 1, memory_usage: 1, disk_usage: 1 }).sort({ timestamp: 1 });
+
+    const byDevice = new Map<string, any[]>();
+    telemetryRows.forEach((row: any) => {
+        const key = String(row.device_id);
+        if (!byDevice.has(key)) byDevice.set(key, []);
+        byDevice.get(key)!.push(row);
+    });
+
+    const rows = devices.map((device: any) => {
+        const telemetry = byDevice.get(String(device.device_id)) || [];
+        return buildForecastForDevice(device, telemetry, service as any);
+    });
+
+    const filteredRows = service === 'all'
+        ? rows
+        : rows.map((row) => ({
+            ...row,
+            breaches: row.breaches.filter((breach: any) => breach.service === service),
+            top_breach: row.top_breach && row.top_breach.service === service ? row.top_breach : null,
+        }));
+
+    const sorted = filteredRows
+        .sort((a: any, b: any) => {
+            const aGap = a.top_breach ? (a.top_breach.value - a.top_breach.threshold) : -9999;
+            const bGap = b.top_breach ? (b.top_breach.value - b.top_breach.threshold) : -9999;
+            return bGap - aGap;
+        });
+
+    return {
+        generated_at: new Date().toISOString(),
+        window_days: windowDays,
+        service,
+        device_id: deviceId || null,
+        rows: sorted,
+    };
+};
+
+export const buildIssueDetail = async (params: {
+    issueKey: string;
+    windowDays?: number;
+    deviceId?: string;
+}) => {
+    const issueKey = String(params.issueKey || '').trim().toLowerCase();
+    if (!issueKey) return null;
+    const windowDays = Math.max(1, Math.min(30, Number(params.windowDays || 7)));
+    const since = new Date(Date.now() - daysToMs(windowDays));
+    const deviceId = params.deviceId ? String(params.deviceId) : '';
+
+    const query: any = {
+        started_at: { $gte: since },
+        target_type: 'device',
+    };
+    if (deviceId) query.target_id = deviceId;
+    const incidents = await Incident.find(query).sort({ started_at: 1 });
+
+    const filtered = incidents.filter((incident: any) => classifyIncident(incident).key === issueKey);
+    const durationMinutes = filtered
+        .filter((incident: any) => incident.resolved_at)
+        .map((incident: any) => (new Date(incident.resolved_at).getTime() - new Date(incident.started_at).getTime()) / 60000)
+        .filter((value: number) => Number.isFinite(value) && value >= 0);
+
+    const dayBuckets = new Map<string, any>();
+    filtered.forEach((incident: any) => {
+        const day = formatDayKey(new Date(incident.started_at));
+        const bucket = dayBuckets.get(day) || { day, mttr_values: [] as number[], started_at_values: [] as number[] };
+        const started = new Date(incident.started_at).getTime();
+        bucket.started_at_values.push(started);
+        if (incident.resolved_at) {
+            const duration = (new Date(incident.resolved_at).getTime() - started) / 60000;
+            if (Number.isFinite(duration) && duration >= 0) bucket.mttr_values.push(duration);
+        }
+        dayBuckets.set(day, bucket);
+    });
+
+    const trend = Array.from(dayBuckets.values())
+        .sort((a, b) => a.day.localeCompare(b.day))
+        .map((bucket: any) => {
+            const starts = bucket.started_at_values.sort((x: number, y: number) => x - y);
+            const deltas: number[] = [];
+            for (let i = 1; i < starts.length; i += 1) {
+                deltas.push((starts[i] - starts[i - 1]) / 60000);
+            }
+            return {
+                day: bucket.day,
+                incidents: starts.length,
+                mttr_minutes: round(average(bucket.mttr_values)),
+                mtbf_minutes: round(average(deltas)),
+            };
+        });
+
+    const affectedMap = new Map<string, any>();
+    filtered.forEach((incident: any) => {
+        const key = String(incident.target_id || 'unknown');
+        const entry = affectedMap.get(key) || {
+            device_id: key,
+            target_name: incident.target_name || key,
+            incident_count: 0,
+            open_count: 0,
+            total_downtime_minutes: 0,
+        };
+        entry.incident_count += 1;
+        if (incident.status === 'open') entry.open_count += 1;
+        const end = incident.resolved_at ? new Date(incident.resolved_at).getTime() : Date.now();
+        const start = new Date(incident.started_at).getTime();
+        entry.total_downtime_minutes += Math.max(0, (end - start) / 60000);
+        affectedMap.set(key, entry);
+    });
+    const affectedDevices = Array.from(affectedMap.values())
+        .map((row: any) => ({ ...row, total_downtime_minutes: round(row.total_downtime_minutes) }))
+        .sort((a, b) => b.incident_count - a.incident_count);
+
+    const issueLabel = filtered[0] ? classifyIncident(filtered[0]).label : issueKey;
+    const remediationNotes = remediationLibrary[issueKey] || remediationLibrary.other_issue;
+
+    return {
+        generated_at: new Date().toISOString(),
+        window_days: windowDays,
+        issue_key: issueKey,
+        issue_label: issueLabel,
+        summary: {
+            incidents_total: filtered.length,
+            incidents_open: filtered.filter((incident: any) => incident.status === 'open').length,
+            mttr_minutes: round(average(durationMinutes)),
+            mtbf_minutes: round(average(
+                filtered.length > 1
+                    ? filtered.slice(1).map((incident: any, idx: number) => (
+                        (new Date(incident.started_at).getTime() - new Date(filtered[idx].started_at).getTime()) / 60000
+                    ))
+                    : []
+            )),
+        },
+        trend,
+        affected_devices: affectedDevices,
+        remediation_notes: remediationNotes,
+        recent_incidents: filtered
+            .slice()
+            .sort((a: any, b: any) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())
+            .slice(0, 20)
+            .map((incident: any) => ({
+                id: String(incident._id),
+                target_id: incident.target_id,
+                target_name: incident.target_name,
+                summary: incident.summary,
+                severity: incident.severity,
+                status: incident.status,
+                started_at: incident.started_at,
+                resolved_at: incident.resolved_at,
+            })),
     };
 };

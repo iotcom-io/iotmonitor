@@ -1189,6 +1189,16 @@ useEffect(() => {
                                     {(!deviceAnalytics?.reliability?.top_causes || deviceAnalytics.reliability.top_causes.length === 0) && (
                                         <p className="text-xs text-slate-500 mt-1">No dominant cause detected.</p>
                                     )}
+                                    {(deviceAnalytics?.reliability?.top_issue_types || []).slice(0, 2).map((row: any) => (
+                                        <p key={row.issue} className="text-xs text-slate-400 mt-1">Issue: {row.issue} ({row.count})</p>
+                                    ))}
+                                    <button
+                                        type="button"
+                                        className="inline-block mt-2 text-xs text-primary-400 hover:text-primary-300"
+                                        onClick={() => navigate(`/incidents?target_id=${encodeURIComponent(String(id || ''))}&status=all`)}
+                                    >
+                                        View linked incidents
+                                    </button>
                                 </div>
                             </div>
                         ) : (
