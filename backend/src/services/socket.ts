@@ -108,9 +108,14 @@ export const initSocket = (httpServer: HttpServer) => {
 
         socket.on('terminal:command', async (data: TerminalCommandData) => {
             const { device_id, command, confirmed } = data || {};
-            if (!device_id || !command) return;
+            console.log(`[SOCKET] terminal:command received from ${socket.id}`, { device_id, command: command?.substring(0, 50), confirmed });
+            if (!device_id || !command) {
+                console.warn('[SOCKET] terminal:command missing device_id or command');
+                return;
+            }
 
             if (!hasPermission(user, 'remote_terminal.run')) {
+                console.warn(`[SOCKET] User ${user.id} lacks remote_terminal.run permission`);
                 socket.emit(`terminal:output:${device_id}`, { error: 'Insufficient permissions for terminal command' });
                 return;
             }
@@ -122,6 +127,7 @@ export const initSocket = (httpServer: HttpServer) => {
 
             const parsed = parseSafeCommand(command);
             if (!parsed) {
+                console.warn(`[SOCKET] Command rejected by parser:`, command.substring(0, 50));
                 socket.emit(`terminal:output:${device_id}`, {
                     error: 'Command rejected. Invalid or unsafe command.',
                 });
@@ -133,6 +139,7 @@ export const initSocket = (httpServer: HttpServer) => {
             const isPrivileged = privilegedCommands.includes(parsed.payload) ||
                 (parsed.payload === 'systemctl' && ['reboot', 'restart', 'status'].some(sub => parsed.args.includes(sub)));
             if (isPrivileged && !confirmed) {
+                console.log(`[SOCKET] Privileged command requires confirmation:`, parsed.payload);
                 socket.emit(`terminal:caution:${device_id}`, {
                     caution: true,
                     command: command,
@@ -145,10 +152,12 @@ export const initSocket = (httpServer: HttpServer) => {
             try {
                 const device = await Device.findOne({ device_id }).select({ device_id: 1, assigned_user_ids: 1 });
                 if (!device || !canAccessDevice(user, device)) {
+                    console.warn(`[SOCKET] Access denied for device ${device_id} to user ${user.id}`);
                     socket.emit(`terminal:output:${device_id}`, { error: 'Access denied for target device' });
                     return;
                 }
 
+                console.log(`[SOCKET] Publishing command to MQTT for device ${device_id}:`, parsed);
                 const { publishCommand } = await import('./mqtt');
                 publishCommand(device_id, {
                     command_id: Math.random().toString(36).substring(2, 10),

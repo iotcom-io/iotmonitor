@@ -412,10 +412,14 @@ client.on('message', async (topic, message, packet) => {
 
         if (type === 'responses') {
             const payload = JSON.parse(message.toString());
+            console.log(`[MQTT] Response received for ${device_id}:`, JSON.stringify(payload).substring(0, 200));
             try {
                 const { getIO } = await import('./socket');
                 const io = getIO();
-                io.emit(`terminal:output:${device_id}`, payload);
+                const eventName = `terminal:output:${device_id}`;
+                const clientCount = io.engine?.clientsCount || 0;
+                console.log(`[MQTT] Emitting ${eventName} to ${clientCount} connected clients`);
+                io.emit(eventName, payload);
             } catch (socketErr) {
                 console.error('[MQTT] Terminal Response Emit Error:', socketErr);
             }
@@ -427,7 +431,9 @@ client.on('message', async (topic, message, packet) => {
 
 export const publishCommand = (device_id: string, command: any) => {
     const topic = `iotmonitor/device/${device_id}/commands`;
-    client.publish(topic, JSON.stringify(command));
+    const payload = JSON.stringify(command);
+    console.log(`[MQTT] Publishing command to ${topic}:`, payload.substring(0, 200));
+    client.publish(topic, payload);
 };
 
 export default client;

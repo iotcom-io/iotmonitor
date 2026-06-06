@@ -160,6 +160,7 @@ export const DeviceDetail = () => {
     const [modalInput, setModalInput] = useState('');
     const modalInputRef = useRef('');
     const [socket, setSocket] = useState<any>(null);
+    const socketRef = useRef<any>(null);
     const [socketStatus, setSocketStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
 
     // Confirmation Modal State
@@ -200,10 +201,15 @@ export const DeviceDetail = () => {
     };
 
     const emitTerminalCommand = (command: string, confirmed = false, logCommand = true) => {
-        if (!socket || !socketDeviceId) return false;
+        const s = socketRef.current;
+        if (!s || !s.connected || !socketDeviceId) {
+            console.warn('[Terminal] Cannot emit: socket not ready', { hasSocket: !!s, connected: s?.connected, socketDeviceId });
+            return false;
+        }
         setIsTerminalLoading(true);
         if (logCommand) pushTerminalCommand(command);
-        socket.emit('terminal:command', {
+        console.log('[Terminal] Emitting command:', { device_id: socketDeviceId, command, confirmed });
+        s.emit('terminal:command', {
             device_id: socketDeviceId,
             command,
             confirmed,
@@ -314,6 +320,7 @@ export const DeviceDetail = () => {
         nextSocket.on('disconnect', onDisconnect);
 
         setSocket(nextSocket);
+        socketRef.current = nextSocket;
 
         return () => {
             nextSocket.off('connect', onConnect);
@@ -322,6 +329,7 @@ export const DeviceDetail = () => {
             nextSocket.off('connect_error', onConnectError);
             nextSocket.off('disconnect', onDisconnect);
             nextSocket.disconnect();
+            socketRef.current = null;
             setSocket(null);
             setSocketStatus('disconnected');
         };
