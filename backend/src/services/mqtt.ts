@@ -387,20 +387,23 @@ client.on('message', async (topic, message, packet) => {
                 }
             }
 
-            await checkServiceHealth(device_id, { [check_type]: payload });
+            await checkServiceHealth(device_id, { [check_type]: payload }, freshDevice);
 
             if (check_type === 'asterisk') {
-                await checkSIPEndpoints(device_id, payload);
+                await checkSIPEndpoints(device_id, payload, freshDevice);
             }
 
             try {
                 const { getIO } = await import('./socket');
                 const io = getIO();
-                io.emit('device:update', {
-                    device_id,
-                    status: 'online',
-                    metrics: payload,
-                });
+                // Skip emit if nobody is connected — reduces CPU/memory under load
+                if (io.engine?.clientsCount > 0) {
+                    io.emit('device:update', {
+                        device_id,
+                        status: 'online',
+                        metrics: payload,
+                    });
+                }
             } catch (socketErr) {
                 console.error('[MQTT] Socket Emit Error:', socketErr);
             }

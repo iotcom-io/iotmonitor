@@ -221,12 +221,16 @@ export const DeviceList = () => {
                 return false;
             }
             if (!normalizedSearch) return true;
+            const customFieldText = device.custom_fields
+                ? Object.entries(device.custom_fields as Record<string, string>).map(([k, v]) => `${k} ${v}`).join(' ')
+                : '';
             const haystack = [
                 device.name,
                 device.owner,
                 device.hostname,
                 device.device_id,
                 DEVICE_TYPE_LABELS[normalizedType],
+                customFieldText,
             ].filter(Boolean).join(' ').toLowerCase();
             return haystack.includes(normalizedSearch);
         })
@@ -521,6 +525,20 @@ export const DeviceList = () => {
                                                 <div>
                                                     <div className="text-sm font-bold text-white mb-0.5">{device.name}</div>
                                                     <div className="text-xs text-slate-500">{device.hostname || 'No hostname'}</div>
+                                                    {device.custom_fields && Object.keys(device.custom_fields).length > 0 && (
+                                                        <div className="flex flex-wrap gap-1 mt-1">
+                                                            {Object.entries(device.custom_fields as Record<string, string>).slice(0, 3).map(([key, value]) => (
+                                                                <span key={key} className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-[9px] text-slate-400 font-mono">
+                                                                    {key}: {value}
+                                                                </span>
+                                                            ))}
+                                                            {Object.keys(device.custom_fields).length > 3 && (
+                                                                <span className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-[9px] text-slate-500 font-mono">
+                                                                    +{Object.keys(device.custom_fields).length - 3} more
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
                                         </td>

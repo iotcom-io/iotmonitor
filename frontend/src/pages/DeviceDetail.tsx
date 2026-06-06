@@ -334,8 +334,17 @@ export const DeviceDetail = () => {
 
     useEffect(() => {
         fetchData();
-        const interval = setInterval(fetchData, 5000); // 5s refresh
-        return () => clearInterval(interval);
+        const interval = setInterval(fetchData, 30000); // 30s refresh
+
+        const onVisibilityChange = () => {
+            if (document.visibilityState === 'visible') fetchData();
+        };
+        document.addEventListener('visibilitychange', onVisibilityChange);
+
+        return () => {
+            clearInterval(interval);
+            document.removeEventListener('visibilitychange', onVisibilityChange);
+        };
     }, [id]);
 
     useEffect(() => {

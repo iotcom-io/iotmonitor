@@ -4,6 +4,25 @@ import { triggerAlert, resolveAlert } from './notificationThrottling';
 import { updateServiceMetrics } from './offlineDetection';
 
 const MODULES = ['system', 'docker', 'asterisk', 'network'] as const;
+
+// Simple TTL cache for monitoring checks to avoid DB hammering on every metrics message
+const checkCache = new Map<string, { checks: any[]; expiresAt: number }>();
+const CHECK_CACHE_TTL_MS = 30000; // 30 seconds
+
+const getCachedChecks = async (deviceId: string): Promise<any[]> => {
+    const now = Date.now();
+    const cached = checkCache.get(deviceId);
+    if (cached && cached.expiresAt > now) {
+        return cached.checks;
+    }
+    const checks = await MonitoringCheck.find({ device_id: deviceId, enabled: true }).lean();
+    checkCache.set(deviceId, { checks, expiresAt: now + CHECK_CACHE_TTL_MS });
+    return checks;
+};
+
+const invalidateCheckCache = (deviceId: string) => {
+    checkCache.delete(deviceId);
+};
 type ModuleName = typeof MODULES[number];
 const GLOBAL_SIP_TARGETS = new Set(['', 'all', 'system-wide', '*']);
 const CHECK_MODULE_MAP: Record<string, ModuleName | null> = {
@@ -174,13 +193,13 @@ const extractTopCpuProcesses = (metrics: any) => {
  *
  * Monitors if specific services are responding even when device is online.
  */
-export async function checkServiceHealth(deviceId: string, receivedMetrics: any) {
+export async function checkServiceHealth(deviceId: string, receivedMetrics: any, device?: any) {
     try {
-        const device = await Device.findOne({ device_id: deviceId });
-        if (!device || device.monitoring_paused) return;
+        const resolvedDevice = device || await Device.findOne({ device_id: deviceId });
+        if (!resolvedDevice || resolvedDevice.monitoring_paused) return;
 
         const now = new Date();
-        const monitoredModules = new Set(getEnabledModules(device));
+        const monitoredModules = new Set(getEnabledModules(resolvedDevice));
 
         // Process each incoming metric type
         for (const moduleName of Object.keys(receivedMetrics)) {
@@ -191,11 +210,11 @@ export async function checkServiceHealth(deviceId: string, receivedMetrics: any)
 
             // If this module just reported, update successful timestamp
             // and resolve any existing "service_down" alert for it.
-            await updateServiceMetrics(device.device_id, module);
+            await updateServiceMetrics(resolvedDevice.device_id, module);
 
             await resolveAlert({
-                device_id: device.device_id,
-                device_name: device.name,
+                device_id: resolvedDevice.device_id,
+                device_name: resolvedDevice.name,
                 alert_type: 'service_down',
                 specific_service: module,
                 details: {
@@ -205,7 +224,7 @@ export async function checkServiceHealth(deviceId: string, receivedMetrics: any)
         }
 
         // Apply dynamic threshold rules for generic metrics (CPU, Memory, etc.)
-        await applyThresholdRules(device, receivedMetrics);
+        await applyThresholdRules(resolvedDevice, receivedMetrics);
     } catch (error) {
         console.error('Error checking service health:', error);
     }
@@ -217,7 +236,7 @@ export async function checkServiceHealth(deviceId: string, receivedMetrics: any)
 export async function applyThresholdRules(device: any, metrics: any) {
     if (device.monitoring_paused) return;
 
-    const checks = await MonitoringCheck.find({ device_id: device.device_id, enabled: true });
+    const checks = await getCachedChecks(device.device_id);
     if (checks.length === 0) return;
     const enabledModules = new Set(getEnabledModules(device));
 
@@ -434,22 +453,19 @@ export async function applyThresholdRules(device: any, metrics: any) {
 /**
  * Monitor SIP endpoints for registration status and latency.
  */
-export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
+export async function checkSIPEndpoints(deviceId: string, sipMetrics: any, device?: any) {
     try {
-        const device = await Device.findOne({ device_id: deviceId });
-        if (!device || device.monitoring_paused) return;
-        const enabledModules = getEnabledModules(device);
+        const resolvedDevice = device || await Device.findOne({ device_id: deviceId });
+        if (!resolvedDevice || resolvedDevice.monitoring_paused) return;
+        const enabledModules = getEnabledModules(resolvedDevice);
         if (!enabledModules.includes('asterisk')) return;
 
-        const sipRules = await MonitoringCheck.find({
-            device_id: deviceId,
-            enabled: true,
-            check_type: { $in: ['sip_rtt', 'sip_registration', 'sip'] }, // keep legacy 'sip' for backward compatibility
-        });
+        const allChecks = await getCachedChecks(deviceId);
+        const sipRules = allChecks.filter((c: any) => ['sip_rtt', 'sip_registration', 'sip'].includes(c.check_type));
         const registrationRules = sipRules.filter((rule: any) => rule.check_type === 'sip_registration');
         const rttRules = sipRules.filter((rule: any) => rule.check_type === 'sip_rtt' || rule.check_type === 'sip');
 
-        const rttThresholdDefault = device.sip_rtt_threshold_ms || 200;
+        const rttThresholdDefault = resolvedDevice.sip_rtt_threshold_ms || 200;
 
         const registrations = sipMetrics.registrations || [];
         if (registrations.length > 0) {
@@ -459,7 +475,7 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
                 if (!isEndpointMonitoredByRules(registrationRules, name)) {
                     await resolveAlert({
                         device_id: deviceId,
-                        device_name: device.name,
+                        device_name: resolvedDevice.name,
                         alert_type: 'sip_issue',
                         specific_service: 'sip_registration',
                         specific_endpoint: name,
@@ -473,7 +489,7 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
                     // Avoid duplicate alerts: registration threshold checks already emit rule_violation alerts.
                     await resolveAlert({
                         device_id: deviceId,
-                        device_name: device.name,
+                        device_name: resolvedDevice.name,
                         alert_type: 'sip_issue',
                         specific_service: 'sip_registration',
                         specific_endpoint: name,
@@ -485,7 +501,7 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
                 if (status !== 'Registered' && status !== 'OK') {
                     await triggerAlert({
                         device_id: deviceId,
-                        device_name: device.name,
+                        device_name: resolvedDevice.name,
                         alert_type: 'sip_issue',
                         severity: 'warning',
                         specific_service: 'sip_registration',
@@ -500,7 +516,7 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
                 } else {
                     await resolveAlert({
                         device_id: deviceId,
-                        device_name: device.name,
+                        device_name: resolvedDevice.name,
                         alert_type: 'sip_issue',
                         specific_service: 'sip_registration',
                         specific_endpoint: name,
@@ -518,7 +534,7 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
             if (!isEndpointMonitoredByRules(rttRules, name)) {
                 await resolveAlert({
                     device_id: deviceId,
-                    device_name: device.name,
+                    device_name: resolvedDevice.name,
                     alert_type: 'sip_issue',
                     specific_service: 'sip_peer',
                     specific_endpoint: name,
@@ -526,7 +542,7 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
                 });
                 await resolveAlert({
                     device_id: deviceId,
-                    device_name: device.name,
+                    device_name: resolvedDevice.name,
                     alert_type: 'high_latency',
                     specific_service: 'sip_peer',
                     specific_endpoint: name,
@@ -543,7 +559,7 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
             if (status !== 'registered' && status !== 'OK' && status !== 'Avail') {
                 await triggerAlert({
                     device_id: deviceId,
-                    device_name: device.name,
+                    device_name: resolvedDevice.name,
                     alert_type: 'sip_issue',
                     severity: 'critical',
                     specific_service: 'sip_peer',
@@ -558,7 +574,7 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
             } else {
                 await resolveAlert({
                     device_id: deviceId,
-                    device_name: device.name,
+                    device_name: resolvedDevice.name,
                     alert_type: 'sip_issue',
                     specific_service: 'sip_peer',
                     specific_endpoint: name,
@@ -569,7 +585,7 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
                 // Avoid duplicate alerts: sip_rtt threshold checks emit rule_violation alerts.
                 await resolveAlert({
                     device_id: deviceId,
-                    device_name: device.name,
+                    device_name: resolvedDevice.name,
                     alert_type: 'high_latency',
                     specific_service: 'sip_peer',
                     specific_endpoint: name,
@@ -582,7 +598,7 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
                 if (latencyValue > critThresh) {
                     await triggerAlert({
                         device_id: deviceId,
-                        device_name: device.name,
+                        device_name: resolvedDevice.name,
                         alert_type: 'high_latency',
                         severity: 'critical',
                         specific_service: 'sip_peer',
@@ -593,7 +609,7 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
                 } else if (latencyValue > warnThresh) {
                     await triggerAlert({
                         device_id: deviceId,
-                        device_name: device.name,
+                        device_name: resolvedDevice.name,
                         alert_type: 'high_latency',
                         severity: 'warning',
                         specific_service: 'sip_peer',
@@ -604,7 +620,7 @@ export async function checkSIPEndpoints(deviceId: string, sipMetrics: any) {
                 } else {
                     await resolveAlert({
                         device_id: deviceId,
-                        device_name: device.name,
+                        device_name: resolvedDevice.name,
                         alert_type: 'high_latency',
                         specific_service: 'sip_peer',
                         specific_endpoint: name,
