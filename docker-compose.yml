@@ -78,8 +78,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 25s
-    volumes:
-      - ./agent:/app/agent
 
   frontend:
     build: ./frontend

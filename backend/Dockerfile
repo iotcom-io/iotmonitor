@@ -20,8 +20,8 @@ RUN cd backend && npm run build
 # Production stage
 FROM node:20-alpine
 
-# Install Go for runtime agent compilation
-RUN apk add --no-cache go
+# Install Go for runtime agent compilation and wget for healthcheck
+RUN apk add --no-cache go wget
 
 WORKDIR /app
 

@@ -32,6 +32,8 @@ curl -fsSL "https://your-domain.com/api/devices/{device_id}/install-script?os=li
 powershell -Command "Invoke-WebRequest -Uri 'https://your-domain.com/api/devices/{device_id}/install-script?os=windows' -OutFile 'install.ps1'; .\install.ps1"
 ```
 
+**Important**: Your nginx must have `/socket.io/` proxy configured for WebSocket connections to work after installation.
+
 ### Method 2: Download and Execute
 
 #### Linux
