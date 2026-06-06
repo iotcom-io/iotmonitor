@@ -909,9 +909,9 @@ GREEN='\\033[0;32m'
 YELLOW='\\033[1;33m'
 NC='\\033[0m' # No Color
 
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}  IoTMonitor Agent Installation${NC}"
-echo -e "${GREEN}========================================${NC}"
+echo -e "\${GREEN}========================================\${NC}"
+echo -e "\${GREEN}  IoTMonitor Agent Installation\${NC}"
+echo -e "\${GREEN}========================================\${NC}"
 echo ""
 echo "Device: ${device.name}"
 echo "Device ID: ${device.device_id}"
@@ -919,30 +919,30 @@ echo ""
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
-    echo -e "${RED}Error: This script must be run as root (use sudo)${NC}"
+    echo -e "\${RED}Error: This script must be run as root (use sudo)\${NC}"
     exit 1
 fi
 
 # Check for required commands
 for cmd in curl systemctl; do
     if ! command -v $cmd &> /dev/null; then
-        echo -e "${RED}Error: Required command '$cmd' not found${NC}"
+        echo -e "\${RED}Error: Required command '$cmd' not found\${NC}"
         exit 1
     fi
 done
 
-echo -e "${YELLOW}[1/5] Downloading agent binary...${NC}"
+echo -e "\${YELLOW}[1/5] Downloading agent binary...\${NC}"
 curl -fsSL "${downloadUrl}" -o /tmp/iotmonitor-agent
 if [ $? -ne 0 ]; then
-    echo -e "${RED}Error: Failed to download agent binary${NC}"
+    echo -e "\${RED}Error: Failed to download agent binary\${NC}"
     exit 1
 fi
 
-echo -e "${YELLOW}[2/5] Setting permissions...${NC}"
+echo -e "\${YELLOW}[2/5] Setting permissions...\${NC}"
 chmod +x /tmp/iotmonitor-agent
 mv /tmp/iotmonitor-agent /usr/local/bin/iotmonitor-agent
 
-echo -e "${YELLOW}[3/5] Creating systemd service...${NC}"
+echo -e "\${YELLOW}[3/5] Creating systemd service...\${NC}"
 cat > /etc/systemd/system/iotmonitor-agent.service <<EOF
 [Unit]
 Description=IoTMonitor Agent for ${device.name}
@@ -970,11 +970,11 @@ ReadWritePaths=/var/log/iotmonitor
 WantedBy=multi-user.target
 EOF
 
-echo -e "${YELLOW}[4/5] Creating log directory...${NC}"
+echo -e "\${YELLOW}[4/5] Creating log directory...\${NC}"
 mkdir -p /var/log/iotmonitor
 chown -R nobody:nogroup /var/log/iotmonitor
 
-echo -e "${YELLOW}[5/5] Starting service...${NC}"
+echo -e "\${YELLOW}[5/5] Starting service...\${NC}"
 systemctl daemon-reload
 systemctl enable iotmonitor-agent
 systemctl start iotmonitor-agent
@@ -985,9 +985,9 @@ sleep 2
 # Check service status
 if systemctl is-active --quiet iotmonitor-agent; then
     echo ""
-    echo -e "${GREEN}========================================${NC}"
-    echo -e "${GREEN}  Installation Successful!${NC}"
-    echo -e "${GREEN}========================================${NC}"
+    echo -e "\${GREEN}========================================\${NC}"
+    echo -e "\${GREEN}  Installation Successful!\${NC}"
+    echo -e "\${GREEN}========================================\${NC}"
     echo ""
     echo "Agent is now running as a systemd service."
     echo ""
@@ -999,9 +999,9 @@ if systemctl is-active --quiet iotmonitor-agent; then
     echo ""
 else
     echo ""
-    echo -e "${RED}========================================${NC}"
-    echo -e "${RED}  Installation Failed${NC}"
-    echo -e "${RED}========================================${NC}"
+    echo -e "\${RED}========================================\${NC}"
+    echo -e "\${RED}  Installation Failed\${NC}"
+    echo -e "\${RED}========================================\${NC}"
     echo ""
     echo "Service failed to start. Check logs with:"
     echo "  sudo journalctl -u iotmonitor-agent -n 50"
