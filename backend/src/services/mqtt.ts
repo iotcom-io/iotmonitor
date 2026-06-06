@@ -297,8 +297,11 @@ client.on('message', async (topic, message, packet) => {
                     recentTelemetry.markModified('extra');
                 }
 
-                Object.assign(recentTelemetry, updateData);
-                await recentTelemetry.save();
+                const setPayload: any = { ...updateData };
+                if (recentTelemetry.extra !== undefined && recentTelemetry.extra !== null) {
+                    setPayload.extra = recentTelemetry.extra;
+                }
+                await Telemetry.updateOne({ _id: recentTelemetry._id }, { $set: setPayload });
             } else {
                 if (check_type === 'system') {
                     if (payload.hostname || payload.memory_total || payload.disk_total || payload.uptime !== undefined) {
