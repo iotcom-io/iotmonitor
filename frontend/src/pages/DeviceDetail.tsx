@@ -1036,7 +1036,7 @@ useEffect(() => {
                             </div>
                             {device.custom_fields && Object.keys(device.custom_fields).length > 0 && (
                                 <div className="flex flex-wrap gap-1.5 mt-2">
-                                    {Object.entries(device.custom_fields).map(([key, value]) => (
+                                    {Object.entries(device.custom_fields as Record<string, string>).map(([key, value]) => (
                                         <span key={key} className="px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-[10px] text-slate-400 font-mono">
                                             {key}: {value}
                                         </span>
@@ -2508,7 +2508,7 @@ useEffect(() => {
                                         <span className="text-[10px] text-slate-600">Key-value metadata</span>
                                     </div>
                                     <div className="space-y-2">
-                                        {(Object.entries(device.custom_fields || {})).map(([key, value], idx, arr) => (
+                                        {(Object.entries((device.custom_fields || {}) as Record<string, string>)).map(([key, value], idx, arr) => (
                                             <div key={idx} className="flex gap-2 items-center">
                                                 <input
                                                     type="text"

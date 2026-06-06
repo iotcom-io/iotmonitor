@@ -112,7 +112,7 @@ export const DeviceList = () => {
         setAsteriskContainerName(device.asterisk_container_name || device.config?.asterisk_container || 'asterisk');
         setPingHost(device.probe_config?.ping_host || device.hostname || '');
         const existingFields = device.custom_fields
-            ? Object.entries(device.custom_fields).map(([k, v]) => ({ key: k, value: v }))
+            ? Object.entries(device.custom_fields as Record<string, string>).map(([k, v]) => ({ key: k, value: v }))
             : [];
         setCustomFields(existingFields.length > 0 ? existingFields : [{ key: '', value: '' }]);
         setShowModal(true);
