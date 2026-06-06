@@ -23,6 +23,7 @@ interface Device {
         asterisk_container?: string;
         [key: string]: any;
     };
+    custom_fields?: Record<string, string>;
 }
 
 interface DeviceState {

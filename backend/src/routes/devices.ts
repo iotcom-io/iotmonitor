@@ -273,7 +273,7 @@ router.get('/', authorizePermission('devices.view'), async (req: AuthRequest, re
 // Register a new device
 router.post('/register', authorizePermission('devices.create'), async (req: AuthRequest, res) => {
     try {
-        const { name, owner, type, hostname, enabled_modules, probe_config, asterisk_container_name, assigned_user_ids } = req.body;
+        const { name, owner, type, hostname, enabled_modules, probe_config, asterisk_container_name, assigned_user_ids, custom_fields } = req.body;
         const normalizedType = normalizeDeviceType(type);
         const effectiveModules = resolveEffectiveModules({
             deviceModules: sanitizeModules(enabled_modules),
@@ -287,6 +287,19 @@ router.post('/register', authorizePermission('devices.create'), async (req: Auth
         const device_id = crypto.randomBytes(8).toString('hex');
         const agent_token = crypto.randomBytes(32).toString('hex');
         const mqtt_topic = `iotmonitor/device/${device_id}`;
+
+        // Sanitize custom_fields
+        let sanitizedCustomFields: Record<string, string> | undefined;
+        if (custom_fields && typeof custom_fields === 'object' && !Array.isArray(custom_fields)) {
+            sanitizedCustomFields = {};
+            for (const [key, value] of Object.entries(custom_fields)) {
+                const trimmedKey = String(key).trim().slice(0, 64);
+                if (!trimmedKey) continue;
+                if (/^[a-zA-Z0-9_]+$/.test(trimmedKey)) {
+                    sanitizedCustomFields[trimmedKey] = String(value).slice(0, 500);
+                }
+            }
+        }
 
         const device = new Device({
             device_id,
@@ -306,6 +319,7 @@ router.post('/register', authorizePermission('devices.create'), async (req: Auth
             assigned_user_ids: hasPermission(req.user, 'devices.assign')
                 ? normalizeAssignedUserIds(assigned_user_ids)
                 : [],
+            custom_fields: sanitizedCustomFields,
             status: 'not_monitored',
         });
 
@@ -450,6 +464,26 @@ router.patch('/:id', authorizePermission('devices.update'), async (req: AuthRequ
             if (updateBody.monitoring_paused) {
                 updateBody.monitoring_paused_at = new Date();
                 unsetFields.pause_window_online_at = '';
+            }
+        }
+
+        // Sanitize custom_fields: only allow string key-value pairs
+        if (updateBody.custom_fields !== undefined) {
+            if (updateBody.custom_fields === null) {
+                unsetFields.custom_fields = '';
+                delete updateBody.custom_fields;
+            } else if (typeof updateBody.custom_fields === 'object' && !Array.isArray(updateBody.custom_fields)) {
+                const sanitized: Record<string, string> = {};
+                for (const [key, value] of Object.entries(updateBody.custom_fields)) {
+                    const trimmedKey = String(key).trim().slice(0, 64);
+                    if (!trimmedKey) continue;
+                    if (/^[a-zA-Z0-9_]+$/.test(trimmedKey)) {
+                        sanitized[trimmedKey] = String(value).slice(0, 500);
+                    }
+                }
+                updateBody.custom_fields = sanitized;
+            } else {
+                delete updateBody.custom_fields;
             }
         }
 

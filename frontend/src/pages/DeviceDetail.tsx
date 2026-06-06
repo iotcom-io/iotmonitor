@@ -1034,6 +1034,15 @@ useEffect(() => {
                                 {id}
                                 {device.hostname ? ` | ${device.hostname}` : ''}
                             </div>
+                            {device.custom_fields && Object.keys(device.custom_fields).length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 mt-2">
+                                    {Object.entries(device.custom_fields).map(([key, value]) => (
+                                        <span key={key} className="px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-[10px] text-slate-400 font-mono">
+                                            {key}: {value}
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     </div>
                     {canRunRemoteTerminal && (
@@ -2492,6 +2501,72 @@ useEffect(() => {
                                             !device.monitoring_paused ? "right-1" : "left-1"
                                         )} />
                                     </button>
+                                </div>
+                                <div className="space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">Custom Fields</label>
+                                        <span className="text-[10px] text-slate-600">Key-value metadata</span>
+                                    </div>
+                                    <div className="space-y-2">
+                                        {(Object.entries(device.custom_fields || {})).map(([key, value], idx, arr) => (
+                                            <div key={idx} className="flex gap-2 items-center">
+                                                <input
+                                                    type="text"
+                                                    className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-sm text-slate-300 placeholder:text-slate-700 outline-none focus:border-primary-500/30"
+                                                    placeholder="key"
+                                                    defaultValue={key}
+                                                    onBlur={async (e) => {
+                                                        const newKey = e.target.value.trim();
+                                                        const newValue = (e.target.parentElement?.querySelector('input:nth-child(2)') as HTMLInputElement)?.value || '';
+                                                        if (!newKey || !/^[a-zA-Z0-9_]+$/.test(newKey)) return;
+                                                        const next: Record<string, string> = {};
+                                                        arr.forEach(([k, v], i) => {
+                                                            if (i === idx) { next[newKey] = newValue; }
+                                                            else if (k !== key) { next[k] = v; }
+                                                        });
+                                                        await api.patch(`/devices/${id}`, { custom_fields: next });
+                                                        setDevice({ ...device, custom_fields: next });
+                                                    }}
+                                                />
+                                                <input
+                                                    type="text"
+                                                    className="flex-[2] bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-sm text-slate-300 placeholder:text-slate-700 outline-none focus:border-primary-500/30"
+                                                    placeholder="value"
+                                                    defaultValue={value}
+                                                    onBlur={async (e) => {
+                                                        const newValue = e.target.value;
+                                                        const next = { ...(device.custom_fields || {}) };
+                                                        next[key] = newValue;
+                                                        await api.patch(`/devices/${id}`, { custom_fields: next });
+                                                        setDevice({ ...device, custom_fields: next });
+                                                    }}
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={async () => {
+                                                        const next = { ...(device.custom_fields || {}) };
+                                                        delete next[key];
+                                                        await api.patch(`/devices/${id}`, { custom_fields: Object.keys(next).length > 0 ? next : null });
+                                                        setDevice({ ...device, custom_fields: Object.keys(next).length > 0 ? next : undefined });
+                                                    }}
+                                                    className="text-slate-500 hover:text-red-400 px-2"
+                                                >
+                                                    &times;
+                                                </button>
+                                            </div>
+                                        ))}
+                                        <button
+                                            type="button"
+                                            onClick={async () => {
+                                                const next = { ...(device.custom_fields || {}), '': '' };
+                                                await api.patch(`/devices/${id}`, { custom_fields: next });
+                                                setDevice({ ...device, custom_fields: next });
+                                            }}
+                                            className="text-xs text-primary-400 hover:text-primary-300 mt-1"
+                                        >
+                                            + Add Custom Field
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>

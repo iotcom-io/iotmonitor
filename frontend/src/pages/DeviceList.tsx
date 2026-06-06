@@ -62,6 +62,7 @@ export const DeviceList = () => {
     const [enabledModules, setEnabledModules] = React.useState<string[]>([...MODULE_DEFAULTS_BY_DEVICE_TYPE.server]);
     const [asteriskContainerName, setAsteriskContainerName] = React.useState('asterisk');
     const [pingHost, setPingHost] = React.useState('');
+    const [customFields, setCustomFields] = React.useState<Array<{ key: string; value: string }>>([]);
     const [searchQuery, setSearchQuery] = React.useState('');
     const [typeFilter, setTypeFilter] = React.useState<'all' | DeviceType>('all');
     const [groupByType, setGroupByType] = React.useState(true);
@@ -88,6 +89,7 @@ export const DeviceList = () => {
         setEnabledModules([...MODULE_DEFAULTS_BY_DEVICE_TYPE.server]);
         setAsteriskContainerName('asterisk');
         setPingHost('');
+        setCustomFields([]);
     };
 
     const openCreateModal = () => {
@@ -109,6 +111,10 @@ export const DeviceList = () => {
         setEnabledModules(nextModules);
         setAsteriskContainerName(device.asterisk_container_name || device.config?.asterisk_container || 'asterisk');
         setPingHost(device.probe_config?.ping_host || device.hostname || '');
+        const existingFields = device.custom_fields
+            ? Object.entries(device.custom_fields).map(([k, v]) => ({ key: k, value: v }))
+            : [];
+        setCustomFields(existingFields.length > 0 ? existingFields : [{ key: '', value: '' }]);
         setShowModal(true);
     };
 
@@ -116,7 +122,16 @@ export const DeviceList = () => {
         e.preventDefault();
         setRegistering(true);
         try {
-            const payload = {
+            const sanitizedCustomFields: Record<string, string> = {};
+            for (const field of customFields) {
+                const key = field.key.trim();
+                const value = field.value.trim();
+                if (key && /^[a-zA-Z0-9_]+$/.test(key)) {
+                    sanitizedCustomFields[key] = value;
+                }
+            }
+
+            const payload: any = {
                 name: newName,
                 owner: newOwner.trim() || undefined,
                 type: newType,
@@ -125,7 +140,8 @@ export const DeviceList = () => {
                 asterisk_container_name: enabledModules.includes('asterisk') ? (asteriskContainerName.trim() || 'asterisk') : undefined,
                 probe_config: enabledModules.includes('network') ? {
                     ping_host: pingHost.trim() || undefined,
-                } : undefined
+                } : undefined,
+                ...(Object.keys(sanitizedCustomFields).length > 0 ? { custom_fields: sanitizedCustomFields } : {}),
             };
 
             if (isEditMode && editingDeviceId) {
@@ -356,6 +372,59 @@ export const DeviceList = () => {
                                     onChange={e => setNewHostname(e.target.value)}
                                 />
                             </div>
+
+                            {/* Custom Fields */}
+                            <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <label className="text-sm font-medium text-slate-300">Custom Fields</label>
+                                    <button
+                                        type="button"
+                                        onClick={() => setCustomFields(prev => [...prev, { key: '', value: '' }])}
+                                        className="text-xs text-primary-400 hover:text-primary-300"
+                                    >
+                                        + Add Field
+                                    </button>
+                                </div>
+                                <div className="space-y-2">
+                                    {customFields.map((field, idx) => (
+                                        <div key={idx} className="flex gap-2 items-center">
+                                            <input
+                                                type="text"
+                                                className="input-field text-sm flex-1"
+                                                placeholder="key (e.g. ssh_port)"
+                                                value={field.key}
+                                                onChange={e => {
+                                                    const next = [...customFields];
+                                                    next[idx].key = e.target.value;
+                                                    setCustomFields(next);
+                                                }}
+                                            />
+                                            <input
+                                                type="text"
+                                                className="input-field text-sm flex-[2]"
+                                                placeholder="value"
+                                                value={field.value}
+                                                onChange={e => {
+                                                    const next = [...customFields];
+                                                    next[idx].value = e.target.value;
+                                                    setCustomFields(next);
+                                                }}
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => setCustomFields(prev => prev.filter((_, i) => i !== idx))}
+                                                className="text-slate-500 hover:text-red-400 px-2"
+                                            >
+                                                &times;
+                                            </button>
+                                        </div>
+                                    ))}
+                                    {customFields.length === 0 && (
+                                        <p className="text-xs text-slate-500">No custom fields. Click "Add Field" to add metadata like tunnel_port, ssh_user, etc.</p>
+                                    )}
+                                </div>
+                            </div>
+
                             <div className="flex gap-4 pt-4">
                                 <button
                                     type="button"

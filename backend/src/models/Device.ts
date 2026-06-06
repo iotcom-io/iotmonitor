@@ -60,6 +60,7 @@ export interface IDevice extends Document {
     sip_rtt_threshold_ms?: number; // Custom RTT threshold for SIP
     asterisk_container_name?: string;
     assigned_user_ids?: string[];
+    custom_fields?: Record<string, string>; // User-defined key-value pairs (e.g. tunnel_port, ssh_user)
     created_at: Date;
     updated_at: Date;
 }
@@ -122,6 +123,7 @@ const DeviceSchema: Schema = new Schema({
     sip_rtt_threshold_ms: { type: Number, default: 200 },
     asterisk_container_name: { type: String },
     assigned_user_ids: [{ type: String }],
+    custom_fields: { type: Schema.Types.Mixed, default: {} },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 export default mongoose.model<IDevice>('Device', DeviceSchema);
