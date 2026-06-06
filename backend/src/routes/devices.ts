@@ -310,6 +310,34 @@ router.post('/register', authorizePermission('devices.create'), async (req: Auth
         });
 
         await device.save();
+
+        // Send notification that monitoring has started for new device
+        try {
+            const { NotificationService } = await import('../services/NotificationService');
+            const SystemSettings = (await import('../models/SystemSettings')).default;
+            const settings = await SystemSettings.findOne();
+
+            await NotificationService.send({
+                subject: `Monitoring Started: ${device.name}`,
+                message: [
+                    '📡 NEW DEVICE REGISTERED',
+                    '',
+                    `Device: ${device.name}`,
+                    `ID: ${device.device_id}`,
+                    `Type: ${device.type}`,
+                    `Hostname: ${device.hostname || 'N/A'}`,
+                    `Modules: ${effectiveModules.join(', ')}`,
+                    '',
+                    'Monitoring is now active for this device.',
+                    'You will receive alerts when thresholds are breached or the device goes offline.',
+                ].join('\n'),
+                channels: ['slack'],
+                recipients: { slackWebhook: settings?.notification_slack_webhook || device.notification_slack_webhook },
+            });
+        } catch (nErr) {
+            console.error('[NOTIFY] Device registration notification failed:', nErr);
+        }
+
         res.status(201).json(device);
     } catch (err: any) {
         res.status(400).json({ message: err.message });
