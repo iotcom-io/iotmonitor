@@ -160,6 +160,7 @@ export const DeviceDetail = () => {
     const [modalInput, setModalInput] = useState('');
     const modalInputRef = useRef('');
     const [socket, setSocket] = useState<any>(null);
+    const [socketStatus, setSocketStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
 
     // Confirmation Modal State
     const [confirmModal, setConfirmModal] = useState<{
@@ -213,13 +214,32 @@ export const DeviceDetail = () => {
     useEffect(() => {
         if (!token || !socketDeviceId || !canRunRemoteTerminal) return;
 
+        // Only connect when terminal tab is active (on-demand)
+        if (activeTab !== 'terminal') {
+            if (socket) {
+                socket.disconnect();
+                setSocket(null);
+                setSocketStatus('disconnected');
+            }
+            return;
+        }
+
+        setSocketStatus('connecting');
+
         const baseUrl = (import.meta.env.VITE_API_URL || window.location.origin).replace(/\/api\/?$/, '');
         const nextSocket = io(baseUrl, {
             auth: { token },
             transports: ['websocket', 'polling'],
+            reconnection: true,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            timeout: 15000,
         });
 
         const outputEvent = `terminal:output:${socketDeviceId}`;
+        const cautionEvent = `terminal:caution:${socketDeviceId}`;
+
         const onOutput = (payload: any) => {
             setIsTerminalLoading(false);
             setTerminalOutputs((prev) => [...prev.slice(-99), {
@@ -229,7 +249,17 @@ export const DeviceDetail = () => {
             }]);
         };
 
+        const onConnect = () => {
+            setSocketStatus('connected');
+            setTerminalOutputs((prev) => [...prev.slice(-99), {
+                type: 'output',
+                message: 'Terminal connected successfully',
+                timestamp: new Date().toISOString(),
+            }]);
+        };
+
         const onConnectError = (err: any) => {
+            setSocketStatus('error');
             setIsTerminalLoading(false);
             setTerminalOutputs((prev) => [...prev.slice(-99), {
                 type: 'output',
@@ -238,17 +268,64 @@ export const DeviceDetail = () => {
             }]);
         };
 
+        const onDisconnect = () => {
+            setSocketStatus('disconnected');
+            setTerminalOutputs((prev) => [...prev.slice(-99), {
+                type: 'output',
+                message: 'Terminal disconnected',
+                timestamp: new Date().toISOString(),
+            }]);
+        };
+
+        nextSocket.on('connect', onConnect);
         nextSocket.on(outputEvent, onOutput);
+        nextSocket.on(cautionEvent, (data: any) => {
+            const { command, message } = data || {};
+            const lower = String(command || '').toLowerCase();
+            let requireInput = false;
+            let inputLabel = '';
+            let expectedInput = '';
+            if (lower.includes('reboot')) {
+                requireInput = true;
+                inputLabel = 'Type REBOOT to confirm';
+                expectedInput = 'REBOOT';
+            } else if (lower.includes('shutdown')) {
+                requireInput = true;
+                inputLabel = 'Type SHUTDOWN to confirm';
+                expectedInput = 'SHUTDOWN';
+            }
+
+            setModalInput('');
+            setConfirmModal({
+                isOpen: true,
+                title: 'Caution: Privileged Command',
+                message: message || 'This command may reboot or restart the device/server. Please confirm before proceeding.',
+                type: 'danger',
+                requireInput,
+                inputLabel,
+                expectedInput,
+                onConfirm: () => {
+                    if (requireInput && modalInputRef.current !== expectedInput) return false;
+                    emitTerminalCommand(command, true, false);
+                }
+            });
+        });
         nextSocket.on('connect_error', onConnectError);
+        nextSocket.on('disconnect', onDisconnect);
+
         setSocket(nextSocket);
 
         return () => {
+            nextSocket.off('connect', onConnect);
             nextSocket.off(outputEvent, onOutput);
+            nextSocket.off(cautionEvent);
             nextSocket.off('connect_error', onConnectError);
+            nextSocket.off('disconnect', onDisconnect);
             nextSocket.disconnect();
             setSocket(null);
+            setSocketStatus('disconnected');
         };
-    }, [token, socketDeviceId, canRunRemoteTerminal]);
+    }, [token, socketDeviceId, canRunRemoteTerminal, activeTab]);
 
     useEffect(() => {
         const terminalEnd = document.getElementById('terminal-end');
@@ -459,48 +536,6 @@ export const DeviceDetail = () => {
     useEffect(() => {
         modalInputRef.current = modalInput;
     }, [modalInput]);
-
-    // Listen for caution event for privileged commands
-    useEffect(() => {
-        if (!socket || !socketDeviceId) return;
-        const cautionEvent = `terminal:caution:${socketDeviceId}`;
-        const cautionHandler = (data: any) => {
-            const { command, message } = data || {};
-            const lower = String(command || '').toLowerCase();
-            let requireInput = false;
-            let inputLabel = '';
-            let expectedInput = '';
-            if (lower.includes('reboot')) {
-                requireInput = true;
-                inputLabel = 'Type REBOOT to confirm';
-                expectedInput = 'REBOOT';
-            } else if (lower.includes('shutdown')) {
-                requireInput = true;
-                inputLabel = 'Type SHUTDOWN to confirm';
-                expectedInput = 'SHUTDOWN';
-            }
-
-            setModalInput('');
-            setConfirmModal({
-                isOpen: true,
-                title: 'Caution: Privileged Command',
-                message: message || 'This command may reboot or restart the device/server. Please confirm before proceeding.',
-                type: 'danger',
-                requireInput,
-                inputLabel,
-                expectedInput,
-                onConfirm: () => {
-                    if (requireInput && modalInputRef.current !== expectedInput) return false;
-                    emitTerminalCommand(command, true, false);
-                }
-            });
-        };
-
-        socket.on(cautionEvent, cautionHandler);
-        return () => {
-            socket.off(cautionEvent, cautionHandler);
-        };
-    }, [socket, socketDeviceId]);
 
     const handleSaveCheck = async (ruleData: any | any[]) => {
         try {
@@ -1912,9 +1947,35 @@ useEffect(() => {
                                     <Eraser size={16} />
                                 </button>
                                 <div className="h-4 w-px bg-white/10 mx-1" />
-                                <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                    <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Secure MQTT-TLS Bridge</span>
+                                <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all ${
+                                    socketStatus === 'connected'
+                                        ? 'bg-emerald-500/10 border-emerald-500/20'
+                                        : socketStatus === 'connecting'
+                                        ? 'bg-amber-500/10 border-amber-500/20'
+                                        : socketStatus === 'error'
+                                        ? 'bg-red-500/10 border-red-500/20'
+                                        : 'bg-slate-500/10 border-slate-500/20'
+                                }`}>
+                                    <div className={`w-1.5 h-1.5 rounded-full ${
+                                        socketStatus === 'connected'
+                                            ? 'bg-emerald-500 animate-pulse'
+                                            : socketStatus === 'connecting'
+                                            ? 'bg-amber-500 animate-pulse'
+                                            : socketStatus === 'error'
+                                            ? 'bg-red-500'
+                                            : 'bg-slate-500'
+                                    }`} />
+                                    <span className={`text-[10px] font-bold uppercase tracking-widest ${
+                                        socketStatus === 'connected'
+                                            ? 'text-emerald-400'
+                                            : socketStatus === 'connecting'
+                                            ? 'text-amber-400'
+                                            : socketStatus === 'error'
+                                            ? 'text-red-400'
+                                            : 'text-slate-400'
+                                    }`}>
+                                        {socketStatus === 'connected' ? 'Connected' : socketStatus === 'connecting' ? 'Connecting...' : socketStatus === 'error' ? 'Connection Error' : 'Disconnected'}
+                                    </span>
                                 </div>
                             </div>
                         </div>

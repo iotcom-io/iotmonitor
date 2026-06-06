@@ -8,8 +8,18 @@ import fs from 'fs';
 import { z } from 'zod';
 import { resolveAllActiveAlertsForDevice } from '../services/notificationThrottling';
 import { canAccessDevice, hasPermission } from '../lib/rbac';
+import rateLimit from 'express-rate-limit';
 
 const router = Router();
+
+// Rate limiting for installation endpoints (prevent abuse)
+const installRateLimit = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 10, // 10 requests per window per IP
+    message: 'Too many installation requests, please try again later',
+    standardHeaders: true,
+    legacyHeaders: false,
+});
 
 type BuildOS = 'linux' | 'windows';
 type BuildArch = 'amd64' | 'arm64';
@@ -799,6 +809,247 @@ router.post('/:id/test-notification', authorizePermission('devices.update'), asy
     } catch (err: any) {
         console.error('[TEST-NOTIFY] Error:', err);
         res.status(500).json({ message: 'Failed to send test notification: ' + err.message });
+    }
+});
+
+// Get installation script for device
+router.get('/:id/install-script', authenticate, installRateLimit, authorizePermission('devices.build_agent'), async (req: AuthRequest, res) => {
+    try {
+        const device = await Device.findOne({ device_id: req.params.id });
+        if (!device) return res.status(404).json({ message: 'Device not found' });
+        if (!canAccessDevice(req.user, device)) {
+            return res.status(403).json({ message: 'Access denied for this device' });
+        }
+
+        const { os = 'linux' } = req.query;
+        const normalizedOS = String(os).toLowerCase();
+        if (!['linux', 'windows'].includes(normalizedOS)) {
+            return res.status(400).json({ message: 'Invalid OS parameter. Use "linux" or "windows"' });
+        }
+
+        const publicUrl = process.env.PUBLIC_URL || process.env.FRONTEND_ORIGIN || 'http://localhost:5001';
+        const baseUrl = publicUrl.replace(/\/$/, '');
+        const downloadUrl = `${baseUrl}/api/devices/download/${device.device_id}`;
+
+        let script = '';
+
+        if (normalizedOS === 'linux') {
+            script = `#!/bin/bash
+# IoTMonitor Agent Installation Script
+# Device: ${device.name} (${device.device_id})
+# Generated: ${new Date().toISOString()}
+
+set -e
+
+# Color codes for output
+RED='\\033[0;31m'
+GREEN='\\033[0;32m'
+YELLOW='\\033[1;33m'
+NC='\\033[0m' # No Color
+
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}  IoTMonitor Agent Installation${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo ""
+echo "Device: ${device.name}"
+echo "Device ID: ${device.device_id}"
+echo ""
+
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then
+    echo -e "${RED}Error: This script must be run as root (use sudo)${NC}"
+    exit 1
+fi
+
+# Check for required commands
+for cmd in curl systemctl; do
+    if ! command -v $cmd &> /dev/null; then
+        echo -e "${RED}Error: Required command '$cmd' not found${NC}"
+        exit 1
+    fi
+done
+
+echo -e "${YELLOW}[1/5] Downloading agent binary...${NC}"
+curl -fsSL "${downloadUrl}" -o /tmp/iotmonitor-agent
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Error: Failed to download agent binary${NC}"
+    exit 1
+fi
+
+echo -e "${YELLOW}[2/5] Setting permissions...${NC}"
+chmod +x /tmp/iotmonitor-agent
+mv /tmp/iotmonitor-agent /usr/local/bin/iotmonitor-agent
+
+echo -e "${YELLOW}[3/5] Creating systemd service...${NC}"
+cat > /etc/systemd/system/iotmonitor-agent.service <<EOF
+[Unit]
+Description=IoTMonitor Agent for ${device.name}
+Documentation=https://iotmonitor.io/docs
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/iotmonitor-agent
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=iotmonitor-agent
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/iotmonitor
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+echo -e "${YELLOW}[4/5] Creating log directory...${NC}"
+mkdir -p /var/log/iotmonitor
+chown -R nobody:nogroup /var/log/iotmonitor
+
+echo -e "${YELLOW}[5/5] Starting service...${NC}"
+systemctl daemon-reload
+systemctl enable iotmonitor-agent
+systemctl start iotmonitor-agent
+
+# Wait a moment for service to start
+sleep 2
+
+# Check service status
+if systemctl is-active --quiet iotmonitor-agent; then
+    echo ""
+    echo -e "${GREEN}========================================${NC}"
+    echo -e "${GREEN}  Installation Successful!${NC}"
+    echo -e "${GREEN}========================================${NC}"
+    echo ""
+    echo "Agent is now running as a systemd service."
+    echo ""
+    echo "Useful commands:"
+    echo "  - Check status: sudo systemctl status iotmonitor-agent"
+    echo "  - View logs: sudo journalctl -u iotmonitor-agent -f"
+    echo "  - Restart: sudo systemctl restart iotmonitor-agent"
+    echo "  - Stop: sudo systemctl stop iotmonitor-agent"
+    echo ""
+else
+    echo ""
+    echo -e "${RED}========================================${NC}"
+    echo -e "${RED}  Installation Failed${NC}"
+    echo -e "${RED}========================================${NC}"
+    echo ""
+    echo "Service failed to start. Check logs with:"
+    echo "  sudo journalctl -u iotmonitor-agent -n 50"
+    echo ""
+    exit 1
+fi
+`;
+        } else {
+            script = `@echo off
+REM IoTMonitor Agent Installation Script for Windows
+REM Device: ${device.name} (${device.device_id})
+REM Generated: ${new Date().toISOString()}
+
+echo ========================================
+echo   IoTMonitor Agent Installation
+echo ========================================
+echo.
+echo Device: ${device.name}
+echo Device ID: ${device.device_id}
+echo.
+
+echo [1/4] Downloading agent binary...
+powershell -Command "Invoke-WebRequest -Uri '${downloadUrl}' -OutFile '%TEMP%\\iotmonitor-agent.exe'"
+if errorlevel 1 (
+    echo Error: Failed to download agent binary
+    exit /b 1
+)
+
+echo [2/4] Installing agent...
+move "%TEMP%\\iotmonitor-agent.exe" "C:\\Program Files\\iotmonitor-agent.exe" >nul 2>&1 || (
+    echo Error: Failed to move agent to Program Files
+    echo Trying alternative location...
+    move "%TEMP%\\iotmonitor-agent.exe" "C:\\iotmonitor-agent.exe"
+)
+
+echo [3/4] Creating log directory...
+if not exist "C:\\ProgramData\\iotmonitor" mkdir "C:\\ProgramData\\iotmonitor"
+
+echo [4/4] Installing Windows Service...
+sc create IoTMonitorAgent binPath= "C:\\Program Files\\iotmonitor-agent.exe" start= auto
+if errorlevel 1 (
+    echo Warning: Failed to create Windows service
+    echo You may need to run as Administrator
+    echo.
+    echo To run manually: C:\\Program Files\\iotmonitor-agent.exe
+) else (
+    sc description IoTMonitorAgent "IoTMonitor Agent for ${device.name}"
+    sc start IoTMonitorAgent
+    echo Service installed and started successfully
+)
+
+echo.
+echo ========================================
+echo   Installation Complete
+echo ========================================
+echo.
+echo To view logs: C:\\ProgramData\\iotmonitor
+echo.
+pause
+`;
+        }
+
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="install-iotmonitor-agent-${normalizedOS}.sh"`);
+        res.send(script);
+    } catch (err: any) {
+        console.error('[INSTALL-SCRIPT] Error:', err);
+        res.status(500).json({ message: 'Failed to generate installation script: ' + err.message });
+    }
+});
+
+// Get installation command (one-liner)
+router.get('/:id/install-command', authenticate, installRateLimit, authorizePermission('devices.build_agent'), async (req: AuthRequest, res) => {
+    try {
+        const device = await Device.findOne({ device_id: req.params.id });
+        if (!device) return res.status(404).json({ message: 'Device not found' });
+        if (!canAccessDevice(req.user, device)) {
+            return res.status(403).json({ message: 'Access denied for this device' });
+        }
+
+        const { os = 'linux' } = req.query;
+        const normalizedOS = String(os).toLowerCase();
+        if (!['linux', 'windows'].includes(normalizedOS)) {
+            return res.status(400).json({ message: 'Invalid OS parameter. Use "linux" or "windows"' });
+        }
+
+        const publicUrl = process.env.PUBLIC_URL || process.env.FRONTEND_ORIGIN || 'http://localhost:5001';
+        const baseUrl = publicUrl.replace(/\/$/, '');
+        const scriptUrl = `${baseUrl}/api/devices/${device.device_id}/install-script?os=${normalizedOS}`;
+
+        let command = '';
+        if (normalizedOS === 'linux') {
+            command = `curl -fsSL "${scriptUrl}" | sudo bash`;
+        } else {
+            command = `powershell -Command "Invoke-WebRequest -Uri '${scriptUrl}' -OutFile 'install.ps1'; .\\install.ps1"`;
+        }
+
+        res.json({
+            device_id: device.device_id,
+            device_name: device.name,
+            os: normalizedOS,
+            command,
+            script_url: scriptUrl,
+            instructions: normalizedOS === 'linux'
+                ? 'Copy and paste this command in your server terminal (requires sudo privileges)'
+                : 'Copy and paste this command in PowerShell (requires Administrator privileges)',
+        });
+    } catch (err: any) {
+        console.error('[INSTALL-COMMAND] Error:', err);
+        res.status(500).json({ message: 'Failed to generate installation command: ' + err.message });
     }
 });
 
