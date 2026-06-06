@@ -15,7 +15,7 @@ const getCachedChecks = async (deviceId: string): Promise<any[]> => {
     if (cached && cached.expiresAt > now) {
         return cached.checks;
     }
-    const checks = await MonitoringCheck.find({ device_id: deviceId, enabled: true }).lean();
+    const checks = await MonitoringCheck.find({ device_id: deviceId, enabled: true });
     checkCache.set(deviceId, { checks, expiresAt: now + CHECK_CACHE_TTL_MS });
     return checks;
 };
