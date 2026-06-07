@@ -35,6 +35,14 @@ const CHECK_MODULE_MAP: Record<string, ModuleName | null> = {
     sip_registration: 'asterisk',
     sip: 'asterisk', // legacy
     container_status: 'docker',
+    mysql: null,
+    postgresql: null,
+    redis: null,
+    nginx: null,
+    elasticsearch: null,
+    rabbitmq: null,
+    mongodb: null,
+    snmp_interface: null,
     custom: null,
 };
 
@@ -148,6 +156,8 @@ const getCheckUnit = (checkType: string) => {
     if (checkType === 'bandwidth') return 'Mbps';
     if (['cpu', 'memory', 'disk', 'utilization', 'sip_registration'].includes(checkType)) return '%';
     if (checkType === 'container_status') return 'state';
+    if (['mysql', 'postgresql', 'redis', 'nginx', 'elasticsearch', 'rabbitmq', 'mongodb'].includes(checkType)) return 'ms';
+    if (checkType === 'snmp_interface') return '%';
     return '';
 };
 
@@ -375,6 +385,40 @@ export async function applyThresholdRules(device: any, metrics: any) {
                     value = 0;
                     message = `Container ${displayName} is healthy (${statusText || effectiveState})`;
                 }
+            }
+        } else if (['mysql', 'postgresql', 'redis', 'nginx', 'elasticsearch', 'rabbitmq', 'mongodb'].includes(check.check_type)) {
+            const servicesPayload = metrics.services || metrics;
+            const svc = servicesPayload?.[check.check_type] || servicesPayload?.[check.check_type.replace('postgresql', 'postgres')] || {};
+            const status = String(svc.status || svc.state || '').toLowerCase().trim();
+            const responseTime = firstNumber(svc.response_time_ms, svc.responseTimeMs, svc.latency_ms, svc.latency);
+            const connections = firstNumber(svc.connections, svc.active_connections, svc.conn);
+
+            if (status === 'down' || status === 'offline' || status === 'error' || status === 'unreachable') {
+                isProblem = true;
+                value = 9999;
+                message = `${check.check_type.toUpperCase()} is ${status}`;
+                alertDetails = { service: check.check_type, status, response_time_ms: responseTime, connections };
+            } else if (responseTime !== undefined) {
+                value = responseTime;
+                message = `${check.check_type.toUpperCase()} response time is ${responseTime}ms`;
+                alertDetails = { service: check.check_type, status: status || 'up', response_time_ms: responseTime, connections };
+            } else if (connections !== undefined) {
+                value = connections;
+                message = `${check.check_type.toUpperCase()} active connections: ${connections}`;
+                alertDetails = { service: check.check_type, status: status || 'up', connections };
+            } else {
+                value = 0;
+                message = `${check.check_type.toUpperCase()} is reachable`;
+                alertDetails = { service: check.check_type, status: status || 'up' };
+            }
+        } else if (check.check_type === 'snmp_interface') {
+            const snmpPayload = metrics.snmp || metrics;
+            const interfaces = snmpPayload?.interfaces || [];
+            const iface = interfaces.find((i: any) => i.name === check.target || i.index === check.target);
+            if (iface) {
+                value = firstNumber(iface.utilization_percent, iface.utilization, iface.usage_percent);
+                message = `Interface ${iface.name || check.target} utilization is ${value}%`;
+                alertDetails = { interface: iface.name || check.target, index: iface.index };
             }
         }
 

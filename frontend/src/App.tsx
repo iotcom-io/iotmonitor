@@ -10,12 +10,14 @@ import { DeviceDetail } from './pages/DeviceDetail';
 import { AgentBuilder } from './pages/AgentBuilder';
 import { Settings } from './pages/Settings';
 import { Synthetics } from './pages/Synthetics';
+import { NetworkMonitoring } from './pages/NetworkMonitoring';
 import { Incidents } from './pages/Incidents';
 import { Alerts } from './pages/Alerts';
 import { Users } from './pages/Users';
 import { Licenses } from './pages/Licenses';
 import NotificationChannels from './pages/NotificationChannels';
 import { Analytics } from './pages/Analytics';
+import { ServiceMonitoring } from './pages/ServiceMonitoring';
 import { hasPermission, PermissionKey } from './lib/permissions';
 import api from './lib/axios';
 
@@ -201,6 +203,8 @@ function App() {
                             <Route path="/notification-channels" element={<PrivateRoute><PermissionRoute permission="settings.view"><NotificationChannels /></PermissionRoute></PrivateRoute>} />
                             <Route path="/settings" element={<PrivateRoute><PermissionRoute permission="settings.view"><Settings /></PermissionRoute></PrivateRoute>} />
                             <Route path="/web-monitoring" element={<PrivateRoute><PermissionRoute permission="synthetics.view"><Synthetics /></PermissionRoute></PrivateRoute>} />
+                            <Route path="/network" element={<PrivateRoute><PermissionRoute permission="devices.view"><NetworkMonitoring /></PermissionRoute></PrivateRoute>} />
+                            <Route path="/services" element={<PrivateRoute><PermissionRoute permission="monitoring.view"><ServiceMonitoring /></PermissionRoute></PrivateRoute>} />
                             <Route path="/licenses" element={<PrivateRoute><PermissionRoute permission="licenses.view"><Licenses /></PermissionRoute></PrivateRoute>} />
                             <Route path="/users" element={<PrivateRoute><PermissionRoute permission="users.view"><Users /></PermissionRoute></PrivateRoute>} />
                             <Route path="/synthetics" element={<Navigate to="/web-monitoring" replace />} />

@@ -7,6 +7,7 @@ export type PermissionKey =
     | 'devices.delete'
     | 'devices.assign'
     | 'devices.build_agent'
+    | 'devices.manage'
     | 'monitoring.view'
     | 'monitoring.create'
     | 'monitoring.update'

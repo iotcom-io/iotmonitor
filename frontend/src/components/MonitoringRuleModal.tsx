@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, ShieldCheck, Activity, Phone, Wifi, Cpu, MemoryStick as Memory, Bell, HardDrive, Box, LayoutGrid, Users } from 'lucide-react';
+import { X, ShieldCheck, Activity, Phone, Wifi, Cpu, MemoryStick as Memory, Bell, HardDrive, Box, LayoutGrid, Users, Database, Server, Search, MessageSquare } from 'lucide-react';
 import { clsx } from 'clsx';
 
 type ModuleName = 'system' | 'docker' | 'asterisk' | 'network';
@@ -12,6 +12,13 @@ const CHECK_MODULE_MAP: Record<string, ModuleName | null> = {
     sip_rtt: 'asterisk',
     sip_registration: 'asterisk',
     container_status: 'docker',
+    mysql: null,
+    postgresql: null,
+    redis: null,
+    nginx: null,
+    elasticsearch: null,
+    rabbitmq: null,
+    mongodb: null,
 };
 const BASE_CHECK_TYPES = [
     { id: 'cpu', label: 'CPU Load', icon: Cpu, unit: '%' },
@@ -22,6 +29,13 @@ const BASE_CHECK_TYPES = [
     { id: 'sip_rtt', label: 'SIP RTT/Status', icon: Phone, unit: 'ms' },
     { id: 'sip_registration', label: 'SIP Registrations %', icon: Phone, unit: '%' },
     { id: 'container_status', label: 'Container Status', icon: Box, unit: 'status' },
+    { id: 'mysql', label: 'MySQL', icon: Database, unit: 'ms' },
+    { id: 'postgresql', label: 'PostgreSQL', icon: Database, unit: 'ms' },
+    { id: 'redis', label: 'Redis', icon: Server, unit: 'ms' },
+    { id: 'nginx', label: 'Nginx', icon: Wifi, unit: 'ms' },
+    { id: 'elasticsearch', label: 'Elasticsearch', icon: Search, unit: 'ms' },
+    { id: 'rabbitmq', label: 'RabbitMQ', icon: MessageSquare, unit: 'ms' },
+    { id: 'mongodb', label: 'MongoDB', icon: Database, unit: 'ms' },
 ];
 
 interface MonitoringRuleModalProps {
@@ -76,7 +90,14 @@ export const MonitoringRuleModal = ({
         utilization: { thresholds: { warning: 70, critical: 90 }, target: '' },
         sip_rtt: { thresholds: { warning: 300, critical: 600 }, target: 'System-wide' },
         sip_registration: { thresholds: { warning: 95, critical: 80 }, target: 'System-wide' },
-        container_status: { thresholds: { warning: 1, critical: 1 }, target: '' }
+        container_status: { thresholds: { warning: 1, critical: 1 }, target: '' },
+        mysql: { thresholds: { warning: 500, critical: 2000 }, target: 'localhost:3306' },
+        postgresql: { thresholds: { warning: 500, critical: 2000 }, target: 'localhost:5432' },
+        redis: { thresholds: { warning: 50, critical: 200 }, target: 'localhost:6379' },
+        nginx: { thresholds: { warning: 500, critical: 2000 }, target: 'localhost:80' },
+        elasticsearch: { thresholds: { warning: 500, critical: 2000 }, target: 'localhost:9200' },
+        rabbitmq: { thresholds: { warning: 500, critical: 2000 }, target: 'localhost:5672' },
+        mongodb: { thresholds: { warning: 500, critical: 2000 }, target: 'localhost:27017' },
     };
 
     // Convert legacy 'attention' to 'warning' if present
@@ -513,6 +534,16 @@ export const MonitoringRuleModal = ({
                                             {path}
                                         </button>
                                     ))
+                                ) : ['mysql', 'postgresql', 'redis', 'nginx', 'elasticsearch', 'rabbitmq', 'mongodb'].includes(formData.check_type) ? (
+                                    <div className="w-full flex items-center gap-2">
+                                        <input
+                                            type="text"
+                                            value={(formData.targets && formData.targets[0]) || ''}
+                                            onChange={(e) => updateField({ targets: [e.target.value] })}
+                                            placeholder="Host:port or connection string"
+                                            className="flex-1 input-field"
+                                        />
+                                    </div>
                                 ) : (
                                     <span className="text-xs text-slate-500 italic">System-wide monitoring enabled for this type.</span>
                                 )}

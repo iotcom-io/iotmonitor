@@ -8,6 +8,7 @@ import { startThrottlingService } from './services/notificationThrottling';
 import { startHourlyReports } from './services/scheduledReports';
 import { startSyntheticRunner } from './services/SyntheticRunner';
 import { startLicenseMonitoring } from './services/licenseMonitoring';
+import { startSnmpPolling } from './services/snmpMonitoring';
 import { seedMonitoringTemplates, seedDefaultNotificationChannel } from './seedMonitoring';
 import './services/mqtt';
 
@@ -43,6 +44,7 @@ mongoose.connect(MONGODB_URI)
         startHourlyReports();
         startSyntheticRunner();
         startLicenseMonitoring();
+        startSnmpPolling();
         console.log('All monitoring services started');
     })
     .catch((err) => {

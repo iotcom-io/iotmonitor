@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Server, ShieldCheck, Settings, LogOut, Terminal, Bell, Globe, FileText, KeyRound, Users, ChevronLeft, ChevronRight, BrainCircuit } from 'lucide-react';
+import { LayoutDashboard, Server, ShieldCheck, Settings, LogOut, Terminal, Bell, Globe, FileText, KeyRound, Users, ChevronLeft, ChevronRight, BrainCircuit, Network, Activity } from 'lucide-react';
 import { useAuthStore } from '../../store/useAuthStore';
 import { Link, useLocation } from 'react-router-dom';
 import { clsx } from 'clsx';
@@ -111,6 +111,26 @@ export const Sidebar = ({
                         label="Devices"
                         to="/devices"
                         active={location.pathname.startsWith('/devices')}
+                        collapsed={collapsed}
+                        onNavigate={handleNavigate}
+                    />
+                )}
+                {hasPermission('devices.view', user) && (
+                    <SidebarItem
+                        icon={Network}
+                        label="Network"
+                        to="/network"
+                        active={location.pathname.startsWith('/network')}
+                        collapsed={collapsed}
+                        onNavigate={handleNavigate}
+                    />
+                )}
+                {hasPermission('monitoring.view', user) && (
+                    <SidebarItem
+                        icon={Activity}
+                        label="Services"
+                        to="/services"
+                        active={location.pathname.startsWith('/services')}
                         collapsed={collapsed}
                         onNavigate={handleNavigate}
                     />

@@ -32,6 +32,8 @@ export const Analytics = () => {
     const [issueDeviceId, setIssueDeviceId] = useState('');
     const [issueDetail, setIssueDetail] = useState<any>(null);
     const [issueLoading, setIssueLoading] = useState(false);
+    const [aiData, setAiData] = useState<any>(null);
+    const [aiLoading, setAiLoading] = useState(false);
 
     const [forecastDeviceId, setForecastDeviceId] = useState('');
     const [forecastService, setForecastService] = useState<'all' | 'cpu' | 'memory' | 'disk'>('all');
@@ -51,9 +53,23 @@ export const Analytics = () => {
         }
     }, [windowDays]);
 
+    const fetchAIInsights = useCallback(async () => {
+        setAiLoading(true);
+        try {
+            const res = await api.get('/ai-analytics/overview', { params: { window_days: windowDays } });
+            setAiData(res.data || null);
+        } catch (error) {
+            console.error('Failed to fetch AI insights', error);
+            setAiData(null);
+        } finally {
+            setAiLoading(false);
+        }
+    }, [windowDays]);
+
     useEffect(() => {
         fetchOverview();
-    }, [fetchOverview]);
+        fetchAIInsights();
+    }, [fetchOverview, fetchAIInsights]);
 
     const runForecast = useCallback(async () => {
         setForecastLoading(true);
@@ -145,6 +161,88 @@ export const Analytics = () => {
                 <Stat label="MTTR" value={`${Number(kpis.mttr_minutes || 0).toFixed(1)} min`} icon={TrendingUp} />
                 <Stat label="Alert Noise Ratio" value={`${Number(kpis.notification_noise_ratio || 0).toFixed(2)}`} icon={BrainCircuit} />
             </div>
+
+            {/* AI Insights */}
+            {(aiData || aiLoading) && (
+                <div className="space-y-6">
+                    <div className="flex items-center gap-2">
+                        <BrainCircuit size={20} className="text-primary-400" />
+                        <h3 className="text-lg font-bold text-white">AI-Powered Insights</h3>
+                        {aiLoading && <span className="text-xs text-slate-500">Computing...</span>}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="card border border-amber-500/20">
+                            <p className="text-xs text-slate-500 uppercase font-bold">Most Problematic Device</p>
+                            <p className="text-lg font-bold text-white mt-1">{aiData?.most_problematic_device?.name || '-'}</p>
+                            <p className="text-xs text-amber-400 mt-1">{aiData?.most_problematic_device?.incident_count || 0} incidents</p>
+                        </div>
+                        <div className="card border border-red-500/20">
+                            <p className="text-xs text-slate-500 uppercase font-bold">Top Issue Type</p>
+                            <p className="text-lg font-bold text-white mt-1 capitalize">{aiData?.top_issue_type || '-'}</p>
+                            <p className="text-xs text-red-400 mt-1">{aiData?.unresolved_count || 0} unresolved</p>
+                        </div>
+                        <div className="card border border-primary-500/20">
+                            <p className="text-xs text-slate-500 uppercase font-bold">Incident Patterns</p>
+                            <p className="text-lg font-bold text-white mt-1">{aiData?.patterns?.length || 0} patterns</p>
+                            <p className="text-xs text-primary-400 mt-1">{aiData?.incident_count || 0} total incidents</p>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                        {/* Peak Hours */}
+                        <div className="card">
+                            <h4 className="text-sm font-bold text-white mb-4">Peak Incident Hours</h4>
+                            <div className="space-y-2">
+                                {(aiData?.peak_hours?.incident_peak_hours || []).map((row: any, i: number) => (
+                                    <div key={i} className="flex items-center gap-3">
+                                        <span className="text-xs text-slate-500 w-12">{row.label}</span>
+                                        <div className="flex-1 h-2 bg-white/5 rounded-full overflow-hidden">
+                                            <div
+                                                className="h-full bg-amber-500/60 rounded-full"
+                                                style={{ width: `${Math.min(100, (row.count / (aiData.peak_hours.incident_peak_hours[0]?.count || 1)) * 100)}%` }}
+                                            />
+                                        </div>
+                                        <span className="text-xs text-slate-300 w-8 text-right">{row.count}</span>
+                                    </div>
+                                ))}
+                                {!(aiData?.peak_hours?.incident_peak_hours?.length) && !aiLoading && (
+                                    <p className="text-slate-500 text-sm">No peak hour data available.</p>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Remediation Suggestions */}
+                        <div className="card">
+                            <h4 className="text-sm font-bold text-white mb-4">Remediation Suggestions</h4>
+                            <div className="space-y-3 max-h-64 overflow-auto">
+                                {(aiData?.remediation_suggestions || []).slice(0, 5).map((row: any, i: number) => (
+                                    <div key={i} className="p-3 rounded-lg border border-primary-500/20 bg-primary-500/5">
+                                        <div className="flex items-center justify-between mb-1">
+                                            <span className="text-xs font-bold text-primary-400 uppercase">{row.issue_type}</span>
+                                            <span className="text-[10px] text-slate-500">{row.total_occurrences} occurrences</span>
+                                        </div>
+                                        <ul className="space-y-1 mt-2">
+                                            {row.suggestions.map((tip: string, j: number) => (
+                                                <li key={j} className="text-xs text-slate-300 flex items-start gap-1.5">
+                                                    <span className="text-primary-400 mt-0.5">•</span>
+                                                    {tip}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                        {row.avg_resolution_minutes && (
+                                            <p className="text-[10px] text-slate-500 mt-2">Avg resolution: {row.avg_resolution_minutes} min</p>
+                                        )}
+                                    </div>
+                                ))}
+                                {!(aiData?.remediation_suggestions?.length) && !aiLoading && (
+                                    <p className="text-slate-500 text-sm">No remediation suggestions available.</p>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
                 <div className="xl:col-span-2 card">

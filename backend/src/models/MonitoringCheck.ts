@@ -2,7 +2,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IMonitoringCheck extends Document {
     device_id: string;
-    check_type: 'cpu' | 'memory' | 'disk' | 'bandwidth' | 'utilization' | 'sip_rtt' | 'sip_registration' | 'container_status' | 'custom';
+    check_type: 'cpu' | 'memory' | 'disk' | 'bandwidth' | 'utilization' | 'sip_rtt' | 'sip_registration' | 'container_status' | 'mysql' | 'postgresql' | 'redis' | 'nginx' | 'elasticsearch' | 'rabbitmq' | 'mongodb' | 'snmp_interface' | 'custom';
     target?: string;
     config: Record<string, any>;
     interval: number; // evaluation interval in seconds
@@ -29,7 +29,7 @@ const MonitoringCheckSchema: Schema = new Schema({
     device_id: { type: String, ref: 'Device', required: true },
     check_type: {
         type: String,
-        enum: ['cpu', 'memory', 'disk', 'bandwidth', 'utilization', 'sip_rtt', 'sip_registration', 'container_status', 'custom'],
+        enum: ['cpu', 'memory', 'disk', 'bandwidth', 'utilization', 'sip_rtt', 'sip_registration', 'container_status', 'mysql', 'postgresql', 'redis', 'nginx', 'elasticsearch', 'rabbitmq', 'mongodb', 'snmp_interface', 'custom'],
         required: true
     },
     target: { type: String },

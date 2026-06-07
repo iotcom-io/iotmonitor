@@ -19,6 +19,14 @@ const CHECK_MODULE_MAP: Record<string, ModuleName | null> = {
     sip: 'asterisk',
     container_status: 'docker',
     custom: null,
+    mysql: null,
+    postgresql: null,
+    redis: null,
+    nginx: null,
+    elasticsearch: null,
+    rabbitmq: null,
+    mongodb: null,
+    snmp_interface: null,
 };
 
 const getEnabledModules = (device: any): ModuleName[] => {
@@ -915,6 +923,19 @@ router.get('/checks/:deviceId', authorizePermission('monitoring.view'), async (r
         }
 
         const checks = await MonitoringCheck.find({ device_id: req.params.deviceId });
+        res.json(checks.filter((check) => canAccessMonitoringCheck(req.user, check)));
+    } catch (err: any) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+// List all checks (global)
+router.get('/checks', authorizePermission('monitoring.view'), async (req: AuthRequest, res) => {
+    try {
+        const filter: any = {};
+        const checkType = typeof req.query.check_type === 'string' ? req.query.check_type.trim() : '';
+        if (checkType) filter.check_type = checkType;
+        const checks = await MonitoringCheck.find(filter).sort({ updatedAt: -1 });
         res.json(checks.filter((check) => canAccessMonitoringCheck(req.user, check)));
     } catch (err: any) {
         res.status(500).json({ message: err.message });

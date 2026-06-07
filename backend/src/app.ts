@@ -14,6 +14,8 @@ import licenseRoutes from './routes/licenses';
 import notificationChannelRoutes from './routes/notificationChannels';
 import templateRoutes from './routes/templates';
 import analyticsRoutes from './routes/analytics';
+import aiAnalyticsRoutes from './routes/aiAnalytics';
+import snmpRoutes from './routes/snmp';
 
 const app = express();
 const allowedOrigins = process.env.FRONTEND_ORIGIN
@@ -41,6 +43,8 @@ app.use('/api/licenses', licenseRoutes);
 app.use('/api/notification-channels', notificationChannelRoutes);
 app.use('/api/templates', templateRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/ai-analytics', aiAnalyticsRoutes);
+app.use('/api/snmp', snmpRoutes);
 
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
