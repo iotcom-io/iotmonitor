@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import api from '../lib/axios';
 import { useAuthStore } from '../store/useAuthStore';
 import { hasPermission } from '../lib/permissions';
-import { Database, Server, Wifi, Search, MessageSquare, ShieldCheck, Activity, AlertTriangle, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { Database, Server, Wifi, Search, MessageSquare, ShieldCheck, Activity, AlertTriangle, CheckCircle, XCircle, Loader2, Plus, Zap } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { clsx } from 'clsx';
 
 const SERVICE_ICONS: Record<string, React.ElementType> = {
@@ -51,6 +52,8 @@ export const ServiceMonitoring = () => {
     const [devices, setDevices] = useState<DeviceMap>({});
     const [loading, setLoading] = useState(true);
     const [selectedType, setSelectedType] = useState<string>('all');
+    const [testingId, setTestingId] = useState<string | null>(null);
+    const [testResults, setTestResults] = useState<Record<string, { success: boolean; message: string }>>({});
 
     useEffect(() => {
         if (!canViewMonitoring) return;
@@ -85,6 +88,22 @@ export const ServiceMonitoring = () => {
         fetchData();
         return () => { isMounted = false; };
     }, [canViewMonitoring]);
+
+    const handleTestConnection = async (check: ServiceCheck) => {
+        const id = check._id;
+        setTestingId(id);
+        try {
+            const res = await api.post('/monitoring/test-connection', {
+                target: check.target,
+                check_type: check.check_type,
+            });
+            setTestResults((prev) => ({ ...prev, [id]: { success: res.data?.success ?? false, message: res.data?.message || 'No response' } }));
+        } catch (e: any) {
+            setTestResults((prev) => ({ ...prev, [id]: { success: false, message: e.response?.data?.message || 'Connection failed' } }));
+        } finally {
+            setTestingId(null);
+        }
+    };
 
     const filteredChecks = useMemo(() => {
         if (selectedType === 'all') return checks;
@@ -135,6 +154,10 @@ export const ServiceMonitoring = () => {
                         Overview of SQL, Redis, Nginx, and other service checks across your fleet.
                     </p>
                 </div>
+                <Link to="/devices" className="btn-primary flex items-center gap-2">
+                    <Plus size={18} />
+                    Add Service Check
+                </Link>
             </div>
 
             {/* Summary cards */}
@@ -219,6 +242,7 @@ export const ServiceMonitoring = () => {
                                     <th className="px-4 py-3">Last Value</th>
                                     <th className="px-4 py-3">Thresholds</th>
                                     <th className="px-4 py-3">Updated</th>
+                                    <th className="px-4 py-3">Test</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-white/5">
@@ -264,6 +288,24 @@ export const ServiceMonitoring = () => {
                                             </td>
                                             <td className="px-4 py-3 text-xs text-slate-500">
                                                 {check.updatedAt ? new Date(check.updatedAt).toLocaleString() : '-'}
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <div className="flex flex-col gap-1">
+                                                    <button
+                                                        onClick={() => handleTestConnection(check)}
+                                                        disabled={testingId === check._id || !check.target}
+                                                        className="flex items-center gap-1 text-xs font-bold text-slate-400 hover:text-amber-400 transition-colors disabled:opacity-40"
+                                                        title="Test connection to target"
+                                                    >
+                                                        <Zap size={12} className={testingId === check._id ? 'animate-pulse' : ''} />
+                                                        {testingId === check._id ? 'Testing' : 'Test'}
+                                                    </button>
+                                                    {testResults[check._id] && (
+                                                        <span className={clsx("text-[10px]", testResults[check._id].success ? 'text-emerald-400' : 'text-red-400')}>
+                                                            {testResults[check._id].message}
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </td>
                                         </tr>
                                     );

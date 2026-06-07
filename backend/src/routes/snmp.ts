@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authenticate, authorizePermission, AuthRequest } from '../middleware/auth';
 import SnmpDevice from '../models/SnmpDevice';
-import { pollSnmpDevice, startSnmpPolling, stopSnmpPolling } from '../services/snmpMonitoring';
+import { pollSnmpDevice, startSnmpPolling, stopSnmpPolling, testSnmpConnection } from '../services/snmpMonitoring';
 import { hasPermission } from '../lib/rbac';
 
 const router = Router();
@@ -84,6 +84,17 @@ router.post('/devices/:id/poll', authorizePermission('devices.view'), async (req
         res.json(result);
     } catch (err: any) {
         res.status(500).json({ message: err.message });
+    }
+});
+
+/* ─── Test Connection ─── */
+router.post('/test', authorizePermission('devices.view'), async (req: AuthRequest, res) => {
+    try {
+        const { host, port, community, version } = req.body || {};
+        const result = await testSnmpConnection({ host, port, community, version });
+        res.json(result);
+    } catch (err: any) {
+        res.status(500).json({ success: false, message: err.message });
     }
 });
 

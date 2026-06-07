@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Plus, RefreshCw, Trash2, Activity, Router, ServerOff, CheckCircle, Wifi } from 'lucide-react';
+import { Plus, RefreshCw, Trash2, Activity, Router, ServerOff, CheckCircle, Wifi, X, Zap } from 'lucide-react';
 import api from '../lib/axios';
 import { useAuthStore } from '../store/useAuthStore';
 import { hasPermission } from '../lib/permissions';
+import { clsx } from 'clsx';
 
 const TYPE_ICONS: Record<string, any> = {
     switch: Wifi,
@@ -44,6 +45,8 @@ export const NetworkMonitoring = () => {
         location: '',
         poll_interval_seconds: 300,
     });
+    const [testingId, setTestingId] = useState<string | null>(null);
+    const [testResult, setTestResult] = useState<{ id: string; success: boolean; message: string } | null>(null);
 
     const fetchDevices = useCallback(async () => {
         setLoading(true);
@@ -99,6 +102,24 @@ export const NetworkMonitoring = () => {
         }
     };
 
+    const handleTestConnection = async (deviceOrForm: any) => {
+        const isForm = !deviceOrForm._id;
+        const id = isForm ? 'form' : deviceOrForm._id;
+        setTestingId(id);
+        setTestResult(null);
+        try {
+            const payload = isForm
+                ? { host: form.host, port: form.port, community: form.community, version: form.version }
+                : { host: deviceOrForm.host, port: deviceOrForm.port, community: deviceOrForm.community, version: deviceOrForm.version };
+            const res = await api.post('/snmp/test', payload);
+            setTestResult({ id, success: res.data?.success ?? false, message: res.data?.message || 'No response' });
+        } catch (e: any) {
+            setTestResult({ id, success: false, message: e.response?.data?.message || 'Connection failed' });
+        } finally {
+            setTestingId(null);
+        }
+    };
+
     const canManage = user?.role === 'admin' || hasPermission('devices.manage', user);
 
     return (
@@ -120,36 +141,79 @@ export const NetworkMonitoring = () => {
             </div>
 
             {showAdd && (
-                <div className="card">
-                    <h3 className="text-lg font-semibold text-white mb-4">Add SNMP Device</h3>
-                    <form onSubmit={handleAdd} className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <input className="input" placeholder="Name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-                        <input className="input" placeholder="Host/IP *" value={form.host} onChange={(e) => setForm({ ...form, host: e.target.value })} required />
-                        <input className="input" type="number" placeholder="Port" value={form.port} onChange={(e) => setForm({ ...form, port: Number(e.target.value) })} />
-                        <input className="input" placeholder="Community" value={form.community} onChange={(e) => setForm({ ...form, community: e.target.value })} />
-                        <select className="input" value={form.version} onChange={(e) => setForm({ ...form, version: e.target.value })}>
-                            <option value="v1">SNMP v1</option>
-                            <option value="v2c">SNMP v2c</option>
-                            <option value="v3">SNMP v3</option>
-                        </select>
-                        <select className="input" value={form.device_type} onChange={(e) => setForm({ ...form, device_type: e.target.value })}>
-                            <option value="switch">Switch</option>
-                            <option value="router">Router</option>
-                            <option value="firewall">Firewall</option>
-                            <option value="ap">Access Point</option>
-                            <option value="printer">Printer</option>
-                            <option value="ups">UPS</option>
-                            <option value="storage">Storage</option>
-                            <option value="other">Other</option>
-                        </select>
-                        <input className="input" placeholder="Vendor" value={form.vendor} onChange={(e) => setForm({ ...form, vendor: e.target.value })} />
-                        <input className="input" placeholder="Model" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} />
-                        <input className="input" placeholder="Location" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} />
-                        <div className="md:col-span-3 flex gap-2">
-                            <button type="submit" className="btn-primary">Save</button>
-                            <button type="button" onClick={() => setShowAdd(false)} className="btn-secondary">Cancel</button>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                    <div className="bg-[#0a0e1a] border border-white/10 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl">
+                        <div className="flex items-center justify-between p-6 border-b border-white/10">
+                            <h3 className="text-lg font-bold text-white">Add SNMP Device</h3>
+                            <button onClick={() => setShowAdd(false)} className="p-2 rounded-lg hover:bg-white/10 text-slate-400 transition-colors">
+                                <X size={18} />
+                            </button>
                         </div>
-                    </form>
+                        <form onSubmit={handleAdd} className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Name *</label>
+                                <input className="input-field" placeholder="e.g. Core Switch 01" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Host/IP *</label>
+                                <input className="input-field" placeholder="192.168.1.1" value={form.host} onChange={(e) => setForm({ ...form, host: e.target.value })} required />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Port</label>
+                                <input className="input-field" type="number" value={form.port} onChange={(e) => setForm({ ...form, port: Number(e.target.value) })} />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Community</label>
+                                <input className="input-field" placeholder="public" value={form.community} onChange={(e) => setForm({ ...form, community: e.target.value })} />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Version</label>
+                                <select className="input-field" value={form.version} onChange={(e) => setForm({ ...form, version: e.target.value })}>
+                                    <option value="v1">SNMP v1</option>
+                                    <option value="v2c">SNMP v2c</option>
+                                    <option value="v3">SNMP v3</option>
+                                </select>
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Device Type</label>
+                                <select className="input-field" value={form.device_type} onChange={(e) => setForm({ ...form, device_type: e.target.value })}>
+                                    <option value="switch">Switch</option>
+                                    <option value="router">Router</option>
+                                    <option value="firewall">Firewall</option>
+                                    <option value="ap">Access Point</option>
+                                    <option value="printer">Printer</option>
+                                    <option value="ups">UPS</option>
+                                    <option value="storage">Storage</option>
+                                    <option value="other">Other</option>
+                                </select>
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Vendor</label>
+                                <input className="input-field" placeholder="Cisco, Juniper..." value={form.vendor} onChange={(e) => setForm({ ...form, vendor: e.target.value })} />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Model</label>
+                                <input className="input-field" placeholder="Model number" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} />
+                            </div>
+                            <div className="md:col-span-2 space-y-1">
+                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Location</label>
+                                <input className="input-field" placeholder="Datacenter A, Rack 3..." value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} />
+                            </div>
+                            {testResult && testResult.id === 'form' && (
+                                <div className={clsx("md:col-span-2 p-3 rounded-lg border text-sm", testResult.success ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" : "bg-red-500/10 border-red-500/20 text-red-400")}>
+                                    {testResult.message}
+                                </div>
+                            )}
+                            <div className="md:col-span-2 flex gap-2 pt-2">
+                                <button type="button" onClick={() => handleTestConnection(form)} disabled={!form.host || testingId === 'form'} className="btn-secondary flex items-center gap-2">
+                                    <Zap size={16} className={testingId === 'form' ? 'animate-pulse' : ''} />
+                                    {testingId === 'form' ? 'Testing...' : 'Test Connection'}
+                                </button>
+                                <button type="submit" className="btn-primary">Save Device</button>
+                                <button type="button" onClick={() => setShowAdd(false)} className="btn-secondary">Cancel</button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
             )}
 
@@ -189,6 +253,14 @@ export const NetworkMonitoring = () => {
                                             <span className="capitalize">{device.status}</span>
                                         </div>
                                         <button
+                                            onClick={() => handleTestConnection(device)}
+                                            disabled={testingId === device._id}
+                                            className="p-2 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
+                                            title="Test Connection"
+                                        >
+                                            <Zap size={16} className={testingId === device._id ? 'animate-pulse' : ''} />
+                                        </button>
+                                        <button
                                             onClick={() => handlePoll(device._id)}
                                             disabled={pollingId === device._id}
                                             className="p-2 rounded-lg text-slate-400 hover:text-primary-400 hover:bg-primary-500/10 transition-colors"
@@ -207,6 +279,12 @@ export const NetworkMonitoring = () => {
                                         )}
                                     </div>
                                 </div>
+
+                                {testResult && testResult.id === device._id && (
+                                    <div className={clsx("mt-3 p-2 rounded-lg border text-xs", testResult.success ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" : "bg-red-500/10 border-red-500/20 text-red-400")}>
+                                        {testResult.message}
+                                    </div>
+                                )}
 
                                 {device.status === 'online' && metrics.sysName && (
                                     <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3 text-sm">

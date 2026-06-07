@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, BrainCircuit, Gauge, RefreshCw, ShieldAlert, TrendingUp } from 'lucide-react';
+import { AlertTriangle, BrainCircuit, Gauge, RefreshCw, ShieldAlert, TrendingUp, Info } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import api from '../lib/axios';
 
@@ -13,11 +13,21 @@ const RiskBadge = ({ band }: { band: string }) => {
     return <span className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase ${cls}`}>{key}</span>;
 };
 
-const Stat = ({ label, value, icon: Icon }: { label: string; value: string; icon: any }) => (
-    <div className="card">
+const Stat = ({ label, value, icon: Icon, info }: { label: string; value: string; icon: any; info?: string }) => (
+    <div className="card group relative">
         <div className="flex items-center justify-between mb-2">
             <span className="text-xs text-slate-500 uppercase tracking-widest font-bold">{label}</span>
-            <Icon size={16} className="text-primary-400" />
+            <div className="flex items-center gap-2">
+                {info && (
+                    <div className="relative">
+                        <Info size={14} className="text-slate-600 group-hover:text-slate-400 transition-colors cursor-help" />
+                        <div className="absolute bottom-full right-0 mb-2 w-56 p-2 rounded-lg bg-slate-800 border border-white/10 text-xs text-slate-300 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 shadow-xl">
+                            {info}
+                        </div>
+                    </div>
+                )}
+                <Icon size={16} className="text-primary-400" />
+            </div>
         </div>
         <p className="text-2xl font-black text-white">{value}</p>
     </div>
@@ -156,10 +166,10 @@ export const Analytics = () => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-                <Stat label="Fleet Availability" value={`${Number(kpis.availability_pct_estimate || 0).toFixed(2)}%`} icon={Gauge} />
-                <Stat label="Incidents (Open)" value={`${kpis.incidents_open || 0}`} icon={AlertTriangle} />
-                <Stat label="MTTR" value={`${Number(kpis.mttr_minutes || 0).toFixed(1)} min`} icon={TrendingUp} />
-                <Stat label="Alert Noise Ratio" value={`${Number(kpis.notification_noise_ratio || 0).toFixed(2)}`} icon={BrainCircuit} />
+                <Stat label="Fleet Availability" value={`${Number(kpis.availability_pct_estimate || 0).toFixed(2)}%`} icon={Gauge} info="Estimated percentage of time your fleet was healthy based on incident-free intervals in the selected window." />
+                <Stat label="Incidents (Open)" value={`${kpis.incidents_open || 0}`} icon={AlertTriangle} info="Number of incidents that are currently unresolved or in an open state." />
+                <Stat label="MTTR" value={`${Number(kpis.mttr_minutes || 0).toFixed(1)} min`} icon={TrendingUp} info="Mean Time To Recovery — average minutes taken to resolve incidents in this window." />
+                <Stat label="Alert Noise Ratio" value={`${Number(kpis.notification_noise_ratio || 0).toFixed(2)}`} icon={BrainCircuit} info="Ratio of alerts that did not lead to actionable incidents. Lower is better." />
             </div>
 
             {/* AI Insights */}

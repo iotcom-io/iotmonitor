@@ -1067,4 +1067,50 @@ router.delete('/:id', authorizePermission('monitoring.delete'), async (req: Auth
     }
 });
 
+// Test connection to a service target (TCP connect)
+router.post('/test-connection', authorizePermission('monitoring.view'), async (req: AuthRequest, res) => {
+    try {
+        const { target, check_type } = req.body || {};
+        if (!target) return res.status(400).json({ success: false, message: 'Target is required' });
+
+        const [host, portStr] = String(target).split(':');
+        const port = Number(portStr) || defaultPortForService(String(check_type));
+        if (!host || !port) return res.status(400).json({ success: false, message: 'Invalid target format. Expected host:port' });
+
+        const net = require('net');
+        const result = await new Promise<{ success: boolean; message: string }>((resolve) => {
+            const socket = new net.Socket();
+            const timer = setTimeout(() => {
+                socket.destroy();
+                resolve({ success: false, message: `Connection timed out to ${host}:${port}` });
+            }, 5000);
+            socket.connect(port, host, () => {
+                clearTimeout(timer);
+                socket.destroy();
+                resolve({ success: true, message: `Connected to ${host}:${port}` });
+            });
+            socket.on('error', (err: Error) => {
+                clearTimeout(timer);
+                resolve({ success: false, message: `Connection failed: ${err.message}` });
+            });
+        });
+        res.json(result);
+    } catch (err: any) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+function defaultPortForService(checkType: string): number {
+    const ports: Record<string, number> = {
+        mysql: 3306,
+        postgresql: 5432,
+        redis: 6379,
+        nginx: 80,
+        elasticsearch: 9200,
+        rabbitmq: 5672,
+        mongodb: 27017,
+    };
+    return ports[checkType] || 0;
+}
+
 export default router;

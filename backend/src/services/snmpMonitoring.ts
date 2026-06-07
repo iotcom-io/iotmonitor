@@ -78,6 +78,45 @@ function createSession(device: any) {
     return snmpLib.createSession(device.host, device.community || 'public', options);
 }
 
+export async function testSnmpConnection(config: { host: string; port?: number; community?: string; version?: string }): Promise<{ success: boolean; message: string }> {
+    if (!snmpLib) return { success: false, message: 'net-snmp package is not installed on the server' };
+    if (!config.host) return { success: false, message: 'Host is required' };
+
+    const session = createSession({
+        host: config.host,
+        port: config.port || 161,
+        community: config.community || 'public',
+        version: config.version || 'v2c',
+    });
+    if (!session) return { success: false, message: 'Failed to create SNMP session' };
+
+    return new Promise((resolve) => {
+        const timer = setTimeout(() => {
+            session.close();
+            resolve({ success: false, message: 'SNMP connection timed out (5s)' });
+        }, 6000);
+
+        session.get([STANDARD_OIDS.sysName], (err: any, varbinds: any[]) => {
+            clearTimeout(timer);
+            session.close();
+            if (err) {
+                resolve({ success: false, message: `SNMP error: ${err.message || err}` });
+                return;
+            }
+            if (!varbinds || varbinds.length === 0) {
+                resolve({ success: false, message: 'No response from device' });
+                return;
+            }
+            const vb = varbinds[0];
+            if (snmpLib.isVarbindError(vb)) {
+                resolve({ success: false, message: `Varbind error: ${vb.oid}` });
+                return;
+            }
+            resolve({ success: true, message: `Connected: ${vb.value || 'SNMP device responded'}` });
+        });
+    });
+}
+
 export async function pollSnmpDevice(deviceId: string): Promise<PollResult> {
     const device = await SnmpDevice.findById(deviceId);
     if (!device) return { success: false, metrics: {}, error: 'Device not found', responseTimeMs: 0 };

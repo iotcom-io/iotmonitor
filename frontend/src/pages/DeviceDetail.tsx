@@ -2814,13 +2814,13 @@ useEffect(() => {
                                     <p className="text-xs text-slate-500 font-medium">Run this command as root on the target server:</p>
                                     <div className="bg-black/60 p-6 rounded-[24px] border border-white/10 font-mono text-[12px] text-primary-400/90 leading-relaxed overflow-x-auto relative group">
                                         <code className="whitespace-pre">
-                                            curl -fsSL {window.location.origin}/install.sh | sudo bash -s -- \{'\n'}
+                                            curl -fsSL {window.location.origin}/api/devices/{id}/install-script?os=linux | sudo bash -s -- \{'\n'}
                                             {'  '}--token {device.agent_token.slice(0, 8)}************************ \{'\n'}
                                             {'  '}--modules {enabledModules.join(',')}
                                         </code>
                                         <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                             <button
-                                                onClick={() => navigator.clipboard.writeText(`curl -fsSL ${window.location.origin}/install.sh | sudo bash -s -- --token ${device.agent_token} --modules ${enabledModules.join(',')}`)}
+                                                onClick={() => navigator.clipboard.writeText(`curl -fsSL ${window.location.origin}/api/devices/${id}/install-script?os=linux | sudo bash -s -- --token ${device.agent_token} --modules ${enabledModules.join(',')}`)}
                                                 className="p-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl text-white transition-all"
                                                 title="Copy Command"
                                             >

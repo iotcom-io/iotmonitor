@@ -31,7 +31,16 @@ class WorkerPool {
     }) {
         this.maxWorkers = options?.maxWorkers || Math.min(4, require('os').cpus().length);
         this.taskTimeoutMs = options?.taskTimeoutMs || 30000;
-        this.scriptPath = options?.scriptPath || path.resolve(__dirname, '../workers/analyticsWorker.js');
+
+        // Detect if running under ts-node/ts-node-dev and adjust worker path accordingly
+        const isTsNode = !!(process as any)[Symbol.for('ts-node.register.instance')] || __filename.endsWith('.ts');
+        if (options?.scriptPath) {
+            this.scriptPath = options.scriptPath;
+        } else if (isTsNode) {
+            this.scriptPath = path.resolve(__dirname, '../workers/analyticsWorker.ts');
+        } else {
+            this.scriptPath = path.resolve(__dirname, '../workers/analyticsWorker.js');
+        }
         this.init();
     }
 
@@ -43,7 +52,9 @@ class WorkerPool {
 
     private spawnWorker(index: number) {
         try {
-            const worker = new Worker(this.scriptPath);
+            const isTsNode = this.scriptPath.endsWith('.ts');
+            const workerOptions = isTsNode ? { execArgv: ['-r', 'ts-node/register'] } : undefined;
+            const worker = new Worker(this.scriptPath, workerOptions);
             worker.on('message', (msg: { id: string; result: any; error?: string }) => {
                 this.idle.add(index);
                 const task = this.pending.get(msg.id);
