@@ -96,14 +96,19 @@ export async function testSnmpConnection(config: { host: string; port?: number; 
     if (!session) return { success: false, message: 'Failed to create SNMP session' };
 
     return new Promise((resolve) => {
+        let done = false;
         const timer = setTimeout(() => {
-            session.close();
+            if (done) return;
+            done = true;
+            try { session.close(); } catch {}
             resolve({ success: false, message: 'SNMP connection timed out (5s)' });
         }, 6000);
 
         session.get([STANDARD_OIDS.sysName], (err: any, varbinds: any[]) => {
+            if (done) return;
+            done = true;
             clearTimeout(timer);
-            session.close();
+            try { session.close(); } catch {}
             if (err) {
                 resolve({ success: false, message: `SNMP error: ${err.message || err}` });
                 return;
@@ -148,10 +153,13 @@ export async function pollSnmpDevice(deviceId: string): Promise<PollResult> {
 
     return new Promise((resolve) => {
         const metrics: Record<string, any> = {};
+        let done = false;
+        const safeClose = () => { if (!done) { done = true; try { session.close(); } catch {} } };
 
         session.get(oidsToPoll, (err: any, varbinds: any[]) => {
+            if (done) return;
             if (err) {
-                session.close();
+                safeClose();
                 resolve({
                     success: false,
                     metrics: {},
@@ -174,7 +182,7 @@ export async function pollSnmpDevice(deviceId: string): Promise<PollResult> {
             // Try interface table for network devices
             if (device.device_type === 'switch' || device.device_type === 'router' || device.device_type === 'firewall') {
                 session.getBulk([STANDARD_OIDS.ifOperStatus], 0, 50, (ifaceErr: any, ifaceBinds: any[]) => {
-                    session.close();
+                    safeClose();
 
                     const interfaces: any[] = [];
                     let upCount = 0;
@@ -202,7 +210,7 @@ export async function pollSnmpDevice(deviceId: string): Promise<PollResult> {
                 return;
             }
 
-            session.close();
+            safeClose();
             resolve({
                 success: true,
                 metrics,
