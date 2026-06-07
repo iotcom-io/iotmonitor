@@ -78,7 +78,7 @@ function createSession(device: any) {
     return snmpLib.createSession(device.host, device.community || 'public', options);
 }
 
-export async function testSnmpConnection(config: { host: string; port?: number; community?: string; version?: string }): Promise<{ success: boolean; message: string }> {
+export async function testSnmpConnection(config: { host: string; port?: number; community?: string; version?: string; v3_username?: string; v3_auth_protocol?: string; v3_auth_key?: string; v3_priv_protocol?: string; v3_priv_key?: string }): Promise<{ success: boolean; message: string }> {
     if (!snmpLib) return { success: false, message: 'net-snmp package is not installed on the server' };
     if (!config.host) return { success: false, message: 'Host is required' };
 
@@ -87,6 +87,11 @@ export async function testSnmpConnection(config: { host: string; port?: number; 
         port: config.port || 161,
         community: config.community || 'public',
         version: config.version || 'v2c',
+        v3_username: config.v3_username,
+        v3_auth_protocol: config.v3_auth_protocol,
+        v3_auth_key: config.v3_auth_key,
+        v3_priv_protocol: config.v3_priv_protocol,
+        v3_priv_key: config.v3_priv_key,
     });
     if (!session) return { success: false, message: 'Failed to create SNMP session' };
 

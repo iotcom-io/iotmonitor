@@ -39,6 +39,11 @@ export const NetworkMonitoring = () => {
         port: 161,
         community: 'public',
         version: 'v2c',
+        v3_username: '',
+        v3_auth_protocol: 'SHA',
+        v3_auth_key: '',
+        v3_priv_protocol: 'AES',
+        v3_priv_key: '',
         device_type: 'switch',
         vendor: '',
         model: '',
@@ -93,7 +98,8 @@ export const NetworkMonitoring = () => {
             setShowAdd(false);
             setForm({
                 name: '', host: '', port: 161, community: 'public',
-                version: 'v2c', device_type: 'switch', vendor: '',
+                version: 'v2c', v3_username: '', v3_auth_protocol: 'SHA', v3_auth_key: '', v3_priv_protocol: 'AES', v3_priv_key: '',
+                device_type: 'switch', vendor: '',
                 model: '', location: '', poll_interval_seconds: 300,
             });
             fetchDevices();
@@ -109,8 +115,12 @@ export const NetworkMonitoring = () => {
         setTestResult(null);
         try {
             const payload = isForm
-                ? { host: form.host, port: form.port, community: form.community, version: form.version }
-                : { host: deviceOrForm.host, port: deviceOrForm.port, community: deviceOrForm.community, version: deviceOrForm.version };
+                ? { host: form.host, port: form.port, community: form.community, version: form.version,
+                    v3_username: form.v3_username, v3_auth_protocol: form.v3_auth_protocol, v3_auth_key: form.v3_auth_key,
+                    v3_priv_protocol: form.v3_priv_protocol, v3_priv_key: form.v3_priv_key }
+                : { host: deviceOrForm.host, port: deviceOrForm.port, community: deviceOrForm.community, version: deviceOrForm.version,
+                    v3_username: deviceOrForm.v3_username, v3_auth_protocol: deviceOrForm.v3_auth_protocol, v3_auth_key: deviceOrForm.v3_auth_key,
+                    v3_priv_protocol: deviceOrForm.v3_priv_protocol, v3_priv_key: deviceOrForm.v3_priv_key };
             const res = await api.post('/snmp/test', payload);
             setTestResult({ id, success: res.data?.success ?? false, message: res.data?.message || 'No response' });
         } catch (e: any) {
@@ -174,6 +184,38 @@ export const NetworkMonitoring = () => {
                                     <option value="v3">SNMP v3</option>
                                 </select>
                             </div>
+                            {form.version === 'v3' && (
+                                <>
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">v3 Username</label>
+                                        <input className="input-field" placeholder="snmpuser" value={form.v3_username} onChange={(e) => setForm({ ...form, v3_username: e.target.value })} />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Auth Protocol</label>
+                                        <select className="input-field" value={form.v3_auth_protocol} onChange={(e) => setForm({ ...form, v3_auth_protocol: e.target.value })}>
+                                            <option value="MD5">MD5</option>
+                                            <option value="SHA">SHA</option>
+                                            <option value="SHA256">SHA256</option>
+                                        </select>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Auth Key</label>
+                                        <input className="input-field" type="password" placeholder="Authentication passphrase" value={form.v3_auth_key} onChange={(e) => setForm({ ...form, v3_auth_key: e.target.value })} />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Privacy Protocol</label>
+                                        <select className="input-field" value={form.v3_priv_protocol} onChange={(e) => setForm({ ...form, v3_priv_protocol: e.target.value })}>
+                                            <option value="DES">DES</option>
+                                            <option value="AES">AES</option>
+                                            <option value="AES256">AES256</option>
+                                        </select>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Privacy Key</label>
+                                        <input className="input-field" type="password" placeholder="Encryption passphrase" value={form.v3_priv_key} onChange={(e) => setForm({ ...form, v3_priv_key: e.target.value })} />
+                                    </div>
+                                </>
+                            )}
                             <div className="space-y-1">
                                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Device Type</label>
                                 <select className="input-field" value={form.device_type} onChange={(e) => setForm({ ...form, device_type: e.target.value })}>

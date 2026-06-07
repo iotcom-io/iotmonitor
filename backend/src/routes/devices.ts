@@ -1,5 +1,6 @@
-import { Router } from 'express';
-import { authenticate, authorizePermission, AuthRequest } from '../middleware/auth';
+import { Router, Request } from 'express';
+import { authenticate, authorizePermission, AuthRequest, JWT_SECRET } from '../middleware/auth';
+import jwt from 'jsonwebtoken';
 import Device from '../models/Device';
 import crypto from 'crypto';
 import { spawn } from 'child_process';
@@ -875,12 +876,29 @@ router.post('/:id/test-notification', authorizePermission('devices.update'), asy
 });
 
 // Get installation script for device
-router.get('/:id/install-script', authenticate, installRateLimit, authorizePermission('devices.build_agent'), async (req: AuthRequest, res) => {
+// Accepts agent token via ?token= query param for remote server curl commands
+router.get('/:id/install-script', installRateLimit, async (req: Request, res) => {
     try {
         const device = await Device.findOne({ device_id: req.params.id });
         if (!device) return res.status(404).json({ message: 'Device not found' });
-        if (!canAccessDevice(req.user, device)) {
-            return res.status(403).json({ message: 'Access denied for this device' });
+
+        // Verify access: either valid JWT OR matching agent token query param
+        const queryToken = String(req.query.token || '');
+        const jwtToken = req.header('Authorization')?.replace('Bearer ', '');
+        let isAuthorized = false;
+        if (queryToken && queryToken === device.agent_token) {
+            isAuthorized = true;
+        } else if (jwtToken) {
+            try {
+                const decoded = jwt.verify(jwtToken, JWT_SECRET as string) as any;
+                const user = decoded?.user;
+                if (user && (user.role === 'admin' || (device.assigned_user_ids || []).includes(user.id))) {
+                    isAuthorized = true;
+                }
+            } catch { /* invalid jwt */ }
+        }
+        if (!isAuthorized) {
+            return res.status(401).json({ message: 'Unauthorized. Provide valid agent token via ?token= or Bearer JWT.' });
         }
 
         const { os = 'linux' } = req.query;

@@ -2,8 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import api from '../lib/axios';
 import { useAuthStore } from '../store/useAuthStore';
 import { hasPermission } from '../lib/permissions';
-import { Database, Server, Wifi, Search, MessageSquare, ShieldCheck, Activity, AlertTriangle, CheckCircle, XCircle, Loader2, Plus, Zap } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Database, Server, Wifi, Search, MessageSquare, ShieldCheck, Activity, AlertTriangle, CheckCircle, XCircle, Loader2, Plus, Zap, X } from 'lucide-react';
 import { clsx } from 'clsx';
 
 const SERVICE_ICONS: Record<string, React.ElementType> = {
@@ -54,6 +53,16 @@ export const ServiceMonitoring = () => {
     const [selectedType, setSelectedType] = useState<string>('all');
     const [testingId, setTestingId] = useState<string | null>(null);
     const [testResults, setTestResults] = useState<Record<string, { success: boolean; message: string }>>({});
+    const [showAddModal, setShowAddModal] = useState(false);
+    const [addForm, setAddForm] = useState({
+        device_id: '',
+        check_type: 'mysql',
+        target: '',
+        interval: 60,
+        warning_threshold: 500,
+        critical_threshold: 1000,
+    });
+    const [adding, setAdding] = useState(false);
 
     useEffect(() => {
         if (!canViewMonitoring) return;
@@ -88,6 +97,33 @@ export const ServiceMonitoring = () => {
         fetchData();
         return () => { isMounted = false; };
     }, [canViewMonitoring]);
+
+    const handleAddCheck = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!addForm.device_id) { alert('Select a device'); return; }
+        setAdding(true);
+        try {
+            await api.post('/monitoring', {
+                device_id: addForm.device_id,
+                check_type: addForm.check_type,
+                target: addForm.target,
+                interval: addForm.interval,
+                thresholds: { warning: addForm.warning_threshold, critical: addForm.critical_threshold },
+            });
+            setShowAddModal(false);
+            setAddForm({ device_id: '', check_type: 'mysql', target: '', interval: 60, warning_threshold: 500, critical_threshold: 1000 });
+            // Refresh checks
+            const checksRes = await api.get('/monitoring/checks');
+            const allChecks: ServiceCheck[] = (checksRes.data || []).filter(
+                (c: ServiceCheck) => SERVICE_TYPES.includes(c.check_type)
+            );
+            setChecks(allChecks);
+        } catch (err: any) {
+            alert(err.response?.data?.message || 'Failed to add service check');
+        } finally {
+            setAdding(false);
+        }
+    };
 
     const handleTestConnection = async (check: ServiceCheck) => {
         const id = check._id;
@@ -154,10 +190,10 @@ export const ServiceMonitoring = () => {
                         Overview of SQL, Redis, Nginx, and other service checks across your fleet.
                     </p>
                 </div>
-                <Link to="/devices" className="btn-primary flex items-center gap-2">
+                <button onClick={() => setShowAddModal(true)} className="btn-primary flex items-center gap-2">
                     <Plus size={18} />
                     Add Service Check
-                </Link>
+                </button>
             </div>
 
             {/* Summary cards */}
@@ -315,6 +351,61 @@ export const ServiceMonitoring = () => {
                     </div>
                 )}
             </div>
+
+            {showAddModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                    <div className="bg-[#0a0e1a] border border-white/10 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl">
+                        <div className="flex items-center justify-between p-6 border-b border-white/10">
+                            <h3 className="text-lg font-bold text-white">Add Service Check</h3>
+                            <button onClick={() => setShowAddModal(false)} className="p-2 rounded-lg hover:bg-white/10 text-slate-400 transition-colors">
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <form onSubmit={handleAddCheck} className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-1 md:col-span-2">
+                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Device *</label>
+                                <select className="input-field" value={addForm.device_id} onChange={(e) => setAddForm({ ...addForm, device_id: e.target.value })} required>
+                                    <option value="">Select a device...</option>
+                                    {Object.entries(devices).map(([id, d]) => (
+                                        <option key={id} value={id}>{d.name} ({id.slice(0, 8)})</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Service Type *</label>
+                                <select className="input-field" value={addForm.check_type} onChange={(e) => setAddForm({ ...addForm, check_type: e.target.value })} required>
+                                    {SERVICE_TYPES.map((t) => (
+                                        <option key={t} value={t}>{SERVICE_LABELS[t]}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Target Host:Port *</label>
+                                <input className="input-field" placeholder="192.168.1.10:3306" value={addForm.target} onChange={(e) => setAddForm({ ...addForm, target: e.target.value })} required />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Interval (seconds)</label>
+                                <input className="input-field" type="number" min={10} value={addForm.interval} onChange={(e) => setAddForm({ ...addForm, interval: Number(e.target.value) })} />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Warning Threshold (ms)</label>
+                                <input className="input-field" type="number" min={1} value={addForm.warning_threshold} onChange={(e) => setAddForm({ ...addForm, warning_threshold: Number(e.target.value) })} />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Critical Threshold (ms)</label>
+                                <input className="input-field" type="number" min={1} value={addForm.critical_threshold} onChange={(e) => setAddForm({ ...addForm, critical_threshold: Number(e.target.value) })} />
+                            </div>
+                            <div className="md:col-span-2 flex gap-2 pt-2">
+                                <button type="submit" disabled={adding} className="btn-primary">
+                                    {adding ? <Loader2 size={16} className="animate-spin inline mr-1" /> : null}
+                                    Save Check
+                                </button>
+                                <button type="button" onClick={() => setShowAddModal(false)} className="btn-secondary">Cancel</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

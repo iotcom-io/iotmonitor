@@ -90,8 +90,8 @@ router.post('/devices/:id/poll', authorizePermission('devices.view'), async (req
 /* ─── Test Connection ─── */
 router.post('/test', authorizePermission('devices.view'), async (req: AuthRequest, res) => {
     try {
-        const { host, port, community, version } = req.body || {};
-        const result = await testSnmpConnection({ host, port, community, version });
+        const { host, port, community, version, v3_username, v3_auth_protocol, v3_auth_key, v3_priv_protocol, v3_priv_key } = req.body || {};
+        const result = await testSnmpConnection({ host, port, community, version, v3_username, v3_auth_protocol, v3_auth_key, v3_priv_protocol, v3_priv_key });
         res.json(result);
     } catch (err: any) {
         res.status(500).json({ success: false, message: err.message });
