@@ -454,7 +454,17 @@ export async function applyThresholdRules(device: any, metrics: any) {
             check.last_message = message || (unit
                 ? `${check.check_type.toUpperCase()} is ${value}${unit} (Threshold: ${thresholdValue}${unit})`
                 : `${check.check_type.toUpperCase()} is ${value} (Threshold: ${thresholdValue})`);
-            await check.save();
+            await MonitoringCheck.updateOne(
+                { _id: check._id },
+                {
+                    $set: {
+                        last_value: check.last_value,
+                        last_state: check.last_state,
+                        last_evaluated_at: check.last_evaluated_at,
+                        last_message: check.last_message
+                    }
+                }
+            );
 
             if (newState !== 'ok') {
                 const throttlingConfig = newState === 'critical'
