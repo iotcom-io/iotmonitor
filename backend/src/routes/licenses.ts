@@ -13,31 +13,72 @@ router.post('/:id/mark-renewed', authorizePermission('licenses.manage'), async (
         const license = await LicenseAsset.findOne({ _id: req.params.id, ...getAccessQuery(req.user) });
         if (!license) return res.status(404).json({ message: 'License not found' });
 
-        // Calculate next renewal date
+        const { amount_paid, currency, payment_mode, payment_proof, renewal_period, next_renewal_date, notes } = req.body;
+
+        const actualPeriod = renewal_period || license.billing_cycle || 'yearly';
         let nextRenewal = new Date(license.renewal_date);
-        switch (license.billing_cycle) {
+        if (Number.isNaN(nextRenewal.getTime())) {
+            nextRenewal = new Date();
+        }
+
+        switch (actualPeriod) {
+            case 'weekly':
+                nextRenewal.setDate(nextRenewal.getDate() + 7);
+                break;
             case 'monthly':
                 nextRenewal.setMonth(nextRenewal.getMonth() + 1);
                 break;
             case 'quarterly':
                 nextRenewal.setMonth(nextRenewal.getMonth() + 3);
                 break;
+            case 'semi-annual':
+                nextRenewal.setMonth(nextRenewal.getMonth() + 6);
+                break;
             case 'yearly':
                 nextRenewal.setFullYear(nextRenewal.getFullYear() + 1);
                 break;
+            case 'custom':
+                if (next_renewal_date) {
+                    nextRenewal = new Date(next_renewal_date);
+                } else {
+                    nextRenewal.setFullYear(nextRenewal.getFullYear() + 1);
+                }
+                break;
+            case 'none':
+                // For non-recursive, do not advance the date
+                break;
             default:
-                // For custom or unknown, just add 1 year as fallback
                 nextRenewal.setFullYear(nextRenewal.getFullYear() + 1);
         }
 
-        license.renewal_date = nextRenewal;
+        license.payment_history = license.payment_history || [];
+        license.payment_history.push({
+            paid_at: new Date(),
+            amount_paid: Number(amount_paid ?? license.amount ?? 0),
+            currency: String(currency || license.currency || 'INR'),
+            payment_mode: String(payment_mode || 'Other'),
+            payment_proof: payment_proof ? String(payment_proof) : undefined,
+            renewal_period: actualPeriod,
+            next_renewal_date: actualPeriod !== 'none' ? nextRenewal : undefined,
+            notes: notes ? String(notes) : undefined,
+        });
+
+        if (actualPeriod !== 'none') {
+            license.renewal_date = nextRenewal;
+        }
+        if (actualPeriod && actualPeriod !== 'custom') {
+            license.billing_cycle = actualPeriod;
+        }
+        if (amount_paid !== undefined && amount_paid !== null) {
+            license.amount = Number(amount_paid);
+        }
         license.status = 'active';
         await license.save();
 
         res.json({
             ok: true,
             license,
-            message: 'License marked as renewed. Next renewal set.'
+            message: 'License renewal payment recorded successfully. Next renewal set.'
         });
     } catch (error: any) {
         res.status(400).json({ message: error.message || 'Failed to mark as renewed' });
@@ -48,13 +89,13 @@ const schema = z.object({
     name: z.string().trim().min(1),
     vendor: z.string().trim().optional(),
     product: z.string().trim().optional(),
-    type: z.enum(['license', 'subscription']).default('subscription'),
+    type: z.enum(['license', 'subscription', 'utility']).default('subscription'),
     owner: z.string().trim().optional(),
     reference_key: z.string().trim().optional(),
     renewal_date: z.union([z.string(), z.date()]),
     warning_days: z.number().int().min(1).max(365).optional(),
     critical_days: z.number().int().min(1).max(365).optional(),
-    billing_cycle: z.enum(['monthly', 'quarterly', 'yearly', 'custom']).optional(),
+    billing_cycle: z.enum(['none', 'weekly', 'monthly', 'quarterly', 'semi-annual', 'yearly', 'custom']).optional(),
     amount: z.number().nonnegative().optional(),
     currency: z.string().trim().min(1).max(8).optional(),
     seats_total: z.number().int().nonnegative().optional(),

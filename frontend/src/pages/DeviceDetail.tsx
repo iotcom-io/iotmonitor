@@ -14,11 +14,12 @@ import api from '../lib/axios';
 import { clsx } from 'clsx';
 import { MonitoringRuleModal } from '../components/MonitoringRuleModal';
 import { IncidentBanner } from '../components/IncidentBanner';
-import { Info, Send, Eraser, SquareTerminal as Terminal } from 'lucide-react';
+import { Info, Send, Eraser, SquareTerminal as Terminal, Printer } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { ConfirmationModal } from '../components/ConfirmationModal';
 import { useAuthStore } from '../store/useAuthStore';
 import { hasPermission } from '../lib/permissions';
+import { DowntimeReportModal } from '../components/DowntimeReportModal';
 
 type ModuleName = 'system' | 'docker' | 'asterisk' | 'network';
 const ALL_MODULES: ModuleName[] = ['system', 'docker', 'asterisk', 'network'];
@@ -146,6 +147,7 @@ export const DeviceDetail = () => {
     const [showHistoricalTrends, setShowHistoricalTrends] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingCheck, setEditingCheck] = useState<any>(null);
+    const [showDowntimeReport, setShowDowntimeReport] = useState(false);
     const [incidents, setIncidents] = useState<any[]>([]);
     const [ruleFilter, setRuleFilter] = useState<'all' | 'issues' | 'nodata' | 'disabled'>('all');
     const [hideNoData, setHideNoData] = useState(false);
@@ -1020,7 +1022,7 @@ useEffect(() => {
     return (
         <div className="space-y-8">
             {/* Sticky Header & Navigation Section */}
-            <div className="sticky top-0 z-30 -mt-8 pt-8 pb-4 bg-[#0a0f18]/80 backdrop-blur-xl border-b border-white/5 -mx-8 px-8 space-y-6">
+            <div className="sticky top-0 z-30 -mt-8 pt-8 pb-4 bg-[#0a0f18]/80 backdrop-blur-xl border-b border-white/5 -mx-4 px-4 md:-mx-6 md:px-6 space-y-6">
                 <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
                     <div className="flex items-center gap-5">
                         <button
@@ -1062,57 +1064,67 @@ useEffect(() => {
                             )}
                         </div>
                     </div>
-                    {canRunRemoteTerminal && (
-                        <div className="flex gap-2 ml-6">
+                    <div className="flex gap-2 ml-auto">
                         <button
-                            className="px-4 py-2 rounded-lg bg-primary-600 text-white font-bold text-xs uppercase tracking-widest hover:bg-primary-500 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-primary-600 transition-all border border-primary-500/20 shadow-lg"
-                            style={{ minWidth: 120 }}
-                            disabled={!socket || isOffline}
-                            onClick={() => {
-                                setModalInput('');
-                                setConfirmModal({
-                                    isOpen: true,
-                                    title: 'Reboot Device',
-                                    message: 'This will reboot the device/server. Type REBOOT to confirm.',
-                                    type: 'danger',
-                                    requireInput: true,
-                                    inputLabel: 'Type REBOOT to confirm',
-                                    expectedInput: 'REBOOT',
-                                    onConfirm: () => {
-                                        if (modalInputRef.current !== 'REBOOT') return false;
-                                        emitTerminalCommand('systemctl reboot', true);
-                                    }
-                                });
-                            }}
+                            className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs uppercase tracking-widest transition-all border border-slate-700/50 shadow-lg flex items-center gap-1.5"
+                            style={{ minWidth: 125 }}
+                            onClick={() => setShowDowntimeReport(true)}
                         >
-                            Reboot Device
+                            <Printer size={14} />
+                            Downtime Report
                         </button>
-                        <button
-                            className="px-4 py-2 rounded-lg bg-primary-600 text-white font-bold text-xs uppercase tracking-widest hover:bg-primary-500 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-primary-600 transition-all border border-primary-500/20 shadow-lg"
-                            style={{ minWidth: 120 }}
-                            disabled={!socket || isOffline}
-                            onClick={() => {
-                                setModalInput('');
-                                setConfirmModal({
-                                    isOpen: true,
-                                    title: 'Initiate Remote',
-                                    message: 'This will restart the remote service and show its status. Confirm to proceed.',
-                                    type: 'warning',
-                                    requireInput: false,
-                                    onConfirm: () => {
-                                        const dispatched = emitTerminalCommand('systemctl restart remote', true);
-                                        if (!dispatched) return false;
-                                        window.setTimeout(() => {
-                                            emitTerminalCommand('systemctl status remote', true);
-                                        }, 2000);
-                                    }
-                                });
-                            }}
-                        >
-                            Initiate Remote
-                        </button>
-                        </div>
-                    )}
+                        {canRunRemoteTerminal && (
+                            <>
+                                <button
+                                    className="px-4 py-2 rounded-lg bg-primary-600 text-white font-bold text-xs uppercase tracking-widest hover:bg-primary-500 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-primary-600 transition-all border border-primary-500/20 shadow-lg"
+                                    style={{ minWidth: 120 }}
+                                    disabled={!socket || isOffline}
+                                    onClick={() => {
+                                        setModalInput('');
+                                        setConfirmModal({
+                                            isOpen: true,
+                                            title: 'Reboot Device',
+                                            message: 'This will reboot the device/server. Type REBOOT to confirm.',
+                                            type: 'danger',
+                                            requireInput: true,
+                                            inputLabel: 'Type REBOOT to confirm',
+                                            expectedInput: 'REBOOT',
+                                            onConfirm: () => {
+                                                if (modalInputRef.current !== 'REBOOT') return false;
+                                                emitTerminalCommand('systemctl reboot', true);
+                                            }
+                                        });
+                                    }}
+                                >
+                                    Reboot Device
+                                </button>
+                                <button
+                                    className="px-4 py-2 rounded-lg bg-primary-600 text-white font-bold text-xs uppercase tracking-widest hover:bg-primary-500 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-primary-600 transition-all border border-primary-500/20 shadow-lg"
+                                    style={{ minWidth: 120 }}
+                                    disabled={!socket || isOffline}
+                                    onClick={() => {
+                                        setModalInput('');
+                                        setConfirmModal({
+                                            isOpen: true,
+                                            title: 'Initiate Remote',
+                                            message: 'This will restart the remote service and show its status. Confirm to proceed.',
+                                            type: 'warning',
+                                            requireInput: false,
+                                            onConfirm: () => {
+                                                const dispatched = emitTerminalCommand('systemctl restart remote', true);
+                                                if (!dispatched) return false;
+                                                window.setTimeout(() => {
+                                                    emitTerminalCommand('systemctl status remote', true);
+                                                }, 2000);
+                                            }
+                                        });
+                                    }}
+                                >
+                                    Initiate Remote
+                                </button>
+                            </>
+                        )}
+                    </div>
                 </div>
 
                 <div className="flex gap-2 p-1 bg-dark-surface border border-dark-border rounded-xl w-fit max-w-full overflow-x-auto">
@@ -1176,6 +1188,15 @@ useEffect(() => {
                                             </span>
                                         ))}
                                     </div>
+                                </div>
+                            )}
+                            {latest?.cpu_user !== undefined && latest?.cpu_user !== null && !isOffline && (
+                                <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] text-slate-400 border-t border-white/5 pt-2 font-mono">
+                                    <div>User: <span className="font-semibold text-white">{formatWithUnit(latest.cpu_user, '%')}</span></div>
+                                    <div>Sys: <span className="font-semibold text-white">{formatWithUnit(latest.cpu_system, '%')}</span></div>
+                                    <div>Wait: <span className="font-semibold text-white">{formatWithUnit(latest.cpu_iowait, '%')}</span></div>
+                                    <div>Steal: <span className="font-semibold text-white">{formatWithUnit(latest.cpu_steal, '%')}</span></div>
+                                    <div className="col-span-2">Idle: <span className="font-semibold text-slate-500">{formatWithUnit(latest.cpu_idle, '%')}</span></div>
                                 </div>
                             )}
                         </div>
@@ -1513,7 +1534,36 @@ useEffect(() => {
                                                     <Line type="monotone" dataKey="cpu_usage" stroke="#0ea5e9" strokeWidth={2} dot={false} />
                                                 </LineChart>
                                             </ResponsiveContainer>
+                                            <div className="flex justify-center gap-2 mt-1">
+                                                <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-blue-500"/><span className="text-[10px] text-slate-400">User</span></div>
+                                                <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500"/><span className="text-[10px] text-slate-400">Sys</span></div>
+                                                <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-amber-500"/><span className="text-[10px] text-slate-400">Wait</span></div>
+                                                <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-purple-500"/><span className="text-[10px] text-slate-400">Stl</span></div>
+                                                <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-emerald-500"/><span className="text-[10px] text-slate-400">Idle</span></div>
+                                            </div>
                                         </div>
+                                        {historicalSeries.some(s => s.cpu_user !== undefined && s.cpu_user !== null) && (
+                                            <div className="h-72 min-w-[320px] min-h-[320px] border border-white/10 rounded-2xl p-4 bg-white/[0.02] md:col-span-2">
+                                                <h4 className="text-sm font-bold text-white mb-3">CPU Time Breakdown (%)</h4>
+                                                <ResponsiveContainer width="100%" height="90%">
+                                                    <AreaChart data={historicalSeries}>
+                                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" />
+                                                        <XAxis dataKey="timestamp" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} tickFormatter={historyTickFormatter} />
+                                                        <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} domain={[0, 100]} />
+                                                        <Tooltip
+                                                            contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
+                                                            labelFormatter={(value) => new Date(String(value)).toLocaleString()}
+                                                        />
+                                                        <Legend />
+                                                        <Area type="monotone" dataKey="cpu_user" stackId="1" stroke="#3b82f6" fill="#3b82f6" name="User" />
+                                                        <Area type="monotone" dataKey="cpu_system" stackId="1" stroke="#ef4444" fill="#ef4444" name="System" />
+                                                        <Area type="monotone" dataKey="cpu_iowait" stackId="1" stroke="#f59e0b" fill="#f59e0b" name="Iowait" />
+                                                        <Area type="monotone" dataKey="cpu_steal" stackId="1" stroke="#a855f7" fill="#a855f7" name="Steal" />
+                                                        <Area type="monotone" dataKey="cpu_idle" stackId="1" stroke="#10b981" fill="#10b981" name="Idle" />
+                                                    </AreaChart>
+                                                </ResponsiveContainer>
+                                            </div>
+                                        )}
                                         <div className="h-72 min-w-[320px] min-h-[320px] border border-white/10 rounded-2xl p-4 bg-white/[0.02]">
                                             <h4 className="text-sm font-bold text-white mb-3">Memory Usage (%)</h4>
                                             <ResponsiveContainer width="100%" height="90%">
@@ -2898,6 +2948,12 @@ useEffect(() => {
                 inputLabel={confirmModal.inputLabel}
                 inputValue={modalInput}
                 onInputChange={setModalInput}
+            />
+            <DowntimeReportModal
+                open={showDowntimeReport}
+                onClose={() => setShowDowntimeReport(false)}
+                deviceId={id || ''}
+                deviceName={device?.name}
             />
         </div>
     );

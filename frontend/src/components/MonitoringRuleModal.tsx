@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, ShieldCheck, Activity, Phone, Wifi, Cpu, MemoryStick as Memory, Bell, HardDrive, Box, LayoutGrid, Users, Database, Server, Search, MessageSquare } from 'lucide-react';
 import { clsx } from 'clsx';
+import api from '../lib/axios';
 
 type ModuleName = 'system' | 'docker' | 'asterisk' | 'network';
 const CHECK_MODULE_MAP: Record<string, ModuleName | null> = {
@@ -108,6 +109,7 @@ export const MonitoringRuleModal = ({
             thresholds: { warning: 70, critical: 90, consecutive_failures: 1 },
             notification_frequency: 15,
             notify: { channels: ['slack'] },
+            notification_channel_ids: [],
             assigned_user_ids: [],
             enabled: true
         };
@@ -120,8 +122,25 @@ export const MonitoringRuleModal = ({
         const assigned_user_ids = Array.isArray(data.assigned_user_ids)
             ? data.assigned_user_ids.filter(Boolean)
             : [];
-        return { ...defaultData, ...data, thresholds, assigned_user_ids };
+        const notification_channel_ids = Array.isArray(data.notification_channel_ids)
+            ? data.notification_channel_ids.filter(Boolean)
+            : [];
+        return { ...defaultData, ...data, thresholds, assigned_user_ids, notification_channel_ids };
     };
+
+    const [availableChannels, setAvailableChannels] = useState<any[]>([]);
+
+    React.useEffect(() => {
+        if (isOpen) {
+            api.get('/notification-channels')
+                .then((res) => {
+                    setAvailableChannels(res.data || []);
+                })
+                .catch((err) => {
+                    console.error('Failed to fetch notification channels:', err);
+                });
+        }
+    }, [isOpen]);
 
     const [formData, setFormData] = useState(prepData(initialData));
     const [customDockerTarget, setCustomDockerTarget] = useState('');
@@ -135,6 +154,7 @@ export const MonitoringRuleModal = ({
         target?: string;
         notification_frequency: number;
         notify: any;
+        notification_channel_ids?: string[];
         assigned_user_ids: string[];
     }
 
@@ -237,6 +257,7 @@ export const MonitoringRuleModal = ({
                 targets: initialTargets,
                 notification_frequency: prepped.notification_frequency || 15,
                 notify: prepped.notify || { channels: ['slack'] },
+                notification_channel_ids: Array.isArray(prepped.notification_channel_ids) ? prepped.notification_channel_ids : [],
                 assigned_user_ids: Array.isArray(prepped.assigned_user_ids) ? prepped.assigned_user_ids : [],
             };
             setSessionConfigs({ [prepped.check_type]: config });
@@ -284,6 +305,7 @@ export const MonitoringRuleModal = ({
                     targets: next.targets || (next.target ? [next.target] : []),
                     notification_frequency: next.notification_frequency,
                     notify: next.notify,
+                    notification_channel_ids: next.notification_channel_ids || [],
                     assigned_user_ids: next.assigned_user_ids || [],
                 }
             }));
@@ -314,6 +336,7 @@ export const MonitoringRuleModal = ({
             targets: Array.isArray(formData.targets) ? formData.targets : [],
             notification_frequency: formData.notification_frequency,
             notify: formData.notify,
+            notification_channel_ids: formData.notification_channel_ids || [],
             assigned_user_ids: formData.assigned_user_ids || [],
         };
 
@@ -328,6 +351,7 @@ export const MonitoringRuleModal = ({
                 thresholds: config.thresholds,
                 notification_frequency: config.notification_frequency,
                 notify: config.notify,
+                notification_channel_ids: config.notification_channel_ids || [],
                 assigned_user_ids: config.assigned_user_ids || [],
                 enabled: initialData?.enabled ?? true,
             };
@@ -641,31 +665,46 @@ export const MonitoringRuleModal = ({
 
                     {/* Notification Channels */}
                     <div className="space-y-3">
-                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Notification Channels</label>
-                        <div className="grid grid-cols-3 gap-3">
-                            {['slack', 'email', 'webhook'].map(channel => (
-                                <button
-                                    key={channel}
-                                    type="button"
-                                    onClick={() => {
-                                        const channels = formData.notify?.channels || [];
-                                        const updated = channels.includes(channel)
-                                            ? channels.filter((c: any) => c !== channel)
-                                            : [...channels, channel];
-                                        updateField({ notify: { ...formData.notify, channels: updated } });
-                                    }}
-                                    className={clsx(
-                                        "flex items-center justify-center gap-2 p-3 rounded-xl border text-xs font-bold transition-all capitalize",
-                                        formData.notify?.channels?.includes(channel)
-                                            ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400"
-                                            : "bg-white/5 border-white/10 text-slate-500"
-                                    )}
-                                >
-                                    <div className={clsx("w-2 h-2 rounded-full", formData.notify?.channels?.includes(channel) ? "bg-emerald-500 shadow-[0_0_5px_#10b981]" : "bg-slate-700")} />
-                                    {channel}
-                                </button>
-                            ))}
-                        </div>
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center justify-between">
+                            <span>Notification Destinations</span>
+                            <span className="text-[10px] text-slate-500 font-normal lowercase">Overrides global defaults</span>
+                        </label>
+                        {availableChannels.length === 0 ? (
+                            <div className="text-xs text-amber-300 bg-amber-500/5 border border-amber-500/10 rounded-xl p-3">
+                                No notification channels configured. Default fallback channels will be used. Configure channels in Notification settings.
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-40 overflow-y-auto border border-white/10 rounded-2xl p-3 bg-white/5 custom-scrollbar">
+                                {availableChannels.map((channel: any) => {
+                                    const selected = (formData.notification_channel_ids || []).includes(channel._id);
+                                    return (
+                                        <button
+                                            key={channel._id}
+                                            type="button"
+                                            onClick={() => {
+                                                const ids = formData.notification_channel_ids || [];
+                                                const updated = ids.includes(channel._id)
+                                                    ? ids.filter((id: any) => id !== channel._id)
+                                                    : [...ids, channel._id];
+                                                updateField({ notification_channel_ids: updated });
+                                            }}
+                                            className={clsx(
+                                                "flex items-center justify-between p-2.5 rounded-xl border text-xs font-bold transition-all",
+                                                selected
+                                                    ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400"
+                                                    : "bg-white/5 border-white/10 text-slate-400 hover:bg-white/10"
+                                            )}
+                                        >
+                                            <span className="flex items-center gap-2">
+                                                <div className={clsx("w-2 h-2 rounded-full", selected ? "bg-emerald-500 shadow-[0_0_5px_#10b981]" : "bg-slate-700")} />
+                                                <span className="truncate max-w-[120px]" title={channel.name}>{channel.name}</span>
+                                            </span>
+                                            <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-white/5 text-slate-500">{channel.type}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </div>
 
                     {canAssignUsers && (

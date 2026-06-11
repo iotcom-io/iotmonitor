@@ -279,7 +279,7 @@ export const Dashboard = () => {
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-4">
                 <StatCard icon={Server} label="Total Devices" value={String(totalDevices)} tone="primary" subvalue={`${onlineCount} online`} />
                 <StatCard icon={WifiOff} label="Offline Devices" value={String(statusCounts.offline || 0)} tone={(statusCounts.offline || 0) > 0 ? 'red' : 'emerald'} subvalue={`${statusCounts.warning || 0} warning`} />
                 <StatCard icon={ShieldCheck} label="Active Alerts" value={String(activeAlerts.length)} tone={activeAlerts.length > 0 ? 'red' : 'emerald'} subvalue={canViewAlerts ? `${alertSeverityCounts.critical} critical` : 'No access'} />

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ConfirmationModal } from '../components/ConfirmationModal';
 import api from '../lib/axios';
-import { KeyRound, Plus, RefreshCw, Edit3, Trash2, X, Download } from 'lucide-react';
+import { KeyRound, Plus, RefreshCw, Edit3, Trash2, X, Download, ChevronDown, ChevronRight } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 import { hasPermission } from '../lib/permissions';
 import { AssigneeBadges } from '../components/AssigneeBadges';
@@ -111,7 +111,7 @@ const LicenseModal = ({ open, onClose, onSaved, initial, availableChannels }: an
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur flex items-center justify-center p-4">
             <div className="bg-dark-surface border border-dark-border rounded-2xl w-full max-w-3xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
                 <div className="flex justify-between items-center">
-                    <h3 className="text-xl font-bold text-white">{form._id ? 'Edit License/Subscription' : 'New License/Subscription'}</h3>
+                    <h3 className="text-xl font-bold text-white">{form._id ? 'Edit License/Subscription/Bill' : 'New License/Subscription/Bill'}</h3>
                     <button className="text-slate-500 hover:text-white" onClick={onClose}><X size={20} /></button>
                 </div>
 
@@ -125,6 +125,7 @@ const LicenseModal = ({ open, onClose, onSaved, initial, availableChannels }: an
                         <select className="input-field" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
                             <option value="subscription">Subscription</option>
                             <option value="license">License</option>
+                            <option value="utility">Utility / Bill</option>
                         </select>
                     </div>
                 </div>
@@ -174,10 +175,22 @@ const LicenseModal = ({ open, onClose, onSaved, initial, availableChannels }: an
                     </div>
                 </div>
 
-                <div className="grid md:grid-cols-3 gap-3">
+                <div className="grid md:grid-cols-4 gap-3">
                     <div className="space-y-2">
                         <label className="text-sm text-slate-400">Renewal Date</label>
                         <input type="date" className="input-field" value={form.renewal_date || ''} onChange={(e) => setForm({ ...form, renewal_date: e.target.value })} />
+                    </div>
+                    <div className="space-y-2">
+                        <label className="text-sm text-slate-400">Billing Cycle</label>
+                        <select className="input-field" value={form.billing_cycle || 'yearly'} onChange={(e) => setForm({ ...form, billing_cycle: e.target.value })}>
+                            <option value="none">None (Non-recursive)</option>
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly">Monthly</option>
+                            <option value="quarterly">Quarterly</option>
+                            <option value="semi-annual">Semi-Annual</option>
+                            <option value="yearly">Yearly</option>
+                            <option value="custom">Custom</option>
+                        </select>
                     </div>
                     <div className="space-y-2">
                         <label className="text-sm text-slate-400">Warning Days</label>
@@ -209,11 +222,11 @@ const LicenseModal = ({ open, onClose, onSaved, initial, availableChannels }: an
                 </div>
 
                 <div className="grid md:grid-cols-3 gap-3">
-                    <label className="flex items-center gap-2 text-sm text-slate-300">
+                    <label className="flex items-center gap-2 text-sm text-slate-300 mt-6">
                         <input type="checkbox" checked={Boolean(form.auto_renew)} onChange={(e) => setForm({ ...form, auto_renew: e.target.checked })} />
                         Auto Renew
                     </label>
-                    <label className="flex items-center gap-2 text-sm text-slate-300">
+                    <label className="flex items-center gap-2 text-sm text-slate-300 mt-6">
                         <input type="checkbox" checked={Boolean(form.enabled)} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} />
                         Monitoring Enabled
                     </label>
@@ -236,6 +249,128 @@ const LicenseModal = ({ open, onClose, onSaved, initial, availableChannels }: an
     );
 };
 
+const RenewPaymentModal = ({ open, onClose, onConfirm, row }: any) => {
+    const [amountPaid, setAmountPaid] = useState('');
+    const [currency, setCurrency] = useState('INR');
+    const [paymentMode, setPaymentMode] = useState('Card');
+    const [paymentProof, setPaymentProof] = useState('');
+    const [renewalPeriod, setRenewalPeriod] = useState('yearly');
+    const [nextRenewalDate, setNextRenewalDate] = useState('');
+    const [notes, setNotes] = useState('');
+    const [submitting, setSubmitting] = useState(false);
+
+    useEffect(() => {
+        if (!open || !row) return;
+        setAmountPaid(row.amount ?? '');
+        setCurrency(row.currency || 'INR');
+        setPaymentMode('Card');
+        setPaymentProof('');
+        setRenewalPeriod(row.billing_cycle || 'yearly');
+        setNextRenewalDate('');
+        setNotes('');
+    }, [open, row]);
+
+    if (!open) return null;
+
+    const handleConfirm = async () => {
+        setSubmitting(true);
+        try {
+            await onConfirm(row, {
+                amount_paid: amountPaid ? Number(amountPaid) : undefined,
+                currency,
+                payment_mode: paymentMode,
+                payment_proof: paymentProof,
+                renewal_period: renewalPeriod,
+                next_renewal_date: renewalPeriod === 'custom' ? nextRenewalDate : undefined,
+                notes,
+            });
+            onClose();
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    const isUtility = row?.type === 'utility';
+
+    return (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur flex items-center justify-center p-4">
+            <div className="bg-dark-surface border border-dark-border rounded-2xl w-full max-w-lg p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+                <div className="flex justify-between items-center">
+                    <h3 className="text-xl font-bold text-white">{isUtility ? 'Record Bill Payment' : 'Record Renewal'}</h3>
+                    <button className="text-slate-500 hover:text-white" onClick={onClose}><X size={20} /></button>
+                </div>
+                <p className="text-sm text-slate-400">
+                    Recording payment details for <strong>{row?.name}</strong>.
+                </p>
+
+                <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                            <label className="text-xs text-slate-400">Amount Paid (Dynamic)</label>
+                            <input type="number" className="input-field" value={amountPaid} onChange={(e) => setAmountPaid(e.target.value)} placeholder="0.00" />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-xs text-slate-400">Currency</label>
+                            <input type="text" className="input-field" value={currency} onChange={(e) => setCurrency(e.target.value)} />
+                        </div>
+                    </div>
+
+                    <div className="space-y-1">
+                        <label className="text-xs text-slate-400">Payment Mode</label>
+                        <select className="input-field" value={paymentMode} onChange={(e) => setPaymentMode(e.target.value)}>
+                            <option value="Card">Card</option>
+                            <option value="UPI">UPI</option>
+                            <option value="Bank Transfer">Bank Transfer</option>
+                            <option value="Cash">Cash</option>
+                            <option value="Net Banking">Net Banking</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+
+                    <div className="space-y-1">
+                        <label className="text-xs text-slate-400">Payment Proof (Reference/Txn ID)</label>
+                        <input type="text" className="input-field" value={paymentProof} onChange={(e) => setPaymentProof(e.target.value)} placeholder="e.g. TXN10293847" />
+                    </div>
+
+                    {!isUtility && (
+                        <div className="space-y-1">
+                            <label className="text-xs text-slate-400">Renewal Period</label>
+                            <select className="input-field" value={renewalPeriod} onChange={(e) => setRenewalPeriod(e.target.value)}>
+                                <option value="none">None (Non-recursive)</option>
+                                <option value="weekly">1 Week</option>
+                                <option value="monthly">1 Month</option>
+                                <option value="quarterly">3 Months (Quarterly)</option>
+                                <option value="semi-annual">6 Months (Semi-Annual)</option>
+                                <option value="yearly">1 Year (Yearly)</option>
+                                <option value="custom">Custom Date</option>
+                            </select>
+                        </div>
+                    )}
+
+                    {renewalPeriod === 'custom' && !isUtility && (
+                        <div className="space-y-1">
+                            <label className="text-xs text-slate-400">Next Renewal Date</label>
+                            <input type="date" className="input-field" value={nextRenewalDate} onChange={(e) => setNextRenewalDate(e.target.value)} />
+                        </div>
+                    )}
+
+                    <div className="space-y-1">
+                        <label className="text-xs text-slate-400">Notes / Remarks</label>
+                        <textarea className="input-field h-20 resize-none" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional notes..." />
+                    </div>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-2">
+                    <button className="px-4 py-2 text-slate-400 hover:text-white" onClick={onClose}>Cancel</button>
+                    <button disabled={submitting} className="btn-primary px-4 py-2" onClick={handleConfirm}>
+                        {submitting ? 'Processing...' : (isUtility ? 'Confirm Payment' : 'Confirm Renewal')}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 export const Licenses = () => {
     const user = useAuthStore(state => state.user);
     const canViewUsers = hasPermission('users.view', user);
@@ -249,6 +384,14 @@ export const Licenses = () => {
     const [renewModal, setRenewModal] = useState<{ open: boolean, row?: any }>({ open: false });
     const [renewing, setRenewing] = useState(false);
     const [exporting, setExporting] = useState(false);
+    const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+
+    const toggleRow = (id: string) => {
+        const next = new Set(expandedRows);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        setExpandedRows(next);
+    };
 
     const fetchData = async () => {
         setLoading(true);
@@ -341,10 +484,10 @@ export const Licenses = () => {
         }
     };
 
-    const handleMarkRenewed = async (row: any) => {
+    const handleMarkRenewed = async (row: any, paymentDetails: any) => {
         setRenewing(true);
         try {
-            await api.post(`/licenses/${row._id}/mark-renewed`);
+            await api.post(`/licenses/${row._id}/mark-renewed`, paymentDetails);
             fetchData();
         } finally {
             setRenewing(false);
@@ -409,53 +552,123 @@ export const Licenses = () => {
                             </tr>
                         </thead>
                         <tbody>
-                            {sorted.map((row) => (
-                                <tr key={row._id} className="border-b border-white/5">
-                                    <td className="py-3 pr-3">
-                                        <div className="text-white font-semibold">{row.name}</div>
-                                        <div className="text-xs text-slate-500">{row.vendor || 'N/A'} / {row.product || 'N/A'}</div>
-                                        <AssigneeBadges ids={row.assigned_user_ids} users={users} className="mt-1" />
-                                    </td>
-                                    <td className="py-3 pr-3 text-slate-300">{String(row.type || '').toUpperCase()}</td>
-                                    <td className="py-3 pr-3 text-slate-300">{row.owner || 'N/A'}</td>
-                                    <td className="py-3 pr-3 text-slate-300">{row.renewal_date ? new Date(row.renewal_date).toLocaleDateString() : 'N/A'}</td>
-                                    <td className="py-3 pr-3 text-slate-300">{row.days_left ?? 'N/A'}</td>
-                                    <td className="py-3 pr-3">
-                                        <span className={`text-xs px-2 py-0.5 rounded ${stateClass(row.status === 'paused' ? 'paused' : row.computed_state)}`}>
-                                            {String(row.status === 'paused' ? 'paused' : row.computed_state || 'unknown').toUpperCase()}
-                                        </span>
-                                    </td>
-                                    <td className="py-3 pr-3">
-                                        <div className="flex gap-2">
-                                            <button className="icon-btn" onClick={() => { setEditing(row); setModalOpen(true); }}><Edit3 size={14} /></button>
-                                            <button className="icon-btn text-red-400" onClick={() => remove(row._id)}><Trash2 size={14} /></button>
-                                            {['expired', 'critical', 'warning'].includes(row.computed_state) && row.status !== 'paused' && (
-                                                <button
-                                                    className="icon-btn text-emerald-400"
-                                                    title="Mark as Renewed"
-                                                    onClick={() => setRenewModal({ open: true, row })}
-                                                    disabled={renewing}
-                                                >
-                                                    <RefreshCw size={14} />
-                                                </button>
-                                            )}
-                                                    <ConfirmationModal
-                                                        isOpen={renewModal.open}
-                                                        title="Mark as Renewed"
-                                                        message={`Mark '${renewModal.row?.name}' as renewed? This will set the next renewal date based on its plan.`}
-                                                        type="info"
-                                                        confirmLabel={renewing ? 'Renewing...' : 'Confirm'}
-                                                        cancelLabel="Cancel"
-                                                        onClose={() => setRenewModal({ open: false })}
-                                                        onConfirm={() => renewModal.row && handleMarkRenewed(renewModal.row)}
-                                                    />
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
+                            {sorted.map((row) => {
+                                const isExpanded = expandedRows.has(row._id);
+                                return (
+                                    <React.Fragment key={row._id}>
+                                        <tr className="border-b border-white/5">
+                                            <td className="py-3 pr-3">
+                                                <div className="flex items-center">
+                                                    <button
+                                                        onClick={() => toggleRow(row._id)}
+                                                        className="mr-2 text-slate-500 hover:text-white transition-colors"
+                                                    >
+                                                        {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                                                    </button>
+                                                    <div>
+                                                        <div className="text-white font-semibold">{row.name}</div>
+                                                        <div className="text-xs text-slate-500">{row.vendor || 'N/A'} / {row.product || 'N/A'}</div>
+                                                        <AssigneeBadges ids={row.assigned_user_ids} users={users} className="mt-1" />
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td className="py-3 pr-3 text-slate-300">
+                                                <span className="uppercase text-xs font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                                                    {String(row.type || 'subscription').toUpperCase()}
+                                                </span>
+                                            </td>
+                                            <td className="py-3 pr-3 text-slate-300">{row.owner || 'N/A'}</td>
+                                            <td className="py-3 pr-3 text-slate-300">
+                                                {row.billing_cycle === 'none' ? 'Non-recursive' : (row.renewal_date ? new Date(row.renewal_date).toLocaleDateString() : 'N/A')}
+                                            </td>
+                                            <td className="py-3 pr-3 text-slate-300">{row.billing_cycle === 'none' ? 'N/A' : (row.days_left ?? 'N/A')}</td>
+                                            <td className="py-3 pr-3">
+                                                <span className={`text-xs px-2 py-0.5 rounded ${stateClass(row.status === 'paused' ? 'paused' : (row.billing_cycle === 'none' ? 'ok' : row.computed_state))}`}>
+                                                    {String(row.status === 'paused' ? 'paused' : (row.billing_cycle === 'none' ? 'ok' : row.computed_state || 'unknown')).toUpperCase()}
+                                                </span>
+                                            </td>
+                                            <td className="py-3 pr-3">
+                                                <div className="flex gap-2">
+                                                    <button className="icon-btn" onClick={() => { setEditing(row); setModalOpen(true); }}><Edit3 size={14} /></button>
+                                                    <button className="icon-btn text-red-400" onClick={() => remove(row._id)}><Trash2 size={14} /></button>
+                                                    {row.status !== 'paused' && (row.billing_cycle !== 'none' || row.type === 'utility') && (
+                                                        <button
+                                                            className="icon-btn text-emerald-400"
+                                                            title={row.type === 'utility' ? "Mark as Paid" : "Mark as Renewed"}
+                                                            onClick={() => setRenewModal({ open: true, row })}
+                                                            disabled={renewing}
+                                                        >
+                                                            <RefreshCw size={14} />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        {isExpanded && (
+                                            <tr className="bg-white/[0.01]">
+                                                <td colSpan={7} className="px-6 py-4 border-b border-white/5">
+                                                    <div className="space-y-4 text-xs text-slate-300">
+                                                        {row.type === 'license' && (
+                                                            <div className="grid grid-cols-3 gap-4 border-b border-white/5 pb-3">
+                                                                <div>
+                                                                    <span className="text-slate-500 font-semibold block uppercase text-[9px] tracking-wider">Total Seats</span>
+                                                                    <span className="text-sm font-bold text-white">{row.seats_total ?? 0}</span>
+                                                                </div>
+                                                                <div>
+                                                                    <span className="text-slate-500 font-semibold block uppercase text-[9px] tracking-wider">Used Seats</span>
+                                                                    <span className="text-sm font-bold text-amber-400">{row.seats_used ?? 0}</span>
+                                                                </div>
+                                                                <div>
+                                                                    <span className="text-slate-500 font-semibold block uppercase text-[9px] tracking-wider">Free Seats</span>
+                                                                    <span className="text-sm font-bold text-emerald-400">
+                                                                        {Math.max(0, (row.seats_total ?? 0) - (row.seats_used ?? 0))}
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        <div>
+                                                            <div className="flex justify-between items-center mb-2">
+                                                                <span className="text-xs font-bold text-white uppercase tracking-wider">Payment & Transaction History</span>
+                                                                <span className="text-[10px] text-slate-500">Plan Amount: {row.amount ? `${row.currency || 'INR'} ${row.amount}` : 'N/A'} | Cycle: <strong className="uppercase">{row.billing_cycle || 'N/A'}</strong></span>
+                                                            </div>
+                                                            {Array.isArray(row.payment_history) && row.payment_history.length > 0 ? (
+                                                                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                                                                    {row.payment_history.map((payment: any, index: number) => (
+                                                                        <div key={index} className="flex justify-between items-center bg-black/20 p-3 rounded-xl border border-white/5">
+                                                                            <div>
+                                                                                <div className="font-semibold text-white">
+                                                                                    {payment.payment_mode} Payment — {payment.amount_paid} {payment.currency}
+                                                                                </div>
+                                                                                {payment.payment_proof && (
+                                                                                    <div className="text-[10px] text-slate-500 font-mono mt-0.5">Reference/Proof: {payment.payment_proof}</div>
+                                                                                )}
+                                                                                {payment.notes && (
+                                                                                    <div className="text-[10px] text-slate-400 mt-1">{payment.notes}</div>
+                                                                                )}
+                                                                            </div>
+                                                                            <div className="text-right text-[10px] text-slate-500">
+                                                                                <div>Paid on: {new Date(payment.paid_at).toLocaleDateString()}</div>
+                                                                                {payment.next_renewal_date && (
+                                                                                    <div className="text-slate-400 mt-0.5">Extended to: {new Date(payment.next_renewal_date).toLocaleDateString()}</div>
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            ) : (
+                                                                <p className="text-slate-500 italic">No payments logged yet.</p>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </React.Fragment>
+                                );
+                            })}
                             {!loading && sorted.length === 0 && (
                                 <tr>
-                                    <td colSpan={7} className="py-6 text-slate-400">No license/subscription items found.</td>
+                                    <td colSpan={7} className="py-6 text-slate-400">No license/subscription/bill items found.</td>
                                 </tr>
                             )}
                         </tbody>
@@ -469,6 +682,13 @@ export const Licenses = () => {
                 onSaved={fetchData}
                 initial={editing}
                 availableChannels={notificationChannels}
+            />
+
+            <RenewPaymentModal
+                open={renewModal.open}
+                onClose={() => setRenewModal({ open: false })}
+                onConfirm={handleMarkRenewed}
+                row={renewModal.row}
             />
         </div>
     );

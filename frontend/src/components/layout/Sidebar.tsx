@@ -59,7 +59,7 @@ export const Sidebar = ({
 
     return (
         <aside className={clsx(
-            "fixed left-0 top-0 h-screen bg-dark-surface border-r border-dark-border flex flex-col p-4 transition-all duration-300 z-40",
+            "fixed left-0 top-0 h-screen bg-dark-surface border-r border-dark-border flex flex-col p-4 transition-all duration-300 z-40 overflow-y-auto custom-scrollbar",
             collapsed ? "md:w-20 w-64" : "w-64",
             "transform md:translate-x-0",
             mobileOpen ? "translate-x-0" : "-translate-x-full"

@@ -15,6 +15,7 @@ export interface IMonitoringCheck extends Document {
     notify: {
         channels: ('slack' | 'email' | 'webhook')[];
     };
+    notification_channel_ids?: string[];
     enabled: boolean;
     last_evaluated_at?: Date;
     last_state?: 'ok' | 'warning' | 'critical' | 'unknown';
@@ -44,6 +45,7 @@ const MonitoringCheckSchema: Schema = new Schema({
     notify: {
         channels: [{ type: String, enum: ['slack', 'email', 'webhook'], default: ['slack'] }]
     },
+    notification_channel_ids: [{ type: String }],
     enabled: { type: Boolean, default: true },
     last_evaluated_at: { type: Date },
     last_state: { type: String, enum: ['ok', 'warning', 'critical', 'unknown'], default: 'unknown' },

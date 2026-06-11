@@ -4,6 +4,11 @@ export interface ITelemetry extends Document {
     device_id: string;
     timestamp: Date;
     cpu_usage: number;
+    cpu_idle?: number;
+    cpu_steal?: number;
+    cpu_user?: number;
+    cpu_system?: number;
+    cpu_iowait?: number;
     uptime?: number;
     cpu_load?: number;
     cpu_per_core?: number[];
@@ -29,12 +34,15 @@ const TelemetrySchema: Schema = new Schema({
     device_id: { type: String, required: true, index: true },
     timestamp: { type: Date, default: Date.now },
     cpu_usage: { type: Number },
+    cpu_idle: { type: Number },
+    cpu_steal: { type: Number },
+    cpu_user: { type: Number },
+    cpu_system: { type: Number },
+    cpu_iowait: { type: Number },
     uptime: { type: Number },
     cpu_load: { type: Number },
     cpu_per_core: [{ type: Number }],
     memory_usage: { type: Number },
-    memory_total: { type: Number },
-    memory_used: { type: Number },
     memory_available: { type: Number },
     memory_cached: { type: Number },
     memory_buffers: { type: Number },

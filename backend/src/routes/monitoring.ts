@@ -945,7 +945,7 @@ router.get('/checks', authorizePermission('monitoring.view'), async (req: AuthRe
 // Add a check to a device
 router.post('/', authorizePermission('monitoring.create'), async (req: AuthRequest, res) => {
     try {
-        const { device_id, check_type, target, config, interval, thresholds, notification_frequency, notification_recipients, notify, assigned_user_ids } = req.body;
+        const { device_id, check_type, target, config, interval, thresholds, notification_frequency, notification_recipients, notify, assigned_user_ids, notification_channel_ids } = req.body;
         const device = await Device.findOne({ device_id });
         if (!device) return res.status(404).json({ message: 'Device not found' });
         if (!canAccessDevice(req.user, device)) {
@@ -964,6 +964,7 @@ router.post('/', authorizePermission('monitoring.create'), async (req: AuthReque
             thresholds,
             notification_frequency,
             notify: notify || notification_recipients,
+            notification_channel_ids: Array.isArray(notification_channel_ids) ? notification_channel_ids : [],
             assigned_user_ids: hasPermission(req.user, 'devices.assign')
                 ? normalizeAssignedUserIds(assigned_user_ids)
                 : [],

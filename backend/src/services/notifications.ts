@@ -198,11 +198,26 @@ export async function sendNotification(
             ? [alert.alert_type, 'threshold', 'all']
             : [alert.alert_type, 'all'];
 
-        const channels = await NotificationChannel.find({
-            enabled: true,
-            alert_types: { $in: alertTypeFilters },
-            severity_levels: { $in: [alert.severity, 'all'] }
-        });
+        let channels;
+        const ruleId = alert.details?.rule_id;
+        let check = null;
+        if (ruleId) {
+            const MonitoringCheck = (await import('../models/MonitoringCheck')).default;
+            check = await MonitoringCheck.findById(ruleId);
+        }
+
+        if (check && check.notification_channel_ids && check.notification_channel_ids.length > 0) {
+            channels = await NotificationChannel.find({
+                _id: { $in: check.notification_channel_ids },
+                enabled: true
+            });
+        } else {
+            channels = await NotificationChannel.find({
+                enabled: true,
+                alert_types: { $in: alertTypeFilters },
+                severity_levels: { $in: [alert.severity, 'all'] }
+            });
+        }
 
         if (channels.length === 0) {
             console.log(`No notification channels configured for alert type: ${alert.alert_type}`);
@@ -235,10 +250,25 @@ export async function sendRecoveryNotification(
             ? [alert.alert_type, 'threshold', 'all']
             : [alert.alert_type, 'all'];
 
-        const channels = await NotificationChannel.find({
-            enabled: true,
-            alert_types: { $in: alertTypeFilters }
-        });
+        let channels;
+        const ruleId = alert.details?.rule_id;
+        let check = null;
+        if (ruleId) {
+            const MonitoringCheck = (await import('../models/MonitoringCheck')).default;
+            check = await MonitoringCheck.findById(ruleId);
+        }
+
+        if (check && check.notification_channel_ids && check.notification_channel_ids.length > 0) {
+            channels = await NotificationChannel.find({
+                _id: { $in: check.notification_channel_ids },
+                enabled: true
+            });
+        } else {
+            channels = await NotificationChannel.find({
+                enabled: true,
+                alert_types: { $in: alertTypeFilters }
+            });
+        }
 
         const message = buildRecoveryMessage(alert, deviceName);
 

@@ -316,6 +316,11 @@ client.on('message', async (topic, message, packet) => {
                     await new Telemetry({
                         device_id,
                         cpu_usage: payload.cpu_usage,
+                        cpu_idle: payload.cpu_idle,
+                        cpu_steal: payload.cpu_steal,
+                        cpu_user: payload.cpu_user,
+                        cpu_system: payload.cpu_system,
+                        cpu_iowait: payload.cpu_iowait,
                         uptime: payload.uptime,
                         cpu_load: payload.cpu_load,
                         cpu_per_core: payload.cpu_per_core,

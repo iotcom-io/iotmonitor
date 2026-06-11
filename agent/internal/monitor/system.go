@@ -26,6 +26,11 @@ type SystemMetrics struct {
 	CPUUsage             float64      `json:"cpu_usage"`
 	CPULoad              float64      `json:"cpu_load"` // 1 min load avg
 	CPUPerCore           []float64    `json:"cpu_per_core"`
+	CPUIdle              float64      `json:"cpu_idle"`
+	CPUSteal             float64      `json:"cpu_steal"`
+	CPUUser              float64      `json:"cpu_user"`
+	CPUSystem            float64      `json:"cpu_system"`
+	CPUIowait            float64      `json:"cpu_iowait"`
 	MemoryUsage          float64      `json:"memory_usage"`
 	MemoryTotal          uint64       `json:"memory_total"`
 	MemoryUsed           uint64       `json:"memory_used"`
@@ -151,16 +156,40 @@ func readTopCPUProcesses(limit int) []TopProcess {
 
 func GetSystemMetrics() (*SystemMetrics, error) {
 	// CPU: 2s sample to smooth short spikes (per-core then avg for total)
+	t1, err1 := cpu.Times(false)
 	perCorePercent, err := cpu.Percent(2*time.Second, true)
 	if err != nil {
 		return nil, err
 	}
+	t2, err2 := cpu.Times(false)
+
 	totalCpu := 0.0
 	for _, v := range perCorePercent {
 		totalCpu += v
 	}
 	if len(perCorePercent) > 0 {
 		totalCpu = totalCpu / float64(len(perCorePercent))
+	}
+
+	var cpuUser, cpuSystem, cpuIdle, cpuSteal, cpuIowait float64
+	if err1 == nil && err2 == nil && len(t1) > 0 && len(t2) > 0 {
+		userDelta := t2[0].User - t1[0].User
+		systemDelta := t2[0].System - t1[0].System
+		idleDelta := t2[0].Idle - t1[0].Idle
+		stealDelta := t2[0].Steal - t1[0].Steal
+		iowaitDelta := t2[0].Iowait - t1[0].Iowait
+		niceDelta := t2[0].Nice - t1[0].Nice
+		irqDelta := t2[0].Irq - t1[0].Irq
+		softirqDelta := t2[0].Softirq - t1[0].Softirq
+
+		totalDelta := userDelta + systemDelta + idleDelta + stealDelta + iowaitDelta + niceDelta + irqDelta + softirqDelta
+		if totalDelta > 0 {
+			cpuUser = (userDelta / totalDelta) * 100
+			cpuSystem = (systemDelta / totalDelta) * 100
+			cpuIdle = (idleDelta / totalDelta) * 100
+			cpuSteal = (stealDelta / totalDelta) * 100
+			cpuIowait = (iowaitDelta / totalDelta) * 100
+		}
 	}
 
 	vm, err := mem.VirtualMemory()
@@ -201,6 +230,11 @@ func GetSystemMetrics() (*SystemMetrics, error) {
 		CPUUsage:             totalCpu,
 		CPULoad:              avg.Load1,
 		CPUPerCore:           perCorePercent,
+		CPUIdle:              cpuIdle,
+		CPUSteal:             cpuSteal,
+		CPUUser:              cpuUser,
+		CPUSystem:            cpuSystem,
+		CPUIowait:            cpuIowait,
 		MemoryUsage:          memUsedPct,
 		MemoryTotal:          vm.Total,
 		MemoryUsed:           memUsed,

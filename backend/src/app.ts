@@ -16,6 +16,7 @@ import templateRoutes from './routes/templates';
 import analyticsRoutes from './routes/analytics';
 import aiAnalyticsRoutes from './routes/aiAnalytics';
 import snmpRoutes from './routes/snmp';
+import aiReportRoutes from './routes/aiReport';
 
 const app = express();
 const allowedOrigins = process.env.FRONTEND_ORIGIN
@@ -43,6 +44,7 @@ app.use('/api/licenses', licenseRoutes);
 app.use('/api/notification-channels', notificationChannelRoutes);
 app.use('/api/templates', templateRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/analytics', aiReportRoutes);
 app.use('/api/ai-analytics', aiAnalyticsRoutes);
 app.use('/api/snmp', snmpRoutes);
 
